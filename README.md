@@ -217,11 +217,3 @@ pytest tests/ -v
 | `rag.top_k` | `3` | Number of historical precedents to retrieve |
 
 ---
-
-## Roadmap
-
-- [ ] **Session 2** — Implement `ShippingAgent` (Isolation Forest) and `ShippingConnector` (AIS CSV ingestion)
-- [ ] **Session 3** — Populate `data/knowledge_base/` with real Hormuz disruption case files; index into ChromaDB
-- [ ] **Session 4** — Wire SHAP and RAG into orchestrator and `/explain` endpoint
-- [ ] **Session 5** — Evaluation notebook: precision/recall on synthetic scenarios, SHAP waterfall plots
-- [ ] **Session 6** — Geopolitical agent (news/incident feed connector + scoring model)
