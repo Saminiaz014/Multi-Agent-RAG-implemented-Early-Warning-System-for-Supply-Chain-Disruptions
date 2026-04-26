@@ -16,7 +16,7 @@ from src.orchestrator import Orchestrator
 
 _CONFIG = {
     "weights": {"shipping": 0.4, "market": 0.3, "geopolitical": 0.3},
-    "thresholds": {"risk_high": 0.7, "risk_medium": 0.4},
+    "thresholds": {"risk_critical": 0.8, "risk_high": 0.7, "risk_medium": 0.4},
 }
 
 
@@ -77,13 +77,13 @@ def test_normal_signals_produce_low_risk(orchestrator: Orchestrator) -> None:
     assert result["risk_level"] in (RiskLevel.LOW, RiskLevel.MEDIUM)
 
 
-def test_disrupted_signals_produce_high_risk(orchestrator: Orchestrator) -> None:
+def test_disrupted_signals_produce_critical_risk(orchestrator: Orchestrator) -> None:
     orchestrator.register_agent(_ThresholdAgent("shipping", _CONFIG))
     orchestrator.register_agent(_ThresholdAgent("market", _CONFIG))
     orchestrator.register_agent(_ThresholdAgent("geopolitical", _CONFIG))
     result = orchestrator.run(_disrupted_signals())
-    assert result["risk_level"] == RiskLevel.HIGH
-    assert result["composite_score"] >= 0.7
+    assert result["risk_level"] == RiskLevel.CRITICAL
+    assert result["composite_score"] >= 0.8
 
 
 def test_pipeline_output_has_required_keys(orchestrator: Orchestrator) -> None:

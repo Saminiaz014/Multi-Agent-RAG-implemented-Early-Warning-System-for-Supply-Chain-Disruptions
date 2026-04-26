@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 class RiskLevel(str, Enum):
     """Categorical risk classification."""
 
+    CRITICAL = "CRITICAL"
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
     LOW = "LOW"
@@ -38,6 +39,7 @@ class RiskEngine:
 
     def __init__(self, config: dict) -> None:
         self.weights: dict[str, float] = config.get("weights", {})
+        self.threshold_critical: float = config["thresholds"]["risk_critical"]
         self.threshold_high: float = config["thresholds"]["risk_high"]
         self.threshold_medium: float = config["thresholds"]["risk_medium"]
         self._validate_weights()
@@ -64,7 +66,7 @@ class RiskEngine:
         Returns:
             Dictionary with keys:
                 - ``composite_score`` (float): weighted mean in [0, 1].
-                - ``risk_level`` (str): one of HIGH / MEDIUM / LOW.
+                - ``risk_level`` (str): one of CRITICAL / HIGH / MEDIUM / LOW.
                 - ``agent_scores`` (dict[str, float]): mean score per agent.
         """
         if not results:
@@ -115,6 +117,8 @@ class RiskEngine:
         Returns:
             Appropriate :class:`RiskLevel` enum member.
         """
+        if score >= self.threshold_critical:
+            return RiskLevel.CRITICAL
         if score >= self.threshold_high:
             return RiskLevel.HIGH
         if score >= self.threshold_medium:

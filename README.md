@@ -42,7 +42,7 @@ The Strait of Hormuz is one of the world's most critical maritime chokepoints, c
 ┌─────────────────────────────────────────────────────────┐
 │              Risk Aggregation Engine                    │
 │   Weighted average of per-agent anomaly scores          │
-│   Config-driven weights · RiskLevel enum (HIGH/MED/LOW) │
+│   Config-driven weights · RiskLevel enum (CRIT/HIGH/MED/LOW) │
 └────────────┬──────────────────────┬─────────────────────┘
              │                      │
              ▼                      ▼
@@ -116,7 +116,7 @@ Both use Python's `ABC` / `@abstractmethod` pattern, ensuring domain implementat
 | Test file | Coverage |
 |---|---|
 | `tests/test_agents.py` | ABC enforcement, `DetectionResult` shape/type, correct flag logic |
-| `tests/test_risk_engine.py` | HIGH/MEDIUM/LOW boundary cases, unknown-agent skipping, weight renormalisation |
+| `tests/test_risk_engine.py` | CRITICAL/HIGH/MEDIUM/LOW boundary cases, unknown-agent skipping, weight renormalisation |
 | `tests/test_scenarios.py` | End-to-end orchestrator runs with synthetic normal vs. disrupted Hormuz signal data |
 
 ---
@@ -211,6 +211,7 @@ pytest tests/ -v
 | `weights.shipping` | `0.4` | Contribution weight in composite score |
 | `weights.market` | `0.3` | Contribution weight in composite score |
 | `weights.geopolitical` | `0.3` | Contribution weight in composite score |
+| `thresholds.risk_critical` | `0.8` | Composite score cutoff for CRITICAL risk |
 | `thresholds.risk_high` | `0.7` | Composite score cutoff for HIGH risk |
 | `thresholds.risk_medium` | `0.4` | Composite score cutoff for MEDIUM risk |
 | `rag.collection_name` | `disruption_cases` | ChromaDB collection name |

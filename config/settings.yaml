@@ -15,6 +15,7 @@ weights:
   geopolitical: 0.3
 
 thresholds:
+  risk_critical: 0.8
   risk_high: 0.7
   risk_medium: 0.4
 

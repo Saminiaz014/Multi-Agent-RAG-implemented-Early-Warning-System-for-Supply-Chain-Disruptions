@@ -8,7 +8,7 @@ from src.aggregation.risk_engine import RiskEngine, RiskLevel
 
 _CONFIG = {
     "weights": {"shipping": 0.4, "market": 0.3, "geopolitical": 0.3},
-    "thresholds": {"risk_high": 0.7, "risk_medium": 0.4},
+    "thresholds": {"risk_critical": 0.8, "risk_high": 0.7, "risk_medium": 0.4},
 }
 
 
@@ -33,15 +33,27 @@ def test_empty_results_returns_low_risk(engine: RiskEngine) -> None:
     assert result["risk_level"] == RiskLevel.LOW
 
 
-def test_high_scores_produce_high_risk(engine: RiskEngine) -> None:
+def test_critical_scores_produce_critical_risk(engine: RiskEngine) -> None:
     results = [
         _make_result("shipping", [0.9, 0.9]),
         _make_result("market", [0.9, 0.9]),
         _make_result("geopolitical", [0.9, 0.9]),
     ]
     out = engine.aggregate(results)
+    assert out["risk_level"] == RiskLevel.CRITICAL
+    assert out["composite_score"] >= 0.8
+
+
+def test_high_scores_produce_high_risk(engine: RiskEngine) -> None:
+    # Score sits between 0.7 and 0.8 — strictly HIGH, not CRITICAL.
+    results = [
+        _make_result("shipping", [0.75]),
+        _make_result("market", [0.75]),
+        _make_result("geopolitical", [0.75]),
+    ]
+    out = engine.aggregate(results)
     assert out["risk_level"] == RiskLevel.HIGH
-    assert out["composite_score"] >= 0.7
+    assert 0.7 <= out["composite_score"] < 0.8
 
 
 def test_low_scores_produce_low_risk(engine: RiskEngine) -> None:
