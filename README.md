@@ -71,7 +71,7 @@ The Strait of Hormuz is one of the world's most critical maritime chokepoints, c
 
 ---
 
-## What Was Built (Session 1)
+## What Was Built
 
 This session delivered the **complete project scaffold** — every module is independently importable and tested, forming the foundation for domain-specific agent and connector implementations.
 
