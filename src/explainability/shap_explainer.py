@@ -6,12 +6,12 @@ contribution scores, making model decisions interpretable for analysts.
 
 from __future__ import annotations
 
+import importlib
 import logging
 from typing import Any
 
 import numpy as np
 import pandas as pd
-import shap
 
 logger = logging.getLogger(__name__)
 
@@ -38,23 +38,30 @@ class ShapExplainer:
     ) -> None:
         self.model = model
         self.feature_names = feature_names
-        self._explainer: shap.Explainer | None = None
+        self._explainer: Any | None = None
         self._background = background_data
         self._build_explainer()
 
     def _build_explainer(self) -> None:
         """Instantiate the appropriate SHAP explainer for the model type."""
         try:
-            self._explainer = shap.TreeExplainer(self.model)
+            shap_module = importlib.import_module("shap")
+        except ModuleNotFoundError as exc:
+            raise ImportError(
+                "The 'shap' package is required for ShapExplainer. Install it with 'pip install shap'."
+            ) from exc
+
+        try:
+            self._explainer = shap_module.TreeExplainer(self.model)
             logger.info("Using TreeExplainer for %s.", type(self.model).__name__)
         except Exception:
             if self._background is None:
                 raise ValueError(
                     "background_data is required for non-tree models."
                 )
-            self._explainer = shap.KernelExplainer(
+            self._explainer = shap_module.KernelExplainer(
                 self.model.decision_function,
-                shap.sample(self._background, 50),
+                shap_module.sample(self._background, 50),
             )
             logger.info("Using KernelExplainer for %s.", type(self.model).__name__)
 

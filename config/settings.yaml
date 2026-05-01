@@ -16,12 +16,13 @@ weights:
 
 thresholds:
   risk_critical: 0.8
-  risk_high: 0.7
+  risk_high: 0.6
   risk_medium: 0.4
+  risk_low: 0.2
 
 rag:
   collection_name: "disruption_cases"
-  top_k: 3
+  top_k: 3  # Number of similar cases to retrieve for RAG
 
 api:
   host: "0.0.0.0"

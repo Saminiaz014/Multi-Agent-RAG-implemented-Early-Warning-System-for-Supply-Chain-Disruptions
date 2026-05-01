@@ -1,4 +1,4 @@
-# Multi-Agent RAG-Implemented Early Warning System for Supply Chain Disruptions
+# Week 1 (Development) - Multi-Agent RAG-Implemented Early Warning System for Supply Chain Disruptions
 
 A thesis-grade **Decision Support System (DSS)** for detecting, explaining, and contextualising supply chain disruptions in the **Strait of Hormuz** maritime corridor. The system combines multi-agent anomaly detection, SHAP-based explainability, and retrieval-augmented generation (RAG) for historical precedent retrieval — producing structured, interpretable alerts rather than raw predictions.
 
@@ -42,7 +42,7 @@ The Strait of Hormuz is one of the world's most critical maritime chokepoints, c
 ┌─────────────────────────────────────────────────────────┐
 │              Risk Aggregation Engine                    │
 │   Weighted average of per-agent anomaly scores          │
-│   Config-driven weights · RiskLevel enum (CRIT/HIGH/MED/LOW) │
+│   Config-driven weights · RiskLevel enum (HIGH/MED/LOW) │
 └────────────┬──────────────────────┬─────────────────────┘
              │                      │
              ▼                      ▼
@@ -71,14 +71,14 @@ The Strait of Hormuz is one of the world's most critical maritime chokepoints, c
 
 ---
 
-## What Was Built
+## What Was Built (Week 1)
 
 This session delivered the **complete project scaffold** — every module is independently importable and tested, forming the foundation for domain-specific agent and connector implementations.
 
 ### Core Infrastructure
 
 | Module | File | Description |
-|---|---|---|
+|--------|------|-------------|
 | Config system | `config/settings.yaml` | All tunable parameters — agent weights, detection thresholds, RAG settings, API host/port, logging config |
 | Entrypoint | `main.py` | Loads YAML config, wires dual-sink logging (console + file), runs pipeline |
 | Orchestrator | `src/orchestrator.py` | Registers agents, sequences detection → aggregation stages, returns structured output dict |
@@ -116,7 +116,7 @@ Both use Python's `ABC` / `@abstractmethod` pattern, ensuring domain implementat
 | Test file | Coverage |
 |---|---|
 | `tests/test_agents.py` | ABC enforcement, `DetectionResult` shape/type, correct flag logic |
-| `tests/test_risk_engine.py` | CRITICAL/HIGH/MEDIUM/LOW boundary cases, unknown-agent skipping, weight renormalisation |
+| `tests/test_risk_engine.py` | HIGH/MEDIUM/LOW boundary cases, unknown-agent skipping, weight renormalisation |
 | `tests/test_scenarios.py` | End-to-end orchestrator runs with synthetic normal vs. disrupted Hormuz signal data |
 
 ---
@@ -211,10 +211,11 @@ pytest tests/ -v
 | `weights.shipping` | `0.4` | Contribution weight in composite score |
 | `weights.market` | `0.3` | Contribution weight in composite score |
 | `weights.geopolitical` | `0.3` | Contribution weight in composite score |
-| `thresholds.risk_critical` | `0.8` | Composite score cutoff for CRITICAL risk |
 | `thresholds.risk_high` | `0.7` | Composite score cutoff for HIGH risk |
 | `thresholds.risk_medium` | `0.4` | Composite score cutoff for MEDIUM risk |
 | `rag.collection_name` | `disruption_cases` | ChromaDB collection name |
 | `rag.top_k` | `3` | Number of historical precedents to retrieve |
 
 ---
+
+
