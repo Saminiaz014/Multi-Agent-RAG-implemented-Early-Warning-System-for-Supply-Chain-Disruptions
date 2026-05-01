@@ -1,4 +1,4 @@
-# Week 2 (Development) - Multi-Agent RAG-Implemented Early Warning System for Supply Chain Disruptions
+# Multi-Agent RAG-Implemented Early Warning System for Supply Chain Disruptions
 
 A thesis-grade **Decision Support System (DSS)** for detecting, explaining, and contextualising supply chain disruptions in the **Strait of Hormuz** maritime corridor. The system combines multi-agent anomaly detection, SHAP-based explainability, and retrieval-augmented generation (RAG) for historical precedent retrieval — producing structured, interpretable alerts rather than raw predictions.
 
