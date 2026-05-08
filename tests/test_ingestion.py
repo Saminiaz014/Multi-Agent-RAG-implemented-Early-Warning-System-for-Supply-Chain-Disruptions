@@ -21,7 +21,10 @@ def connector() -> ShippingConnector:
 def df(connector: ShippingConnector) -> pd.DataFrame:
     return connector.generate_dataset(days=365, seed=42)
 
-
+"""The dataset has 365 rows and the expected columns.
+    This is a sanity check to catch any major issues with the dataset generation logic.
+    If this test fails, it means the dataset is fundamentally broken and downstream agents 
+    will likely fail"""
 def test_dataset_has_expected_shape_and_columns(df: pd.DataFrame) -> None:
     assert len(df) == 365
     assert set(df.columns) == {
