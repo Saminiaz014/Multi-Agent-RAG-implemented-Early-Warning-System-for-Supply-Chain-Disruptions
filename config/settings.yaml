@@ -1,3 +1,25 @@
+ingestion:
+  shipping:
+    # Source for vessel-arrival signals. One of: "csv", "synthetic", "api".
+    source_mode: "csv"
+    csv_path: "data/raw/shuaiba_arrivals.csv"
+    vessel_type_columns:
+      - "Container"
+      - "Dry Bulk"
+      - "General Cargo"
+      - "Roll-on/roll-off"
+      - "Tanker"
+    api:
+      # Placeholders for the planned aisstream.io WebSocket integration.
+      endpoint: "wss://stream.aisstream.io/v0/stream"
+      key: null
+      bounding_box:
+        # Shuaiba port, Kuwait (Persian Gulf).
+        lat_min: 28.95
+        lat_max: 29.20
+        lon_min: 48.05
+        lon_max: 48.25
+
 agents:
   shipping:
     enabled: true

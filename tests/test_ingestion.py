@@ -1,4 +1,4 @@
-"""Tests for the shipping ingestion connector."""
+"""Tests for the shipping and market ingestion connectors."""
 
 from __future__ import annotations
 
@@ -11,105 +11,325 @@ import pytest
 
 from src.ingestion import MarketConnector, ShippingConnector
 
+_CSV_PATH = Path("data/raw/shuaiba_arrivals.csv")
+
+
+# ---------------------------------------------------------------------------
+# Shipping connector — fixtures
+# ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def connector() -> ShippingConnector:
-    return ShippingConnector(config={})
+    """Default shipping connector — pinned to synthetic mode for unit tests."""
+    return ShippingConnector(source_mode="synthetic", config={})
 
 
 @pytest.fixture()
 def df(connector: ShippingConnector) -> pd.DataFrame:
-    return connector.generate_dataset(days=365, seed=42)
-
-"""The dataset has 365 rows and the expected columns.
-    This is a sanity check to catch any major issues with the dataset generation logic.
-    If this test fails, it means the dataset is fundamentally broken and downstream agents 
-    will likely fail"""
-def test_dataset_has_expected_shape_and_columns(df: pd.DataFrame) -> None:
-    assert len(df) == 365
-    assert set(df.columns) == {
-        "timestamp",
-        "vessel_count",
-        "avg_delay_hours",
-        "congestion_index",
-        "oil_price_usd",
-        "is_disruption",
-    }
+    return connector.generate_synthetic(days=365, seed=42)
 
 
-def test_no_nan_values(df: pd.DataFrame) -> None:
-    assert not df.isna().any().any()
-
-
-def test_congestion_within_unit_interval(df: pd.DataFrame) -> None:
-    assert df["congestion_index"].between(0.0, 1.0).all()
-
-
-def test_vessel_count_non_negative(df: pd.DataFrame) -> None:
-    assert (df["vessel_count"] >= 0).all()
-
-
-def test_disruption_day_count_roughly_46(df: pd.DataFrame) -> None:
-    n_disrupt = int(df["is_disruption"].sum())
-    assert 40 <= n_disrupt <= 55, f"Expected ~46 disruption days, got {n_disrupt}"
-
-
-def test_normal_vs_disruption_distinguishable(df: pd.DataFrame) -> None:
-    normal = df.loc[~df["is_disruption"], "vessel_count"].to_numpy(dtype=float)
-    disrupted = df.loc[df["is_disruption"], "vessel_count"].to_numpy(dtype=float)
-    diff = normal.mean() - disrupted.mean()
-    se = np.sqrt(
-        normal.var(ddof=1) / len(normal) + disrupted.var(ddof=1) / len(disrupted)
+@pytest.fixture()
+def csv_connector() -> ShippingConnector:
+    return ShippingConnector(
+        source_mode="csv",
+        config={"csv_path": str(_CSV_PATH)},
     )
-    t_stat = diff / se
-    print(f"\n[test] vessel_count Welch t-statistic: {t_stat:.2f}")
-    assert t_stat > 5, "Normal and disruption distributions should differ strongly."
 
 
-def test_disruptions_cover_expected_windows(df: pd.DataFrame) -> None:
-    flags = df["is_disruption"].to_numpy()
-    # Sample one day inside each scenario's core window.
-    assert flags[65] and flags[160] and flags[285]
-    # Day 0 is normal.
-    assert not flags[0]
+# ---------------------------------------------------------------------------
+# Shipping connector — CSV mode
+# ---------------------------------------------------------------------------
 
 
-def test_seed_is_reproducible(connector: ShippingConnector) -> None:
-    a = connector.generate_dataset(seed=42)
-    b = connector.generate_dataset(seed=42)
-    pd.testing.assert_frame_equal(a, b)
+@pytest.mark.skipif(
+    not _CSV_PATH.exists(),
+    reason=f"Shuaiba arrivals CSV not present at {_CSV_PATH}",
+)
+class TestShippingCsvMode:
+    """Validate the IMF PortWatch Shuaiba CSV ingestion path."""
+
+    def test_csv_mode_has_expected_columns(
+        self, csv_connector: ShippingConnector
+    ) -> None:
+        df = csv_connector.load_from_csv()
+        expected = {
+            "timestamp",
+            "vessel_count",
+            "tanker_count",
+            "vessel_count_7dma",
+            "avg_delay_hours",
+            "congestion_index",
+            "oil_price_usd",
+            "is_disruption",
+        }
+        assert expected.issubset(set(df.columns))
+
+    def test_csv_mode_loads_full_history(
+        self, csv_connector: ShippingConnector
+    ) -> None:
+        df = csv_connector.load_from_csv()
+        assert len(df) > 2500, "Expected the full 2019-2026 Shuaiba history."
+        assert pd.Timestamp(df["timestamp"].min()) <= pd.Timestamp("2019-01-31")
+        assert pd.Timestamp(df["timestamp"].max()) >= pd.Timestamp("2026-04-01")
+
+    def test_csv_mode_flags_2026_shutdown(
+        self, csv_connector: ShippingConnector
+    ) -> None:
+        """The known April-May 2026 Hormuz shutdown must be flagged."""
+        df = csv_connector.load_from_csv()
+        shutdown = df.loc[
+            df["timestamp"].between(
+                pd.Timestamp("2026-04-01"), pd.Timestamp("2026-05-15")
+            )
+        ]
+        assert not shutdown.empty
+        assert shutdown["is_disruption"].all(), (
+            "All April-May 2026 rows must be flagged as disruption."
+        )
+        # The CSV records a near-total shutdown — a stray vessel on one day
+        # is acceptable, but the mean must be well below the normal baseline.
+        assert shutdown["vessel_count"].mean() < 0.2, (
+            f"Shutdown vessel_count mean should be ~0; got {shutdown['vessel_count'].mean():.2f}"
+        )
+
+    def test_csv_mode_derived_columns_in_range(
+        self, csv_connector: ShippingConnector
+    ) -> None:
+        df = csv_connector.load_from_csv()
+        assert df["congestion_index"].between(0.0, 1.0).all()
+        assert df["avg_delay_hours"].between(1.0, 72.0).all()
+        # Normal-baseline rows should produce moderate (≤ 10h) delays.
+        normal = df.loc[~df["is_disruption"]]
+        assert normal["avg_delay_hours"].median() < 10.0
+
+    def test_csv_mode_vessel_count_sums_types(
+        self, csv_connector: ShippingConnector
+    ) -> None:
+        raw = pd.read_csv(_CSV_PATH)
+        expected_sum = raw[
+            ["Container", "Dry Bulk", "General Cargo", "Roll-on/roll-off", "Tanker"]
+        ].sum(axis=1).astype(float).sum()
+        df = csv_connector.load_from_csv()
+        assert df["vessel_count"].sum() == pytest.approx(expected_sum)
+
+    def test_csv_mode_oil_price_is_nan(
+        self, csv_connector: ShippingConnector
+    ) -> None:
+        """The market connector fills oil_price_usd later; CSV must leave it NaN."""
+        df = csv_connector.load_from_csv()
+        assert df["oil_price_usd"].isna().all()
+
+    def test_csv_mode_ttest_significant(
+        self, csv_connector: ShippingConnector
+    ) -> None:
+        """Welch t-test on vessel_count: disruption vs normal must be highly significant."""
+        from scipy import stats as _stats
+
+        df = csv_connector.load_from_csv()
+        normal = df.loc[~df["is_disruption"], "vessel_count"].to_numpy(dtype=float)
+        disrupted = df.loc[df["is_disruption"], "vessel_count"].to_numpy(dtype=float)
+        t_stat, p_val = _stats.ttest_ind(normal, disrupted, equal_var=False)
+        print(
+            f"\n[test/csv] vessel_count Welch t={float(t_stat):.2f}, "
+            f"p={float(p_val):.2e}, n_normal={len(normal)}, n_dis={len(disrupted)}"
+        )
+        assert p_val < 0.05
+
+    def test_csv_mode_fetch_dispatches_to_csv(
+        self, csv_connector: ShippingConnector
+    ) -> None:
+        df = csv_connector.fetch()
+        assert "tanker_count" in df.columns
+        assert "vessel_count_7dma" in df.columns
 
 
-def test_different_seeds_diverge(connector: ShippingConnector) -> None:
-    a = connector.generate_dataset(seed=42)
-    b = connector.generate_dataset(seed=7)
-    assert not a["vessel_count"].equals(b["vessel_count"])
+# ---------------------------------------------------------------------------
+# Shipping connector — synthetic mode (no-regression checks)
+# ---------------------------------------------------------------------------
 
 
-def test_validate_passes_on_generated(
-    connector: ShippingConnector, df: pd.DataFrame
-) -> None:
-    assert connector.validate(df) is True
+class TestShippingSyntheticMode:
+    """Verify that legacy synthetic generation still produces the same dataset."""
+
+    def test_synthetic_dataset_shape_and_columns(self, df: pd.DataFrame) -> None:
+        assert len(df) == 365
+        assert set(df.columns) == {
+            "timestamp",
+            "vessel_count",
+            "avg_delay_hours",
+            "congestion_index",
+            "oil_price_usd",
+            "is_disruption",
+        }
+
+    def test_synthetic_no_nan(self, df: pd.DataFrame) -> None:
+        assert not df.isna().any().any()
+
+    def test_synthetic_congestion_within_unit_interval(
+        self, df: pd.DataFrame
+    ) -> None:
+        assert df["congestion_index"].between(0.0, 1.0).all()
+
+    def test_synthetic_vessel_count_non_negative(self, df: pd.DataFrame) -> None:
+        assert (df["vessel_count"] >= 0).all()
+
+    def test_synthetic_disruption_day_count_roughly_46(
+        self, df: pd.DataFrame
+    ) -> None:
+        n_disrupt = int(df["is_disruption"].sum())
+        assert 40 <= n_disrupt <= 55, f"Expected ~46 disruption days, got {n_disrupt}"
+
+    def test_synthetic_normal_vs_disruption_distinguishable(
+        self, df: pd.DataFrame
+    ) -> None:
+        normal = df.loc[~df["is_disruption"], "vessel_count"].to_numpy(dtype=float)
+        disrupted = df.loc[df["is_disruption"], "vessel_count"].to_numpy(dtype=float)
+        diff = normal.mean() - disrupted.mean()
+        se = np.sqrt(
+            normal.var(ddof=1) / len(normal)
+            + disrupted.var(ddof=1) / len(disrupted)
+        )
+        t_stat = diff / se
+        print(f"\n[test/synthetic] vessel_count Welch t-statistic: {t_stat:.2f}")
+        assert t_stat > 5
+
+    def test_synthetic_disruptions_cover_expected_windows(
+        self, df: pd.DataFrame
+    ) -> None:
+        flags = df["is_disruption"].to_numpy()
+        assert flags[65] and flags[160] and flags[285]
+        assert not flags[0]
+
+    def test_synthetic_seed_is_reproducible(
+        self, connector: ShippingConnector
+    ) -> None:
+        a = connector.generate_synthetic(seed=42)
+        b = connector.generate_synthetic(seed=42)
+        pd.testing.assert_frame_equal(a, b)
+
+    def test_synthetic_different_seeds_diverge(
+        self, connector: ShippingConnector
+    ) -> None:
+        a = connector.generate_synthetic(seed=42)
+        b = connector.generate_synthetic(seed=7)
+        assert not a["vessel_count"].equals(b["vessel_count"])
+
+    def test_synthetic_fetch_dispatches_to_synthetic(
+        self, connector: ShippingConnector
+    ) -> None:
+        out = connector.fetch()
+        assert set(out.columns) == {
+            "timestamp",
+            "vessel_count",
+            "avg_delay_hours",
+            "congestion_index",
+            "oil_price_usd",
+            "is_disruption",
+        }
+        assert len(out) == 365
 
 
-def test_validate_rejects_out_of_range_congestion(
-    connector: ShippingConnector, df: pd.DataFrame
-) -> None:
-    bad = df.copy()
-    bad.loc[0, "congestion_index"] = 1.5
-    assert connector.validate(bad) is False
+# ---------------------------------------------------------------------------
+# Shipping connector — API mode
+# ---------------------------------------------------------------------------
 
 
-def test_signal_records_match_unified_schema(
+class TestShippingApiMode:
+    def test_api_mode_raises_not_implemented_via_fetch(self) -> None:
+        connector = ShippingConnector(source_mode="api", config={})
+        with pytest.raises(NotImplementedError, match="aisstream"):
+            connector.fetch()
+
+    def test_api_mode_raises_not_implemented_direct(self) -> None:
+        connector = ShippingConnector(source_mode="api", config={})
+        with pytest.raises(NotImplementedError):
+            connector.fetch_from_api()
+
+
+# ---------------------------------------------------------------------------
+# Shipping connector — validate()
+# ---------------------------------------------------------------------------
+
+
+class TestShippingValidate:
+    """validate() must clean small gaps and assert on hard schema/domain breaks."""
+
+    def _baseline_df(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2025-01-01", periods=10, freq="D"),
+                "vessel_count": np.arange(1, 11, dtype=float),
+                "congestion_index": np.linspace(0.1, 0.9, 10),
+            }
+        )
+
+    def test_validate_returns_cleaned_dataframe(
+        self, connector: ShippingConnector
+    ) -> None:
+        out = connector.validate(self._baseline_df())
+        assert isinstance(out, pd.DataFrame)
+        assert out["timestamp"].is_monotonic_increasing
+        assert len(out) == 10
+
+    def test_validate_rejects_nan_in_vessel_count(
+        self, connector: ShippingConnector
+    ) -> None:
+        bad = self._baseline_df()
+        bad.loc[3, "vessel_count"] = np.nan
+        with pytest.raises(AssertionError, match="vessel_count"):
+            connector.validate(bad)
+
+    def test_validate_rejects_negative_vessel_count(
+        self, connector: ShippingConnector
+    ) -> None:
+        bad = self._baseline_df()
+        bad.loc[3, "vessel_count"] = -1.0
+        with pytest.raises(AssertionError, match="Negative"):
+            connector.validate(bad)
+
+    def test_validate_rejects_out_of_range_congestion(
+        self, connector: ShippingConnector
+    ) -> None:
+        bad = self._baseline_df()
+        bad.loc[3, "congestion_index"] = 1.5
+        with pytest.raises(AssertionError, match="congestion_index"):
+            connector.validate(bad)
+
+    def test_validate_forward_fills_small_gap(
+        self, connector: ShippingConnector
+    ) -> None:
+        df = self._baseline_df()
+        df.loc[5, "congestion_index"] = np.nan
+        out = connector.validate(df)
+        assert not out["congestion_index"].isna().any(), (
+            "validate must ffill small (1-2 day) NaN gaps."
+        )
+
+    def test_validate_passes_on_synthetic(
+        self, connector: ShippingConnector, df: pd.DataFrame
+    ) -> None:
+        out = connector.validate(df)
+        assert len(out) == len(df)
+
+
+# ---------------------------------------------------------------------------
+# Shipping connector — unified signals + save_raw
+# ---------------------------------------------------------------------------
+
+
+def test_unified_signals_match_unified_schema(
     connector: ShippingConnector,
 ) -> None:
-    small = connector.generate_dataset(days=10)
-    records = connector.to_signal_records(small)
-    assert len(records) == 10 * len(connector.FEATURE_COLUMNS)
+    small = connector.generate_synthetic(days=10)
+    records = connector.to_unified_signals(small)
+    expected_records = 10 * len(connector.FEATURE_COLUMNS_SYNTHETIC)
+    assert len(records) == expected_records
     sample = records[0]
     assert set(sample.keys()) == {"timestamp", "source", "feature", "value", "location"}
     assert sample["source"] == "shipping"
-    assert sample["location"] == "Strait of Hormuz"
+    assert sample["location"] == "Shuaiba Port, Persian Gulf"
     assert isinstance(sample["value"], float)
     json.dumps(records)
 
@@ -117,20 +337,22 @@ def test_signal_records_match_unified_schema(
 def test_save_raw_to_tmp(
     connector: ShippingConnector, tmp_path: Path
 ) -> None:
-    target = tmp_path / "raw" / "shipping_hormuz.csv"
-    written = connector.save_raw(target)
+    target = tmp_path / "raw" / "shipping_processed.csv"
+    written = connector.save_raw(path=target)
     assert written.exists()
     reloaded = pd.read_csv(written)
     assert len(reloaded) == 365
     assert "is_disruption" in reloaded.columns
 
 
-def test_save_raw_to_canonical_location() -> None:
-    """Persist the canonical artefact under data/raw/ for downstream agents."""
-    connector = ShippingConnector(config={})
-    written = connector.save_raw()
+def test_save_raw_accepts_explicit_dataframe(
+    connector: ShippingConnector, df: pd.DataFrame, tmp_path: Path
+) -> None:
+    target = tmp_path / "raw" / "explicit.csv"
+    written = connector.save_raw(df=df, path=target)
     assert written.exists()
-    assert written.name == "shipping_hormuz.csv"
+    reloaded = pd.read_csv(written)
+    assert len(reloaded) == len(df)
 
 
 # ---------------------------------------------------------------------------
@@ -206,8 +428,6 @@ def test_market_different_seeds_diverge(market_connector: MarketConnector) -> No
 def test_market_response_lags_shipping(market_connector: MarketConnector) -> None:
     """Brent peak should arrive after the shipping disruption begins."""
     market = market_connector.generate_dataset(days=365, seed=42, lag_days=2)
-    # Window 2 (Major Blockage) starts at day 150 in shipping;
-    # market peak must appear no earlier than day 152.
     window = market.iloc[150:175]
     peak_day = int(window["brent_crude_usd"].idxmax())
     assert peak_day >= 152, f"Expected lagged peak >= day 152, got {peak_day}"
@@ -218,7 +438,7 @@ def test_market_mean_reversion_after_window(
 ) -> None:
     """Freight index must decay back toward baseline after the window ends."""
     market = market_connector.generate_dataset(days=365, seed=42)
-    end_day = 170  # end of Major Blockage scenario
+    end_day = 170
     elevated = market.loc[end_day, "freight_rate_index"]
     settled = market.loc[end_day + 15, "freight_rate_index"]
     baseline_band_top = 130.0
@@ -279,7 +499,7 @@ def test_market_ingestion_correlates_with_shipping(
     market_connector: MarketConnector, connector: ShippingConnector
 ) -> None:
     """Pearson r between vessel_count and trade_volume_index > 0.5 in disruption windows."""
-    shipping = connector.generate_dataset(days=365, seed=42)
+    shipping = connector.generate_synthetic(days=365, seed=42)
     market = market_connector.generate_dataset(days=365, seed=42)
 
     mask = shipping["is_disruption"].to_numpy()
