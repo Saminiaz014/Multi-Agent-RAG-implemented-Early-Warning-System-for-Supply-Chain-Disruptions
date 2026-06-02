@@ -360,9 +360,30 @@ def test_save_raw_accepts_explicit_dataframe(
 # ---------------------------------------------------------------------------
 
 
+_BRENT_PATH = Path("data/raw/brent_crude.csv")
+_FREIGHT_PPI_PATH = Path("data/raw/freight_ppi.csv")
+_FREIGHT_SERVICES_PATH = Path("data/raw/freight_services.csv")
+_MARKET_CSVS_PRESENT = all(
+    p.exists() for p in (_BRENT_PATH, _FREIGHT_PPI_PATH, _FREIGHT_SERVICES_PATH)
+)
+
+
 @pytest.fixture()
 def market_connector() -> MarketConnector:
-    return MarketConnector(config={})
+    """Default market connector — pinned to synthetic mode for unit tests."""
+    return MarketConnector(source_mode="synthetic", config={})
+
+
+@pytest.fixture()
+def market_csv_connector() -> MarketConnector:
+    return MarketConnector(
+        source_mode="csv",
+        config={
+            "brent_crude_path": str(_BRENT_PATH),
+            "freight_ppi_path": str(_FREIGHT_PPI_PATH),
+            "freight_services_path": str(_FREIGHT_SERVICES_PATH),
+        },
+    )
 
 
 @pytest.fixture()
@@ -448,10 +469,12 @@ def test_market_mean_reversion_after_window(
     )
 
 
-def test_market_validate_passes_on_generated(
+def test_market_validate_returns_dataframe_on_generated(
     market_connector: MarketConnector, market_df: pd.DataFrame
 ) -> None:
-    assert market_connector.validate(market_df) is True
+    out = market_connector.validate(market_df)
+    assert isinstance(out, pd.DataFrame)
+    assert len(out) == len(market_df)
 
 
 def test_market_validate_rejects_out_of_range_volume(
@@ -459,7 +482,8 @@ def test_market_validate_rejects_out_of_range_volume(
 ) -> None:
     bad = market_df.copy()
     bad.loc[0, "trade_volume_index"] = 1.5
-    assert market_connector.validate(bad) is False
+    with pytest.raises(AssertionError, match="trade_volume_index"):
+        market_connector.validate(bad)
 
 
 def test_market_signal_records_match_unified_schema(
@@ -471,7 +495,7 @@ def test_market_signal_records_match_unified_schema(
     sample = records[0]
     assert set(sample.keys()) == {"timestamp", "source", "feature", "value", "location"}
     assert sample["source"] == "market"
-    assert sample["location"] == "Strait of Hormuz"
+    assert sample["location"] == "Global/Persian Gulf"
     assert isinstance(sample["value"], float)
     json.dumps(records)
 
@@ -479,18 +503,19 @@ def test_market_signal_records_match_unified_schema(
 def test_market_save_raw_to_tmp(
     market_connector: MarketConnector, tmp_path: Path
 ) -> None:
-    target = tmp_path / "raw" / "market_data.csv"
-    written = market_connector.save_raw(target)
+    target = tmp_path / "raw" / "market_processed.csv"
+    written = market_connector.save_raw(path=target)
     assert written.exists()
     reloaded = pd.read_csv(written)
     assert len(reloaded) == 365
     assert "is_disruption" in reloaded.columns
 
 
-def test_market_save_raw_to_canonical_location() -> None:
-    """Persist the canonical artefact under data/raw/ for downstream agents."""
-    connector = MarketConnector(config={})
-    written = connector.save_raw()
+def test_market_save_raw_to_canonical_location(tmp_path: Path) -> None:
+    """Persist a canonical artefact for downstream agents."""
+    connector = MarketConnector(source_mode="synthetic", config={})
+    target = tmp_path / "market_data.csv"
+    written = connector.save_raw(path=target)
     assert written.exists()
     assert written.name == "market_data.csv"
 
@@ -512,3 +537,208 @@ def test_market_ingestion_correlates_with_shipping(
         f"(disruption days, n={int(mask.sum())}): {corr:.3f}"
     )
     assert corr > 0.5, f"Expected r > 0.5 during disruption windows; got {corr:.3f}"
+
+
+# ---------------------------------------------------------------------------
+# Market connector — CSV mode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not _MARKET_CSVS_PRESENT,
+    reason="FRED CSVs not present in data/raw/",
+)
+class TestMarketCsvMode:
+    """Validate the FRED CSV ingestion path (Brent + freight PPI + services)."""
+
+    def test_csv_mode_has_expected_columns(
+        self, market_csv_connector: MarketConnector
+    ) -> None:
+        df = market_csv_connector.load_from_csv()
+        expected = {
+            "timestamp",
+            "brent_crude_usd",
+            "trade_volume_index",
+            "freight_rate_index",
+            "freight_services_pct_change",
+            "is_disruption",
+        }
+        assert expected.issubset(set(df.columns))
+
+    def test_csv_mode_brent_in_historical_range(
+        self, market_csv_connector: MarketConnector
+    ) -> None:
+        df = market_csv_connector.load_from_csv()
+        # Brent crude history: trough ~$9 (1998 collapse), peak ~$147 (2008).
+        assert df["brent_crude_usd"].min() >= 5.0
+        assert df["brent_crude_usd"].max() <= 200.0
+
+    def test_csv_mode_trade_volume_in_unit_interval(
+        self, market_csv_connector: MarketConnector
+    ) -> None:
+        df = market_csv_connector.load_from_csv()
+        assert df["trade_volume_index"].between(0.0, 1.0).all()
+
+    def test_csv_mode_freight_rebased(
+        self, market_csv_connector: MarketConnector
+    ) -> None:
+        """Trailing 2-year freight index should sit close to 100 after rebasing."""
+        df = market_csv_connector.load_from_csv()
+        recent_cutoff = df["timestamp"].max() - pd.Timedelta(days=365 * 2)
+        recent = df.loc[
+            df["timestamp"] >= recent_cutoff, "freight_rate_index"
+        ].dropna()
+        assert recent.mean() == pytest.approx(100.0, rel=0.05)
+
+    def test_csv_mode_date_range_filter(
+        self, market_csv_connector: MarketConnector
+    ) -> None:
+        df = market_csv_connector.load_from_csv(
+            start_date="2024-01-01", end_date="2025-12-31"
+        )
+        assert df["timestamp"].min() >= pd.Timestamp("2024-01-01")
+        assert df["timestamp"].max() <= pd.Timestamp("2025-12-31")
+
+    def test_csv_mode_disruption_label_populated(
+        self, market_csv_connector: MarketConnector
+    ) -> None:
+        """Across 30+ years the co-spike rule must fire at least once."""
+        df = market_csv_connector.load_from_csv()
+        assert df["is_disruption"].sum() > 0
+
+    def test_csv_mode_fetch_dispatches_to_csv(
+        self, market_csv_connector: MarketConnector
+    ) -> None:
+        df = market_csv_connector.fetch()
+        assert "freight_services_pct_change" in df.columns
+
+
+# ---------------------------------------------------------------------------
+# Market connector — API mode
+# ---------------------------------------------------------------------------
+
+
+class TestMarketApiMode:
+    def test_api_mode_raises_not_implemented_via_fetch(self) -> None:
+        c = MarketConnector(source_mode="api", config={})
+        with pytest.raises(NotImplementedError, match="FRED"):
+            c.fetch()
+
+    def test_api_mode_raises_not_implemented_direct(self) -> None:
+        c = MarketConnector(source_mode="api", config={})
+        with pytest.raises(NotImplementedError):
+            c.fetch_from_api()
+
+
+# ---------------------------------------------------------------------------
+# Market connector — synthetic-mode dispatch via fetch()
+# ---------------------------------------------------------------------------
+
+
+class TestMarketSyntheticMode:
+    """No-regression: synthetic generation still produces the legacy schema."""
+
+    def test_synthetic_fetch_dispatches_to_synthetic(
+        self, market_connector: MarketConnector
+    ) -> None:
+        out = market_connector.fetch()
+        assert set(out.columns) == {
+            "timestamp",
+            "brent_crude_usd",
+            "trade_volume_index",
+            "freight_rate_index",
+            "is_disruption",
+        }
+        assert len(out) == 365
+
+
+# ---------------------------------------------------------------------------
+# Market connector — alignment with shipping
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not (_MARKET_CSVS_PRESENT and _CSV_PATH.exists()),
+    reason="Real CSVs (shipping + market) not present in data/raw/",
+)
+class TestMarketAlignment:
+    def test_alignment_matches_shipping_dates(
+        self,
+        csv_connector: ShippingConnector,
+        market_csv_connector: MarketConnector,
+    ) -> None:
+        shipping = csv_connector.load_from_csv()
+        market = market_csv_connector.load_from_csv()
+        aligned = market_csv_connector.align_with_shipping(
+            shipping, market_df=market
+        )
+        np.testing.assert_array_equal(
+            pd.to_datetime(aligned["timestamp"]).to_numpy(),
+            pd.to_datetime(shipping["timestamp"]).to_numpy(),
+        )
+
+    def test_alignment_no_remaining_gaps_in_brent(
+        self,
+        csv_connector: ShippingConnector,
+        market_csv_connector: MarketConnector,
+    ) -> None:
+        shipping = csv_connector.load_from_csv()
+        aligned = market_csv_connector.align_with_shipping(shipping)
+        assert aligned["brent_crude_usd"].notna().all(), (
+            "Aligned market data must be gap-free (weekends ffilled)."
+        )
+
+    def test_alignment_loads_internally_when_market_df_omitted(
+        self,
+        csv_connector: ShippingConnector,
+        market_csv_connector: MarketConnector,
+    ) -> None:
+        shipping = csv_connector.load_from_csv()
+        aligned = market_csv_connector.align_with_shipping(shipping)
+        assert len(aligned) == len(shipping)
+
+
+# ---------------------------------------------------------------------------
+# Cross-source correlation on real CSV data
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not (_MARKET_CSVS_PRESENT and _CSV_PATH.exists()),
+    reason="Real CSVs (shipping + market) not present in data/raw/",
+)
+def test_cross_correlation_real_data(
+    csv_connector: ShippingConnector,
+    market_csv_connector: MarketConnector,
+) -> None:
+    """Brent crude should anti-correlate with shipping vessel count.
+
+    When the Strait of Hormuz is disrupted, vessel arrivals drop while oil
+    prices spike — the Pearson r between brent_crude_usd and vessel_count
+    on the overlapping date range should be negative.
+    """
+    shipping = csv_connector.load_from_csv()
+    aligned = market_csv_connector.align_with_shipping(shipping)
+
+    overlap = shipping.merge(
+        aligned[["timestamp", "brent_crude_usd", "trade_volume_index"]],
+        on="timestamp",
+        how="inner",
+    )
+    mask = overlap["brent_crude_usd"].notna() & overlap["vessel_count"].notna()
+    overlap = overlap.loc[mask]
+
+    r_brent_vc = float(
+        np.corrcoef(overlap["brent_crude_usd"], overlap["vessel_count"])[0, 1]
+    )
+    r_tvi_vc = float(
+        np.corrcoef(overlap["trade_volume_index"], overlap["vessel_count"])[0, 1]
+    )
+    print(
+        f"\n[test/csv] Real-data Pearson r over n={len(overlap)} days: "
+        f"brent_crude_usd <-> vessel_count = {r_brent_vc:+.3f}; "
+        f"trade_volume_index <-> vessel_count = {r_tvi_vc:+.3f}"
+    )
+    assert r_brent_vc < 0, (
+        f"Expected negative Brent ↔ vessel_count correlation; got {r_brent_vc:+.3f}"
+    )

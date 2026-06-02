@@ -19,6 +19,17 @@ ingestion:
         lat_max: 29.20
         lon_min: 48.05
         lon_max: 48.25
+  market:
+    # Source for market-data signals. One of: "csv", "synthetic", "api".
+    source_mode: "csv"
+    brent_crude_path: "data/raw/brent_crude.csv"
+    freight_ppi_path: "data/raw/freight_ppi.csv"
+    freight_services_path: "data/raw/freight_services.csv"
+    api:
+      # Placeholders for planned live FRED + Alpha Vantage integration.
+      fred_endpoint: "https://api.stlouisfed.org/fred"
+      fred_key: null
+      alpha_vantage_key: null
 
 agents:
   shipping:
