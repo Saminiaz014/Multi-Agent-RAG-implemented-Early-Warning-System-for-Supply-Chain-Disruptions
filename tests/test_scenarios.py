@@ -338,3 +338,145 @@ def test_orchestrator_timeseries_real_data_flags_2026_shutdown() -> None:
     assert (
         shutdown["risk_level"].isin(["HIGH", "CRITICAL"]).any()
     ), "Expected HIGH/CRITICAL risk during the April-May 2026 Hormuz shutdown."
+
+
+# --------------------------------------------------------------------------- #
+# Historical-event scenarios — verify the orchestrator behaves sanely across  #
+# known windows in the real Shuaiba + FRED record.                            #
+#                                                                             #
+# These tests use conservative agent thresholds tuned to the production       #
+# discrimination characteristics demonstrated in test_agents.py — see the     #
+# probe in commit fa28629 for the empirical risk-level distribution.          #
+# --------------------------------------------------------------------------- #
+
+
+def _historical_orchestrator() -> Orchestrator:
+    """Build an orchestrator wired for real CSV ingestion + conservative agents.
+
+    The market agent's ``baseline_years=10`` is needed so the 2019 and 2020
+    test windows actually have a rolling baseline (the default 5-year clip
+    would exclude them from the time series entirely).
+    """
+    config = _hybrid_config(shipping_mode="csv", market_mode="csv")
+    orc = Orchestrator(config=config)
+    orc.register_agent(
+        ShippingAgent(
+            config={"contamination": 0.05, "threshold": 0.60, "z_threshold": 2.5}
+        )
+    )
+    orc.register_agent(
+        MarketAgent(
+            config={
+                "z_threshold": 3.0,
+                "threshold": 0.70,
+                "baseline_years": 10,
+            }
+        )
+    )
+    return orc
+
+
+def _window(ts: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    return ts.loc[
+        ts["timestamp"].between(pd.Timestamp(start), pd.Timestamp(end))
+    ]
+
+
+@pytest.fixture(scope="module")
+def historical_timeseries() -> pd.DataFrame:
+    if not _REAL_DATA_PRESENT:
+        pytest.skip("Real Shuaiba + FRED CSVs not all present in data/raw/")
+    orc = _historical_orchestrator()
+    ts = orc.run_timeseries_analysis()
+    ts["timestamp"] = pd.to_datetime(ts["timestamp"])
+    return ts
+
+
+@pytest.mark.skipif(
+    not _REAL_DATA_PRESENT,
+    reason="Real Shuaiba + FRED CSVs not all present in data/raw/",
+)
+def test_2026_hormuz_shutdown(historical_timeseries: pd.DataFrame) -> None:
+    """March-May 2026 Hormuz shutdown must surface as HIGH-level risk."""
+    window = _window(historical_timeseries, "2026-03-01", "2026-05-22")
+    assert not window.empty
+    escalated = window["risk_level"].isin(["HIGH", "CRITICAL"]).sum()
+    print(
+        f"\n[scenario/2026-hormuz] n={len(window)} avg_score="
+        f"{window['composite_score'].mean():.3f} levels="
+        f"{dict(window['risk_level'].value_counts())}"
+    )
+    # At least a quarter of the window must reach HIGH or CRITICAL — the
+    # Hormuz shutdown is the canonical high-risk event in the dataset.
+    assert escalated / len(window) >= 0.25, (
+        f"Expected >=25% of Mar-May 2026 days at HIGH/CRITICAL; got "
+        f"{escalated}/{len(window)}."
+    )
+    assert window["composite_score"].max() >= 0.6, (
+        f"Expected peak composite_score >= 0.6 during the shutdown; got "
+        f"{window['composite_score'].max():.3f}."
+    )
+
+
+@pytest.mark.skipif(
+    not _REAL_DATA_PRESENT,
+    reason="Real Shuaiba + FRED CSVs not all present in data/raw/",
+)
+def test_2019_tanker_attacks(historical_timeseries: pd.DataFrame) -> None:
+    """June-July 2019 Iranian-corridor tanker incidents must show >= MEDIUM risk."""
+    window = _window(historical_timeseries, "2019-06-01", "2019-07-31")
+    assert not window.empty
+    elevated = window["risk_level"].isin(["MEDIUM", "HIGH", "CRITICAL"]).sum()
+    print(
+        f"\n[scenario/2019-tanker] n={len(window)} avg_score="
+        f"{window['composite_score'].mean():.3f} levels="
+        f"{dict(window['risk_level'].value_counts())}"
+    )
+    assert elevated >= 5, (
+        f"Expected >=5 days at MEDIUM+ during Jun-Jul 2019 tanker attacks; "
+        f"got {elevated}/{len(window)}."
+    )
+
+
+@pytest.mark.skipif(
+    not _REAL_DATA_PRESENT,
+    reason="Real Shuaiba + FRED CSVs not all present in data/raw/",
+)
+def test_normal_period_2023(historical_timeseries: pd.DataFrame) -> None:
+    """Jan-Jun 2023 (no major Hormuz incident) must stay predominantly LOW."""
+    window = _window(historical_timeseries, "2023-01-01", "2023-06-30")
+    assert not window.empty
+    low_fraction = (window["risk_level"] == "LOW").sum() / len(window)
+    critical_fraction = (window["risk_level"] == "CRITICAL").sum() / len(window)
+    print(
+        f"\n[scenario/2023-normal] n={len(window)} avg_score="
+        f"{window['composite_score'].mean():.3f} levels="
+        f"{dict(window['risk_level'].value_counts())}"
+    )
+    assert low_fraction >= 0.5, (
+        f"Expected >=50% of Jan-Jun 2023 days at LOW risk (calm baseline); "
+        f"got {low_fraction:.2%}."
+    )
+    assert critical_fraction <= 0.05, (
+        f"Expected <=5% of 2023 days at CRITICAL; got {critical_fraction:.2%}."
+    )
+
+
+@pytest.mark.skipif(
+    not _REAL_DATA_PRESENT,
+    reason="Real Shuaiba + FRED CSVs not all present in data/raw/",
+)
+def test_covid_impact(historical_timeseries: pd.DataFrame) -> None:
+    """March-April 2020 (COVID demand shock) must surface as elevated risk."""
+    window = _window(historical_timeseries, "2020-03-01", "2020-04-30")
+    assert not window.empty
+    elevated = window["risk_level"].isin(["MEDIUM", "HIGH", "CRITICAL"]).sum()
+    print(
+        f"\n[scenario/covid] n={len(window)} avg_score="
+        f"{window['composite_score'].mean():.3f} levels="
+        f"{dict(window['risk_level'].value_counts())}"
+    )
+    assert elevated >= 5, (
+        f"Expected >=5 days at MEDIUM+ during Mar-Apr 2020 COVID shock; "
+        f"got {elevated}/{len(window)}."
+    )

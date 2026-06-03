@@ -307,6 +307,48 @@ class TestShippingValidate:
             "validate must ffill small (1-2 day) NaN gaps."
         )
 
+
+# ---------------------------------------------------------------------------
+# Cross-mode synthetic fallback (named per the integration test spec)
+# ---------------------------------------------------------------------------
+
+
+def test_synthetic_fallback() -> None:
+    """source_mode='synthetic' must reproduce the original (pre-CSV) behaviour.
+
+    Verifies both connectors fall back cleanly to their synthetic generators
+    when explicitly configured with ``source_mode="synthetic"`` — no CSV
+    access, the legacy column schemas, and the expected 365-day length.
+    """
+    shipping = ShippingConnector(source_mode="synthetic", config={})
+    market = MarketConnector(source_mode="synthetic", config={})
+
+    s_df = shipping.fetch()
+    m_df = market.fetch()
+
+    assert len(s_df) == 365
+    assert len(m_df) == 365
+    assert set(s_df.columns) == {
+        "timestamp",
+        "vessel_count",
+        "avg_delay_hours",
+        "congestion_index",
+        "oil_price_usd",
+        "is_disruption",
+    }
+    assert set(m_df.columns) == {
+        "timestamp",
+        "brent_crude_usd",
+        "trade_volume_index",
+        "freight_rate_index",
+        "is_disruption",
+    }
+    # Round-trip guarantee: ground truths align so cross-agent validation works.
+    np.testing.assert_array_equal(
+        s_df["is_disruption"].to_numpy(),
+        m_df["is_disruption"].to_numpy(),
+    )
+
     def test_validate_passes_on_synthetic(
         self, connector: ShippingConnector, df: pd.DataFrame
     ) -> None:

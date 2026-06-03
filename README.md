@@ -620,6 +620,133 @@ Both agents emit the same dict schema, slot into the same `RiskEngine.aggregate(
 
 ---
 
+## What Was Built (Week 8)
+
+This session integrated **real datasets** end-to-end. Both connectors gained a hybrid `csv` / `synthetic` / `api` source mode, both agents auto-adapt to richer real-data feature sets, the orchestrator merges and routes the combined frame through the agents, and `main.py` ships a one-command CLI that prints a formatted risk summary. **108 tests pass**, including real-data evaluations on the 2,699-day Shuaiba PortWatch record and the 14,252-day FRED Brent + freight history.
+
+### Hybrid Ingestion
+
+| Connector | Real CSV source | Synthetic fallback | API stub |
+|---|---|---|---|
+| `ShippingConnector` | IMF PortWatch Shuaiba arrivals — daily vessel-type counts 2019-01-01 → 2026-05-22 (2,699 rows) | Legacy 365-day three-scenario generator (preserved verbatim) | `aisstream.io` WebSocket — raises `NotImplementedError` |
+| `MarketConnector` | FRED — Brent daily 1987-2026 (14,252 rows) ⨝ deep-sea freight PPI (monthly) ⨝ freight services index (monthly) | Legacy 365-day lagged generator (preserved verbatim) | FRED + Alpha Vantage — raises `NotImplementedError` |
+
+Mode is selected per-connector via `config["ingestion"]["{shipping,market}"]["source_mode"]`. `fetch()` routes to the configured branch, then runs `validate()` and logs a one-line summary (`rows`, `range`, `disruption_days`).
+
+**Shipping CSV-mode derived columns** — `vessel_count` (sum across types), `tanker_count` (most Hormuz-sensitive class), `vessel_count_7dma` (passthrough), `congestion_index = clip(1 − vessel_count / rolling_30d_mean, 0, 1)`, `avg_delay_hours = clip(4.0 × rolling_mean / max(vessel_count, 0.1), 1, 72)`. Ground-truth `is_disruption` fires when `vessel_count < rolling_mean − 2σ` persists ≥ 3 consecutive days OR the date lies within the known April-May 2026 Strait of Hormuz shutdown window.
+
+**Market CSV-mode pipeline** — Build a daily index from Brent's range, left-join PPI + services, forward-fill weekends/holidays, **rebase** the freight PPI so the trailing 2 years average to 100 (otherwise the 1988 baseline value of 100 sits decades below the 2026 value of ~440, breaking comparability), derive `trade_volume_index = clip(1 − minmax(rolling_30d_std(brent)), 0, 1)`, label `is_disruption` where Brent > μ + 2σ **and** freight > μ + 1.5σ simultaneously.
+
+**Alignment** — `MarketConnector.align_with_shipping(shipping_df, market_df)` filters market data to the shipping date range, reindexes onto the shipping timestamp grid, and forward/back-fills gaps. This is what the orchestrator calls before merging.
+
+**`validate()` contract change** — Both connectors now return a cleaned `DataFrame` (sorted, small gaps ffilled) instead of a `bool`, and assert on hard schema/domain breaks. `fetch_and_validate()` is overridden so the base-class implementation's `if not validate(df)` truthiness check is bypassed.
+
+### Hybrid Agent Feature Discovery
+
+Both agents now **auto-discover** real-data columns at fit time and adapt their feature set without changing the public schema for synthetic mode.
+
+**`ShippingAgent`** picks up `tanker_count` (the most Hormuz-sensitive vessel class) and derives `vessel_count_trend = vessel_count − vessel_count_7dma` when those columns are present. The active feature set grows from 3 (synthetic) to 5 (real), `_ZSCORE_NAME_MAP` adds `tanker_zscore` and `trend_zscore` to the output schema, and the location stamp switches to `"Shuaiba Port, Persian Gulf"`. `run()` now logs a `[ShippingAgent.eval]` confusion matrix + precision / recall / F1 / TPR / FPR line when ground truth is available.
+
+**`MarketAgent`** picks up `freight_services_pct_change` and switches its weight schedule from `(0.40 / 0.35 / 0.25)` to `(0.35 / 0.30 / 0.20 / 0.15)`. `preprocess()` applies a trailing **recent-baseline clip** (default `baseline_years=5`) before rolling stats — without it, the rolling 30-day mean over the 1987-1998 $20/bbl regime would be ~1/5 of the post-2022 $90/bbl regime and pollute the anomaly baseline. Location switches to `"Global/Persian Gulf"`. The oil-led validation gate (`oil AND [trade OR freight]`) is kept identical so that synthetic-mode behaviour and existing tests are unaffected.
+
+Backwards compatibility is enforced by tests: the 3-feature synthetic path still yields the original schema, the original `_feature_columns` tuple, and the original `"Strait of Hormuz"` location.
+
+### Orchestrator
+
+`src/orchestrator.py` now owns the connectors and exposes three entry points:
+
+- **`ingest()`** — fetch both feeds, call `align_with_shipping()`, left-join on `timestamp`, rename market's `is_disruption` to `market_is_disruption` (so shipping ground truth survives the merge), back-fill `oil_price_usd` from `brent_crude_usd`.
+- **`run_full_pipeline()`** — ingest → run each registered agent via `run_dataframe()` + `to_detection_result()` (falling back to `detect()` for legacy agents) → aggregate via `RiskEngine` → return `{composite_score, risk_level, agent_scores, data, shap, context}`.
+- **`run_timeseries_analysis()`** — run every agent, collect per-row `anomaly_score` into `<agent>_score` columns, compute a daily weighted `composite_score`, bucket into `risk_level`.
+
+**Graceful degradation.** `_safe_fetch()` catches `FileNotFoundError` / `ValueError` from a connector, flips its `source_mode` to `synthetic`, and retries. `_warn_if_market_coverage_short()` logs a warning when raw market data doesn't span the shipping range. The legacy `run(df)` entry point is preserved unchanged so the four pre-existing scenario tests still pass.
+
+### CLI Entrypoint
+
+`main.py` keeps the original `load_config()` and `setup_logging()` and adds:
+
+```bash
+python main.py                    # CSV mode (from config), prints summary box
+python main.py --mode synthetic   # override both connectors to synthetic
+python main.py --serve            # uvicorn src.api.endpoints:app on settings.yaml host/port
+```
+
+Pipeline run sequence:
+
+1. **INGEST** — `Orchestrator._safe_fetch()` on both connectors, then `align_with_shipping()` + merge.
+2. **DETECT** — `_run_agent_safe()` wraps each agent in try/except, captures `len(agent.run(df))` for the windows tally and `agent.to_detection_result(agent.run_dataframe(df))` for aggregation.
+3. **AGGREGATE** — `RiskEngine.aggregate(detection_results)`.
+4. **SUMMARY** — always printed (even on partial failure), example real-CSV output:
+
+```
+╔══════════════════════════════════════╗
+║   SUPPLY CHAIN DSS — RISK SUMMARY    ║
+╠══════════════════════════════════════╣
+║  Risk Score : 0.52                   ║
+║  Risk Level : MEDIUM                 ║
+║  Shipping   : 0.37  (w=0.40)         ║
+║  Market     : 0.71  (w=0.30)         ║
+║  Agreement  : 2 agents               ║
+║  Windows    : ship=96 mkt=72         ║
+╚══════════════════════════════════════╝
+```
+
+`main()` reconfigures `sys.stdout` / `sys.stderr` to UTF-8 so the box-drawing characters render under Windows `cp1252`.
+
+### Real-Data Evaluation Results
+
+| Component | Config | Result |
+|---|---|---|
+| `ShippingAgent` on Shuaiba CSV (2,699 days, 52 ground-truth disruption days) | `contamination=0.05`, `threshold=0.55`, `z_threshold=2.0` | **TPR=0.827, FPR=0.060**, precision=0.214, 96 anomaly windows; the April-May 2026 shutdown is recovered in full |
+| `MarketAgent` on FRED CSV (1,826 scored days after `baseline_years=5` clip, 29 ground-truth disruption days) | `z_threshold=1.5`, `threshold=0.50`, `baseline_years=5` | **TPR=0.966, FPR=0.184**, 73 anomaly windows over 4 active features |
+| End-to-end pipeline on real merged data | default config | composite=0.52 (MEDIUM); 98 CRITICAL / 427 HIGH / 936 MEDIUM / 1,232 LOW days across 2019-2026 |
+
+### Historical-Event Scenario Tests
+
+`tests/test_scenarios.py` adds four named tests verifying the orchestrator behaves sanely across known windows in the real record (conservative thresholds, `market.baseline_years=10` so the 2019 and 2020 windows actually have a baseline):
+
+| Test | Window | Assertion | Empirical result |
+|---|---|---|---|
+| `test_2026_hormuz_shutdown` | Mar-May 2026 | ≥ 25% of days at HIGH/CRITICAL, peak composite ≥ 0.60 | 31/83 (37%) escalated, peak 0.92 |
+| `test_2019_tanker_attacks` | Jun-Jul 2019 | ≥ 5 days at MEDIUM+ | 20 elevated days, avg 0.340 |
+| `test_normal_period_2023` | Jan-Jun 2023 | ≥ 50% LOW, ≤ 5% CRITICAL | 114/181 (63%) LOW, 0% CRITICAL |
+| `test_covid_impact` | Mar-Apr 2020 | ≥ 5 days at MEDIUM+ | 25 elevated days, avg 0.391 |
+
+### Test Coverage (Week 8)
+
+| File | Tests | Coverage |
+|---|---|---|
+| `tests/test_ingestion.py` | 49 | shipping CSV/synthetic/API + validate (`assert`-style) + `test_synthetic_fallback`; market CSV/synthetic/API + alignment + cross-correlation on real data (`r = −0.085` for brent ↔ vessel_count) |
+| `tests/test_agents.py` | 25 | 5 ABC + 9 shipping (4 synthetic + 5 real-data including feature discovery, location override, signal-key extras) + 11 market (4 synthetic + 7 real-data including weight redistribution and baseline clip) |
+| `tests/test_scenarios.py` | 17 | 4 legacy + 9 hybrid orchestrator + 4 historical-event |
+| `tests/test_risk_engine.py` | 7 | unchanged from Week 1 |
+| **Total** | **108 / 108 passing** | |
+
+### Configuration Additions (`config/settings.yaml`)
+
+```yaml
+ingestion:
+  shipping:
+    source_mode: "csv"             # csv | synthetic | api
+    csv_path: "data/raw/shuaiba_arrivals.csv"
+    vessel_type_columns: [Container, "Dry Bulk", "General Cargo", "Roll-on/roll-off", Tanker]
+    api:
+      endpoint: "wss://stream.aisstream.io/v0/stream"
+      key: null
+      bounding_box: {lat_min: 28.95, lat_max: 29.20, lon_min: 48.05, lon_max: 48.25}
+  market:
+    source_mode: "csv"
+    brent_crude_path: "data/raw/brent_crude.csv"
+    freight_ppi_path: "data/raw/freight_ppi.csv"
+    freight_services_path: "data/raw/freight_services.csv"
+    api:
+      fred_endpoint: "https://api.stlouisfed.org/fred"
+      fred_key: null
+      alpha_vantage_key: null
+```
+
+---
+
 ## Project Structure
 
 ```
