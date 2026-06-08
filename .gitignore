@@ -16,6 +16,11 @@ venv/
 env/
 .env/
 
+# Secrets (do not commit API keys)
+.env
+.env.local
+.env.*.local
+
 # Logs
 logs/
 *.log
