@@ -73,6 +73,9 @@ The Strait of Hormuz is one of the world's most critical maritime chokepoints, c
 
 ## What Was Built (Week 1)
 
+> **Summary.** Project scaffold + ABCs + skeleton modules.
+> Adds: `config/settings.yaml`, `main.py` entrypoint, `src/orchestrator.py`, `BaseConnector` and `BaseAgent` ABCs (with `DetectionResult` dataclass), `RiskEngine` with weighted aggregation and `RiskLevel` enum, SHAP explainer wrapper, ChromaDB RAG retriever, FastAPI `/predict` `/explain` `/health` endpoints, and the initial 16-test suite (`tests/test_agents.py`, `test_risk_engine.py`, `test_scenarios.py`).
+
 This session delivered the **complete project scaffold** — every module is independently importable and tested, forming the foundation for domain-specific agent and connector implementations.
 
 ### Core Infrastructure
@@ -122,6 +125,9 @@ Both use Python's `ABC` / `@abstractmethod` pattern, ensuring domain implementat
 ---
 
 ## What Was Built (Week 2)
+
+> **Summary.** Two synthetic data connectors with shared ground truth.
+> Adds: `src/ingestion/shipping_connector.py` (365-day Hormuz dataset with three injected disruption scenarios — Moderate Tension days 60-74, Major Blockage days 150-170, Brief Incident days 280-290) and `src/ingestion/market_connector.py` (Brent / trade volume / freight rate signals lag-aligned to shipping with 2-day propagation and mean-reverting tails). Welch t = 10.04 on vessel_count separation, Pearson r = 0.746 between shipping vessel_count and market trade_volume_index in disruption windows. 30 new ingestion tests; 46/46 total passing.
 
 This session delivered the **first two concrete data connectors** — a synthetic Strait of Hormuz shipping signal generator and a temporally aligned market signal generator. Together they give detection agents a reproducible, multi-source dataset with shared ground-truth disruption labels, enabling cross-agent validation without depending on live AIS or market feeds.
 
@@ -221,6 +227,9 @@ All 30 ingestion tests pass alongside the 16 prior-week tests — **46/46 total*
 ---
 
 ## What Was Built (Week 3)
+
+> **Summary.** First two concrete detection agents wired to the Week-2 datasets.
+> Adds: `src/agents/shipping_agent.py` (Isolation Forest + Z-score fallback with leak-free fit on non-disruption rows, persistence + multi-feature validation, **TPR = 0.936 / FPR = 0.003**) and `src/agents/market_agent.py` (trailing 30-day rolling Z-scores, oil-led validation gate, **TPR = 0.809 / FPR = 0.022**). Both expose `run_dataframe` + `to_detection_result` for `RiskEngine` integration. 8 new agent tests; 54/54 total passing.
 
 This session delivered the **first two concrete detection agents** of the multi-agent pipeline — `ShippingAgent` (physical-flow side: vessel counts, transit delays, corridor congestion) and `MarketAgent` (price-side: Brent crude, trade volume, freight rates) — both wired to the synthetic Strait of Hormuz datasets produced in Week 2. Together they form a two-channel early-warning system: the shipping agent fires first on the physical event, and the market agent corroborates it 1-2 days later as the price reaction propagates. Both agents conform to the same `BaseAgent` ABC, emit the same dict schema, and slot into the existing `RiskEngine.aggregate()` call site without any orchestrator changes.
 
@@ -622,6 +631,9 @@ Both agents emit the same dict schema, slot into the same `RiskEngine.aggregate(
 
 ## What Was Built (Week 8)
 
+> **Summary.** Real-data integration end-to-end.
+> Changes: both connectors gain a hybrid `source_mode` ∈ {`csv`, `synthetic`, `api`} (IMF PortWatch Shuaiba 2,699 days + FRED Brent / freight 14,252 days), both agents auto-discover real-data feature extras (`tanker_count`, `vessel_count_trend`, `freight_services_pct_change`) and adapt their weight schedules, market agent gains a recent-baseline clip (default 5 years). New: `src/orchestrator.py` `ingest()` + `run_full_pipeline()` + `run_timeseries_analysis()` with per-connector CSV→synthetic fallback, `main.py` CLI (`--mode {csv,synthetic}` / `--serve`) with a formatted summary box, four historical-event scenario tests (2026 Hormuz, 2019 tanker, 2023 normal, COVID), `tests/test_fred_api.py` standalone API connectivity check. **Real-data evaluation:** ShippingAgent TPR = 0.827 / FPR = 0.060 on Shuaiba, MarketAgent TPR = 0.966 / FPR = 0.184 on FRED. 108/108 tests passing.
+
 This session integrated **real datasets** end-to-end. Both connectors gained a hybrid `csv` / `synthetic` / `api` source mode, both agents auto-adapt to richer real-data feature sets, the orchestrator merges and routes the combined frame through the agents, and `main.py` ships a one-command CLI that prints a formatted risk summary. **108 tests pass**, including real-data evaluations on the 2,699-day Shuaiba PortWatch record and the 14,252-day FRED Brent + freight history.
 
 ### Hybrid Ingestion
@@ -744,6 +756,155 @@ ingestion:
       fred_key: null
       alpha_vantage_key: null
 ```
+
+---
+
+## What Was Built (Week 9)
+
+> **Summary.** Four new signal domains land the pipeline at six active agents.
+> Adds: `GeopoliticalConnector` + `GeopoliticalAgent`, `DisasterConnector` + `DisasterAgent`, `RoutingConnector` + `RoutingAgent`, `NewsConnector` + `NewsAgent`. Every new connector exposes the three-mode `data_mode` ∈ {`synthetic`, `csv`, `api`} dispatcher (API stubbed with planned-integration docstrings); every new agent emits the unified anomaly-window dict and a `DetectionResult` so `RiskEngine.aggregate()` accepts all six agents unchanged. Six-agent weight split (shipping 0.25, market 0.15, geopolitical 0.25, natural_disaster 0.10, routing 0.15, news_sentiment 0.10). 27 new tests in `tests/test_new_agents.py` including a 6-agent integration ranking Scenario B > Scenario A > normal. **135/135 tests passing.**
+
+This session brought the multi-agent architecture to its full six-agent breadth. Where Weeks 2-3 covered the *physical-flow* (shipping) and *price-side* (market) axes, Week 9 fills in **geopolitical**, **natural-disaster**, **routing**, and **news-sentiment** — each with its own bespoke detection strategy, each leading or lagging the shipping disruption by an agent-specific delay so the orchestrator sees realistic propagation behaviour. No existing module was changed: the six agents are additive.
+
+### Three-Mode Data Ingestion (applies to all four new connectors)
+
+Every new connector dispatches on `data_mode` in its config block under `agents.{name}` in `settings.yaml`:
+
+```yaml
+agents:
+  geopolitical:
+    data_mode: "synthetic"   # Options: "synthetic" | "csv" | "api"
+    csv_path: "data/raw/geopolitical_events.csv"
+    api:
+      provider: "acled"
+      base_url: "https://api.acleddata.com/acled/read"
+      api_key: ""
+```
+
+- **`synthetic`** — internal numpy generator with seedable RNG; injects scenarios aligned with the existing shipping windows (days 60-74 / 150-170 / 280-290), each shifted by an agent-specific `lead_days` so tensions / rerouting / news / disasters arrive *before* port-side congestion.
+- **`csv`** — load a user CSV at `csv_path`; schema + range validation raises `ValueError` on failure.
+- **`api`** — `NotImplementedError` with a docstring that names the planned source, endpoints, and aggregation steps. No external keys required for any current testing.
+
+### Agent Summary
+
+| Domain | Detection method | Key features | Validation gate | Scenarios it drives |
+|---|---|---|---|---|
+| **Geopolitical** | Weighted composite + sigmoid compression (gain 6, centred at 0.5) | `sanctions_severity` / `military_activity_index` / `diplomatic_incident_score` / `regime_stability_index` (inverted) | ≥ 3-day persistence AND ≥ 2 of 4 features elevated above 0.40 | A, B, C — leads shipping by 3 days |
+| **Natural disaster** | Weighted composite OR any single feature ≥ 0.40 | `earthquake_severity` / `tsunami_risk` / `cyclone_severity` / `severe_weather_index` (proximity-decayed: full weight ≤ 500 km, zero ≥ 1,500 km) | Single-day valid (a M6.5 quake on day N is itself the signal); min severity 0.10 to suppress baseline tremor noise | **B only** — single M6.5 quake at day 148, 200 km from Strait |
+| **Routing** | Isolation Forest baseline (contamination 0.08, n_estimators 200) + transit-ratio z-score | `rerouting_percentage` / `avg_route_deviation_km` / `transit_volume_ratio` / `vessels_holding` / `alternative_route_traffic` | ≥ 2-day persistence AND `rerouting_percentage` ≥ 10 %; versioned model id `hormuz_v1.0` | A, B, C — leads shipping by 2 days |
+| **News sentiment** | Threshold detector — `0.40 × neg_sent + 0.25 × consensus + 0.20 × velocity + 0.15 × volume_spike` | `sentiment_score` / `sentiment_magnitude` / `source_consensus` / `article_volume` / `recency_weighted_score` / `dominant_narrative` | ≥ 2-day persistence AND recency-weighted sentiment ≤ −0.30 AND `source_consensus` ≥ 0.40 | A, B, C — leads shipping by 2 days |
+
+The **disaster-only-fires-on-B** asymmetry is deliberate: it lets the orchestrator demonstrate selective attribution (Scenario B = Hormuz disruption *with* a natural cause; Scenarios A and C = pure geopolitical / market / news events with no disaster involvement).
+
+### Synthetic-Mode Output Schemas
+
+All four connectors emit `timestamp` + the source-specific feature columns + a `composite_*_risk` rollup + `is_disruption` (ground truth). The geopolitical and disaster connectors additionally carry a JSON-encoded list of free-text incidents (`flagged_incidents` / `active_events`) that survive into the agent's per-window report:
+
+```python
+{
+  "agent": "geopolitical",
+  "anomaly_score": 0.78,
+  "confidence": 0.65,
+  "signals": {
+    "sanctions_severity": 0.72,
+    "military_activity_index": 0.81,
+    "diplomatic_incident_score": 0.45,
+    "regime_stability_index": 0.38,
+  },
+  "flagged_incidents": [
+    "Comprehensive sanctions package targeting maritime exports",
+    "Major naval deployment to Gulf chokepoint reported",
+  ],
+  "start_timestamp": "2025-05-25",
+  "end_timestamp":   "2025-06-29",
+  "location":        "Strait of Hormuz",
+}
+```
+
+### Six-Agent Weight Split
+
+`settings.yaml` now reflects the production weight distribution (sums to 1.0):
+
+```yaml
+weights:
+  shipping:         0.25
+  market:           0.15
+  geopolitical:     0.25
+  natural_disaster: 0.10
+  routing:          0.15
+  news_sentiment:   0.10
+```
+
+`RiskEngine` auto-renormalises when any agent is toggled off via `agents.{name}.enabled: false`, so the orchestrator stays valid in any sub-configuration.
+
+### Test Coverage (Week 9)
+
+`tests/test_new_agents.py` — 27 new tests, all passing:
+
+| Layer | Per agent | Coverage |
+|---|---|---|
+| Connector — synthetic mode | 1-3 tests | Schema (8-9 columns), value ranges, disruption-day count, scenario placement (e.g. disaster-only-in-B, Scenarios A/C clean) |
+| Connector — CSV mode | 1 test | Round-trip via `save_raw()` + `load_csv()` on a tmp_path target |
+| Connector — API mode | 1 test | `NotImplementedError` raised |
+| Agent — detection | 1 test | Mean `anomaly_score` on disruption days > 1.5-2× normal mean |
+| Agent — output schema | 1 test | Window dicts contain `agent`, `anomaly_score`, `confidence`, `signals`, domain-specific extras, timestamps, location |
+| **6-agent integration** | 1 test | All six agents fit on synthetic data, fed to `RiskEngine.aggregate()`, per-day weighted composite ranks **Scenario B > Scenario A > normal** with Scenario B ≥ 0.40 |
+
+Full project: **135/135 tests passing.**
+
+### Configuration Additions (`config/settings.yaml`)
+
+```yaml
+agents:
+  geopolitical:
+    enabled: true
+    data_mode: "synthetic"
+    detection_method: "weighted_composite"
+    threshold: 0.5
+    lead_days: 3
+    weights: {sanctions: 0.35, military: 0.25, diplomatic: 0.25, stability: 0.15}
+  natural_disaster:
+    enabled: true
+    data_mode: "synthetic"
+    detection_method: "weighted_composite"
+    threshold: 0.30
+    single_event_threshold: 0.40
+    weights: {earthquake: 0.35, tsunami: 0.30, cyclone: 0.20, severe_weather: 0.15}
+    proximity:
+      center_lat: 26.5
+      center_lon: 56.5
+      full_weight_radius_km: 500
+      decay_radius_km: 1500
+  routing:
+    enabled: true
+    data_mode: "synthetic"
+    detection_method: "isolation_forest"
+    contamination: 0.08
+    threshold: 0.55
+    min_rerouting_pct: 10
+    model_version: "hormuz_v1.0"
+    lead_days: 2
+  news_sentiment:
+    enabled: true
+    data_mode: "synthetic"
+    detection_method: "sentiment_threshold"
+    negative_threshold: -0.30
+    consensus_threshold: 0.40
+    volume_spike_multiplier: 2.0
+    threshold: 0.40
+    weights: {sentiment: 0.40, consensus: 0.25, velocity: 0.20, volume: 0.15}
+    location_context:
+      primary_location: "Strait of Hormuz"
+      region: "Persian Gulf"
+      countries: ["Iran", "Oman", "UAE", "Saudi Arabia"]
+      topics: ["shipping", "oil", "tanker", "sanctions", "military", "blockade"]
+```
+
+(API sub-blocks for ACLED / USGS+Ambee / Kpler / NewsAPI+GDELT are present but blank — see `config/settings.yaml` for the full set.)
+
+### What's Next
+
+The new agents are not yet registered with the orchestrator's `run_full_pipeline()` — `python main.py` still drives the two-agent (shipping + market) path. Phase 2F will wire all six into the orchestrator, extend the SHAP explainer to the 6-agent feature space, expand the RAG knowledge base with cases relevant to the new signal types, and surface the new agent panels in the FastAPI endpoints and the dashboard.
 
 ---
 
