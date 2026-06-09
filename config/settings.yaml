@@ -41,11 +41,104 @@ agents:
     enabled: false
     detection_method: "zscore"
     z_threshold: 2.5
+  geopolitical:
+    enabled: true
+    data_mode: "synthetic"  # Options: "synthetic" | "csv" | "api"
+    detection_method: "weighted_composite"
+    threshold: 0.5
+    lead_days: 3
+    weights:
+      sanctions: 0.35
+      military: 0.25
+      diplomatic: 0.25
+      stability: 0.15
+    csv_path: "data/raw/geopolitical_events.csv"
+    api:
+      provider: "acled"
+      base_url: "https://api.acleddata.com/acled/read"
+      api_key: ""
+      refresh_interval_hours: 24
+  natural_disaster:
+    enabled: true
+    data_mode: "synthetic"
+    detection_method: "weighted_composite"
+    threshold: 0.30
+    single_event_threshold: 0.40
+    weights:
+      earthquake: 0.35
+      tsunami: 0.30
+      cyclone: 0.20
+      severe_weather: 0.15
+    proximity:
+      center_lat: 26.5
+      center_lon: 56.5
+      full_weight_radius_km: 500
+      decay_radius_km: 1500
+    csv_path: "data/raw/disaster_events.csv"
+    api:
+      usgs_url: "https://earthquake.usgs.gov/fdsnws/event/1/query"
+      ambee_url: "https://api.ambeedata.com/disasters/latest/by-lat-lng"
+      ambee_api_key: ""
+      refresh_interval_hours: 6
+  routing:
+    enabled: true
+    data_mode: "synthetic"
+    detection_method: "isolation_forest"
+    contamination: 0.08
+    threshold: 0.55
+    min_rerouting_pct: 10
+    model_version: "hormuz_v1.0"
+    lead_days: 2
+    weights:
+      model_score: 0.6
+      transit_zscore: 0.4
+    csv_path: "data/raw/routing_data.csv"
+    api:
+      provider: "kpler"
+      base_url: ""
+      api_key: ""
+      refresh_interval_hours: 12
+  news_sentiment:
+    enabled: true
+    data_mode: "synthetic"
+    detection_method: "sentiment_threshold"
+    negative_threshold: -0.30
+    consensus_threshold: 0.40
+    volume_spike_multiplier: 2.0
+    threshold: 0.40
+    weights:
+      sentiment: 0.40
+      consensus: 0.25
+      velocity: 0.20
+      volume: 0.15
+    location_context:
+      primary_location: "Strait of Hormuz"
+      region: "Persian Gulf"
+      countries: ["Iran", "Oman", "UAE", "Saudi Arabia"]
+      topics: ["shipping", "oil", "tanker", "sanctions", "military", "blockade"]
+    csv_path: "data/raw/news_sentiment.csv"
+    api:
+      news_provider: "newsapi"
+      newsapi_url: "https://newsapi.org/v2/everything"
+      newsapi_key: ""
+      gdelt_url: "https://api.gdeltproject.org/api/v2/doc/doc"
+      sentiment_model: "vader"
+      embedding_model: "all-MiniLM-L6-v2"
+      refresh_interval_hours: 6
+      recency_weights:
+        fresh_days: 2
+        fresh_weight: 1.0
+        recent_days: 7
+        recent_weight: 0.5
+        old_weight: 0.1
 
 weights:
-  shipping: 0.4
-  market: 0.3
-  geopolitical: 0.3
+  shipping: 0.25
+  market: 0.15
+  geopolitical: 0.25
+  natural_disaster: 0.10
+  routing: 0.15
+  news_sentiment: 0.10
 
 thresholds:
   risk_critical: 0.8
