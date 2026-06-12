@@ -105,13 +105,27 @@ def run_pipeline(mode: str | None = None) -> dict:
         populated (with ``LOW`` / 0.0 in degraded scenarios) so callers
         and the printed summary stay consistent.
     """
+    from src.agents.disaster_agent import DisasterAgent
+    from src.agents.geopolitical_agent import GeopoliticalAgent
     from src.agents.market_agent import MarketAgent
+    from src.agents.news_agent import NewsAgent
+    from src.agents.routing_agent import RoutingAgent
     from src.agents.shipping_agent import ShippingAgent
     from src.aggregation.risk_engine import RiskEngine, RiskLevel
     from src.orchestrator import Orchestrator
 
     logger = logging.getLogger(__name__)
     config = load_config()
+
+    # Config agent-name → agent class for the four single-domain agents. Each
+    # runs on its own connector's frame (fit → run_dataframe → result).
+    _DOMAIN_AGENTS = {
+        "geopolitical": GeopoliticalAgent,
+        "natural_disaster": DisasterAgent,
+        "routing": RoutingAgent,
+        "news_sentiment": NewsAgent,
+    }
+
     if mode is not None:
         ingestion = config.setdefault("ingestion", {})
         ingestion.setdefault("shipping", {})["source_mode"] = mode
@@ -121,6 +135,7 @@ def run_pipeline(mode: str | None = None) -> dict:
     orchestrator = Orchestrator(config=config)
 
     # -- a. INGEST -------------------------------------------------------
+    domain_frames: dict = {}
     try:
         shipping_df = orchestrator._safe_fetch(
             orchestrator._shipping_connector, "shipping"
@@ -149,6 +164,18 @@ def run_pipeline(mode: str | None = None) -> dict:
             "[main.ingest] combined rows=%d (shipping ⨝ aligned-market)",
             len(combined_df),
         )
+
+        # Single-domain connectors (geopolitical, disaster, routing, news).
+        for name in _DOMAIN_AGENTS:
+            if name not in orchestrator._domain_connectors:
+                continue
+            logger.info("[main.ingest] running %s connector…", name)
+            try:
+                frame = orchestrator.fetch_domain(name)
+                domain_frames[name] = frame
+                logger.info("[main.ingest] %s rows=%d", name, len(frame))
+            except Exception as exc:
+                logger.exception("[main.ingest/%s] connector failed: %s", name, exc)
     except Exception as exc:
         logger.exception("[main.ingest] failed: %s", exc)
         _print_summary(
@@ -183,6 +210,18 @@ def run_pipeline(mode: str | None = None) -> dict:
 
     detection_results = [r for r in (shipping_result, market_result) if r is not None]
 
+    # Single-domain agents — each scores its own connector frame.
+    agents_cfg = config.get("agents", {}) or {}
+    for name, agent_cls in _DOMAIN_AGENTS.items():
+        frame = domain_frames.get(name)
+        if frame is None:
+            continue
+        result = _run_domain_agent_safe(
+            agent_cls, agents_cfg.get(name, {}) or {}, frame, name, logger
+        )
+        if result is not None:
+            detection_results.append(result)
+
     # -- c. AGGREGATE ----------------------------------------------------
     try:
         engine = RiskEngine(config)
@@ -201,7 +240,7 @@ def run_pipeline(mode: str | None = None) -> dict:
             "agent_scores": {},
         }
 
-    # -- d. SUMMARY ------------------------------------------------------
+    # -- d. SUMMARY / OUTPUT --------------------------------------------
     _print_summary(
         composite_score=float(aggregated["composite_score"]),
         risk_level=aggregated["risk_level"],
@@ -297,6 +336,26 @@ def _run_agent_safe(agent, df, name: str, logger: logging.Logger):
         return 0, None
 
 
+def _run_domain_agent_safe(agent_cls, agent_cfg: dict, df, name: str, logger):
+    """Build + run a single-domain agent on its own frame.
+
+    Uses the proven ``fit → run_dataframe → to_detection_result`` path so the
+    output is RiskEngine-compatible. Returns the :class:`DetectionResult`, or
+    ``None`` if the agent raises (so one failing agent never aborts the run).
+    """
+    try:
+        agent = agent_cls(config=agent_cfg)
+        agent.fit(df)
+        validated = agent.run_dataframe(df)
+        result = agent.to_detection_result(validated)
+        n_flags = int(result.anomaly_flags.sum())
+        logger.info("[main.detect/%s] agent flagged %d anomalies", name, n_flags)
+        return result
+    except Exception as exc:
+        logger.exception("[main.detect/%s] agent failed: %s", name, exc)
+        return None
+
+
 def _print_summary(
     *,
     composite_score: float,
@@ -319,10 +378,15 @@ def _print_summary(
     level_str = (
         risk_level.value if hasattr(risk_level, "value") else str(risk_level)
     )
-    ship_score = float(agent_scores.get("shipping", 0.0))
-    mkt_score = float(agent_scores.get("market", 0.0))
-    ship_w = float(weights.get("shipping", 0.0))
-    mkt_w = float(weights.get("market", 0.0))
+    # Canonical agent order + compact display labels for the summary box.
+    display = [
+        ("shipping", "Shipping"),
+        ("market", "Market"),
+        ("geopolitical", "Geopolitical"),
+        ("natural_disaster", "Disaster"),
+        ("routing", "Routing"),
+        ("news_sentiment", "News"),
+    ]
     n_agents = len(agent_scores)
 
     lines = [
@@ -331,11 +395,17 @@ def _print_summary(
         "╠" + "═" * width + "╣",
         row(f"  Risk Score : {composite_score:.2f}"),
         row(f"  Risk Level : {level_str}"),
-        row(f"  Shipping   : {ship_score:.2f}  (w={ship_w:.2f})"),
-        row(f"  Market     : {mkt_score:.2f}  (w={mkt_w:.2f})"),
-        row(f"  Agreement  : {n_agents} agents"),
-        row(f"  Windows    : ship={shipping_windows} mkt={market_windows}"),
+        "╟" + "─" * width + "╢",
     ]
+    for key, label in display:
+        if key not in agent_scores:
+            continue
+        score = float(agent_scores[key])
+        w = float(weights.get(key, 0.0))
+        lines.append(row(f"  {label:<12}: {score:.2f}  (w={w:.2f})"))
+    lines.append("╟" + "─" * width + "╢")
+    lines.append(row(f"  Agents     : {n_agents}/6 contributing"))
+    lines.append(row(f"  Windows    : ship={shipping_windows} mkt={market_windows}"))
     if note:
         lines.append("╠" + "═" * width + "╣")
         for chunk in _wrap(note, width - 4):

@@ -10,3 +10,5 @@ pyyaml>=6.0
 plotly>=5.15
 pytest>=7.4
 httpx>=0.24
+nltk>=3.8
+streamlit>=1.28

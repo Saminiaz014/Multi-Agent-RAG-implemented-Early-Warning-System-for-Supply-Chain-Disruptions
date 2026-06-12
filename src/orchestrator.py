@@ -25,9 +25,26 @@ from typing import Any
 
 import pandas as pd
 
-from src.ingestion import MarketConnector, ShippingConnector
+from src.ingestion import (
+    DisasterConnector,
+    GeopoliticalConnector,
+    MarketConnector,
+    NewsConnector,
+    RoutingConnector,
+    ShippingConnector,
+)
 
 logger = logging.getLogger(__name__)
+
+# Config agent-name → connector class for the four event/domain agents that
+# each consume their own single-domain frame (unlike shipping+market, which
+# are merged onto a shared daily index).
+_DOMAIN_CONNECTORS: dict[str, type] = {
+    "geopolitical": GeopoliticalConnector,
+    "natural_disaster": DisasterConnector,
+    "routing": RoutingConnector,
+    "news_sentiment": NewsConnector,
+}
 
 
 class Orchestrator:
@@ -68,10 +85,26 @@ class Orchestrator:
             source_mode=self._market_mode, config=market_cfg
         )
 
+        # Own the four single-domain connectors (geopolitical, natural
+        # disaster, routing, news). Each is config-driven via its
+        # ``agents.<name>`` block (``data_mode`` / ``csv_path``) and only
+        # built when that agent is enabled, so a disabled agent is never
+        # ingested or detected.
+        agents_cfg = config.get("agents", {}) or {}
+        self._domain_connectors: dict[str, Any] = {}
+        for name, connector_cls in _DOMAIN_CONNECTORS.items():
+            agent_cfg = agents_cfg.get(name, {}) or {}
+            if not agent_cfg.get("enabled", True):
+                logger.info("Domain agent '%s' disabled — connector skipped.", name)
+                continue
+            self._domain_connectors[name] = connector_cls(config=agent_cfg)
+
         logger.info(
-            "Orchestrator initialised | shipping_mode='%s' | market_mode='%s'",
+            "Orchestrator initialised | shipping_mode='%s' | market_mode='%s' "
+            "| domain_connectors=%s",
             self._shipping_mode,
             self._market_mode,
+            list(self._domain_connectors.keys()),
         )
 
     # ------------------------------------------------------------------
@@ -353,6 +386,37 @@ class Orchestrator:
                 exc,
             )
             connector.source_mode = "synthetic"
+            return connector.fetch()
+
+    def fetch_domain(self, name: str) -> pd.DataFrame:
+        """Fetch a single-domain frame, falling back to synthetic on failure.
+
+        Mirrors :meth:`_safe_fetch` for the four event/domain connectors,
+        which select their mode via ``data_mode`` (rather than ``source_mode``)
+        and each return their own single-domain DataFrame.
+
+        Args:
+            name: Config agent name — one of ``geopolitical``,
+                ``natural_disaster``, ``routing``, ``news_sentiment``.
+
+        Returns:
+            The connector's fetched DataFrame.
+
+        Raises:
+            KeyError: If ``name`` is not an owned (enabled) domain connector.
+        """
+        connector = self._domain_connectors[name]
+        try:
+            return connector.fetch()
+        except (FileNotFoundError, ValueError) as exc:
+            logger.warning(
+                "[Orchestrator] %s connector failed in data_mode='%s' (%s) — "
+                "falling back to synthetic.",
+                name,
+                getattr(connector, "data_mode", "?"),
+                exc,
+            )
+            connector.data_mode = "synthetic"
             return connector.fetch()
 
     def _warn_if_market_coverage_short(

@@ -1,5 +1,4 @@
-"""Tests for the Phase 2B-2E connectors and agents.
-
+"""
 Covers, per agent (geopolitical, natural_disaster, routing, news_sentiment):
 
 1. Connector synthetic mode — schema, ranges, disruption-day count.
@@ -102,11 +101,9 @@ class TestGeopoliticalAgent:
         agent.fit(df)
         validated = agent.run_dataframe(df)
         normal_mean = validated.loc[
-            ~df["is_disruption"].values, "anomaly_score"
-        ].mean()
+            ~df["is_disruption"], "anomaly_score"].mean()
         disrupted_mean = validated.loc[
-            df["is_disruption"].values, "anomaly_score"
-        ].mean()
+            df["is_disruption"], "anomaly_score"].mean()
         print(
             f"\n[geo] anomaly_score: normal={normal_mean:.3f} "
             f"disruption={disrupted_mean:.3f}"
@@ -151,7 +148,8 @@ class TestDisasterConnector:
     def test_synthetic_scenario_b_only(self) -> None:
         """Only the Scenario-B window (days 148+) should carry the earthquake."""
         df = DisasterConnector().fetch()
-        disrupt_idx = np.where(df["is_disruption"].values)[0]
+        # convert to numpy array to satisfy type checkers that expect ArrayLike
+        disrupt_idx = np.where(df["is_disruption"].to_numpy())[0]
         assert len(disrupt_idx) > 0
         # All disruption days fall in [_QUAKE_DAY, _QUAKE_DAY + 7]
         assert disrupt_idx.min() >= 145
