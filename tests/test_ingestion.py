@@ -130,10 +130,12 @@ class TestShippingCsvMode:
         df = csv_connector.load_from_csv()
         normal = df.loc[~df["is_disruption"], "vessel_count"].to_numpy(dtype=float)
         disrupted = df.loc[df["is_disruption"], "vessel_count"].to_numpy(dtype=float)
-        t_stat, p_val = _stats.ttest_ind(normal, disrupted, equal_var=False)
+        result = _stats.ttest_ind(normal, disrupted, equal_var=False)
+        t_stat = float(result.statistic)
+        p_val = float(result.pvalue)
         print(
-            f"\n[test/csv] vessel_count Welch t={float(t_stat):.2f}, "
-            f"p={float(p_val):.2e}, n_normal={len(normal)}, n_dis={len(disrupted)}"
+            f"\n[test/csv] vessel_count Welch t={t_stat:.2f}, "
+            f"p={p_val:.2e}, n_normal={len(normal)}, n_dis={len(disrupted)}"
         )
         assert p_val < 0.05
 
@@ -502,8 +504,8 @@ def test_market_mean_reversion_after_window(
     """Freight index must decay back toward baseline after the window ends."""
     market = market_connector.generate_dataset(days=365, seed=42)
     end_day = 170
-    elevated = market.loc[end_day, "freight_rate_index"]
-    settled = market.loc[end_day + 15, "freight_rate_index"]
+    elevated = float(market.loc[end_day, "freight_rate_index"])
+    settled = float(market.loc[end_day + 15, "freight_rate_index"])
     baseline_band_top = 130.0
     assert elevated > settled, "Freight index should decay after the window closes."
     assert settled < baseline_band_top, (
@@ -627,9 +629,7 @@ class TestMarketCsvMode:
         """Trailing 2-year freight index should sit close to 100 after rebasing."""
         df = market_csv_connector.load_from_csv()
         recent_cutoff = df["timestamp"].max() - pd.Timedelta(days=365 * 2)
-        recent = df.loc[
-            df["timestamp"] >= recent_cutoff, "freight_rate_index"
-        ].dropna()
+        recent = df["freight_rate_index"][df["timestamp"] >= recent_cutoff].dropna()
         assert recent.mean() == pytest.approx(100.0, rel=0.05)
 
     def test_csv_mode_date_range_filter(

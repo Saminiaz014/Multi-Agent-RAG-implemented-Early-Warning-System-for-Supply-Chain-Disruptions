@@ -179,6 +179,8 @@ class RiskEngine:
             Dictionary with keys:
                 - ``risk_score`` (float): amplified composite risk in [0, 1].
                 - ``risk_level`` (str): ``"high"`` / ``"medium"`` / ``"low"``.
+                - ``reason`` (str): human-readable explanation of what is
+                  driving the score, for downstream API / dashboard consumers.
                 - ``contributing_agents`` (dict): per-agent
                   ``{"score", "weight", "contribution"}`` (pre-amplification).
                 - ``agent_agreement`` (int): agents scoring above the
@@ -215,6 +217,7 @@ class RiskEngine:
             return {
                 "risk_score": 0.0,
                 "risk_level": "low",
+                "reason": "No active agents contributed signals; risk defaults to LOW.",
                 "contributing_agents": {},
                 "agent_agreement": 0,
                 "timestamp": timestamp,
@@ -239,27 +242,43 @@ class RiskEngine:
                 "contribution": round(contribution, 6),
             }
 
+        # Pre-amplification weighted sum, kept for the explanation breakdown.
+        base_sum = base_risk
+
         # Non-linear agreement bonus: corroboration across independent agents
         # raises confidence beyond the linear weighted sum.
         agreement = sum(1 for s in scores.values() if s > _AGREEMENT_THRESHOLD)
+        amplification = 1.0
         if agreement >= 5:
-            base_risk *= _AGREEMENT_BONUS_5PLUS
+            amplification = _AGREEMENT_BONUS_5PLUS
         elif agreement >= 3:
-            base_risk *= _AGREEMENT_BONUS_3PLUS
+            amplification = _AGREEMENT_BONUS_3PLUS
+        base_risk *= amplification
 
         risk_score = float(min(base_risk, 1.0))
         risk_level = self.classify_risk(risk_score)
 
+        reason = self._build_reason(
+            risk_level=risk_level,
+            contributing=contributing,
+            scores=scores,
+            base_sum=base_sum,
+            agreement=agreement,
+            amplification=amplification,
+        )
+
         logger.info(
-            "compute_risk | score=%.4f | level=%s | active=%d | agreement=%d",
+            "compute_risk | score=%.4f | level=%s | active=%d | agreement=%d | %s",
             risk_score,
             risk_level,
             active,
             agreement,
+            reason,
         )
         return {
             "risk_score": risk_score,
             "risk_level": risk_level,
+            "reason": reason,
             "contributing_agents": contributing,
             "agent_agreement": agreement,
             "timestamp": timestamp,
@@ -268,6 +287,80 @@ class RiskEngine:
                 "weights_used": {n: round(w, 6) for n, w in norm_weights.items()},
             },
         }
+
+    @staticmethod
+    def _build_reason(
+        *,
+        risk_level: str,
+        contributing: dict[str, dict[str, float]],
+        scores: dict[str, float],
+        base_sum: float,
+        agreement: int,
+        amplification: float,
+    ) -> str:
+        """Build a human-readable explanation of what drives the risk score.
+
+        Names the agents contributing most of the weighted risk, flags how
+        many independent agents corroborate the disruption, and notes any
+        agreement amplification — so a downstream analyst can see *why* the
+        score landed where it did, not just the number.
+
+        Args:
+            risk_level: Final ``"high"`` / ``"medium"`` / ``"low"`` label.
+            contributing: Per-agent ``{"score", "weight", "contribution"}``.
+            scores: Per-agent mean anomaly score.
+            base_sum: Pre-amplification weighted sum (sum of contributions).
+            agreement: Count of agents above the agreement threshold.
+            amplification: Agreement multiplier applied (1.0 / 1.15 / 1.25).
+
+        Returns:
+            One-sentence explanation string.
+        """
+        if not contributing:
+            return "No active agents contributed signals; risk defaults to LOW."
+
+        # Rank agents by their share of the weighted risk.
+        ranked = sorted(
+            contributing.items(),
+            key=lambda kv: kv[1]["contribution"],
+            reverse=True,
+        )
+        lead_name, lead_info = ranked[0]
+        share = (lead_info["contribution"] / base_sum * 100.0) if base_sum > 0 else 0.0
+
+        parts = [f"{risk_level.upper()} risk."]
+        parts.append(
+            f"Primary driver: {lead_name} "
+            f"(mean anomaly {lead_info['score']:.2f}, "
+            f"{share:.0f}% of weighted risk)."
+        )
+
+        # Name up to two supporting agents that are actually elevated.
+        supporting = [
+            f"{name} ({info['score']:.2f})"
+            for name, info in ranked[1:4]
+            if info["score"] > _AGREEMENT_THRESHOLD
+        ]
+        if supporting:
+            parts.append(f"Supporting signals: {', '.join(supporting)}.")
+
+        if agreement >= 3:
+            bonus_pct = int(round((amplification - 1.0) * 100))
+            parts.append(
+                f"{agreement} agents corroborate "
+                f"(+{bonus_pct}% agreement amplification)."
+            )
+        elif agreement > 0:
+            parts.append(
+                f"{agreement} agent(s) above the alert threshold "
+                f"({_AGREEMENT_THRESHOLD:.2f})."
+            )
+        else:
+            parts.append(
+                "No agent exceeded the alert threshold; score reflects "
+                "low-level background signals only."
+            )
+        return " ".join(parts)
 
     def compute_risk_timeseries(
         self, all_outputs_by_day: dict[str, list[DetectionResult]]

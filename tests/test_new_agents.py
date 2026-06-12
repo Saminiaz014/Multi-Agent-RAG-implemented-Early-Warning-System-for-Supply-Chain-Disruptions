@@ -249,8 +249,10 @@ class TestRoutingAgent:
         agent = RoutingAgent()
         agent.fit(df)
         validated = agent.run_dataframe(df)
-        normal = validated.loc[~df["is_disruption"].values, "anomaly_score"].mean()
-        disrupt = validated.loc[df["is_disruption"].values, "anomaly_score"].mean()
+        mask = df["is_disruption"].to_numpy(dtype=bool)
+        scores = validated["anomaly_score"]
+        normal = float(scores[~mask].mean())
+        disrupt = float(scores[mask].mean())
         print(f"\n[routing] anomaly_score: normal={normal:.3f} disruption={disrupt:.3f}")
         assert disrupt > normal * 1.5
 
@@ -316,8 +318,10 @@ class TestNewsAgent:
         agent = NewsAgent()
         agent.fit(df)
         validated = agent.run_dataframe(df)
-        normal = validated.loc[~df["is_disruption"].values, "anomaly_score"].mean()
-        disrupt = validated.loc[df["is_disruption"].values, "anomaly_score"].mean()
+        mask = df["is_disruption"].to_numpy(dtype=bool)
+        scores = validated["anomaly_score"]
+        normal = float(scores[~mask].mean())
+        disrupt = float(scores[mask].mean())
         print(f"\n[news] anomaly_score: normal={normal:.3f} disruption={disrupt:.3f}")
         assert disrupt > normal * 1.5
 
