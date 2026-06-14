@@ -71,6 +71,23 @@ class RoutingAgent(BaseAgent):
         self._transit_mean: float = 0.0
         self._transit_std: float = 1.0
 
+    def set_weights(self, model_score: float, transit_zscore: float) -> None:
+        """Override the Isolation-Forest / transit-z blend, normalised to 1.0.
+
+        Args:
+            model_score: Raw weight on the normalised Isolation-Forest score.
+            transit_zscore: Raw weight on the transit-volume z-score signal.
+        """
+        total = model_score + transit_zscore
+        if total <= 0:
+            raise ValueError("RoutingAgent.set_weights: weights must sum to > 0.")
+        self._w_model = model_score / total
+        self._w_z = transit_zscore / total
+
+    def set_threshold(self, threshold: float) -> None:
+        """Override the minimum combined score to flag a row anomalous."""
+        self._threshold = float(threshold)
+
     # ----------------------------------------------------------------- fit
     def fit(self, df: pd.DataFrame) -> None:
         """Train the baseline model on non-disruption rows."""

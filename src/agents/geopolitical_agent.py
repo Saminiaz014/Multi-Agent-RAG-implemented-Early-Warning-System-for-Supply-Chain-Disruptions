@@ -59,6 +59,35 @@ class GeopoliticalAgent(BaseAgent):
         self._location: str = str(self.config.get("location") or _LOCATION)
         self._feature_columns = list(_FEATURE_COLUMNS)
 
+    def set_weights(
+        self,
+        sanctions: float,
+        military: float,
+        diplomatic: float,
+        stability: float,
+    ) -> None:
+        """Override the composite weights, normalised to sum to 1.0.
+
+        Args:
+            sanctions: Raw weight on sanctions severity.
+            military: Raw weight on military-activity index.
+            diplomatic: Raw weight on diplomatic-incident score.
+            stability: Raw weight on (inverted) regime-stability index.
+        """
+        total = sanctions + military + diplomatic + stability
+        if total <= 0:
+            raise ValueError("GeopoliticalAgent.set_weights: weights must sum to > 0.")
+        self._weights = {
+            "sanctions": sanctions / total,
+            "military": military / total,
+            "diplomatic": diplomatic / total,
+            "stability": stability / total,
+        }
+
+    def set_threshold(self, threshold: float) -> None:
+        """Override the composite-score cutoff for flagging a row."""
+        self._threshold = float(threshold)
+
     # ----------------------------------------------------------------- fit
     def fit(self, df: pd.DataFrame) -> None:
         """Schema check only; weighted composite has no learned parameters."""

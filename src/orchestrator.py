@@ -67,6 +67,19 @@ class Orchestrator:
         self.config = config
         self._agents: list[Any] = []
 
+        # Resolve the active weight source once. In "optimized" mode this loads
+        # config/optimized_weights.yaml; a missing/invalid file logs a warning
+        # and transparently falls back to the hand-tuned settings.yaml values.
+        from src.optimization.weight_config import resolve_active_weights
+
+        self._weight_mode: str = str(config.get("weight_mode", "hand_tuned")).lower()
+        self._weight_layout: dict = resolve_active_weights(config)
+        logger.info(
+            "[Orchestrator] weight_mode='%s' (active source='%s')",
+            self._weight_mode,
+            self._weight_layout.get("source", "hand_tuned"),
+        )
+
         ingestion_cfg = config.get("ingestion", {}) or {}
         shipping_cfg = dict(ingestion_cfg.get("shipping", {}) or {})
         market_cfg = dict(ingestion_cfg.get("market", {}) or {})
@@ -118,6 +131,18 @@ class Orchestrator:
             agent: A fitted :class:`~src.agents.base_agent.BaseAgent` instance.
         """
         self._agents.append(agent)
+        # Inject the active weight set so registered agents honour weight_mode.
+        try:
+            from src.optimization.weight_config import apply_weights_to_agent
+
+            if apply_weights_to_agent(agent, self._weight_layout):
+                logger.debug(
+                    "Applied '%s' weights to agent: %s",
+                    self._weight_layout.get("source", "hand_tuned"),
+                    agent.name,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to apply weights to %s: %s", agent.name, exc)
         logger.debug("Registered agent: %s", agent.name)
 
     # ------------------------------------------------------------------

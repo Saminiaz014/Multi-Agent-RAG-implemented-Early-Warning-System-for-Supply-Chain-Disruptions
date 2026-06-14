@@ -63,6 +63,41 @@ class DisasterAgent(BaseAgent):
         self._location: str = str(self.config.get("location") or _LOCATION)
         self._feature_columns = list(_FEATURE_COLUMNS)
 
+    def set_weights(
+        self,
+        earthquake: float,
+        tsunami: float,
+        cyclone: float,
+        weather: float,
+    ) -> None:
+        """Override the composite weights, normalised to sum to 1.0.
+
+        Args:
+            earthquake: Raw weight on earthquake severity.
+            tsunami: Raw weight on tsunami risk.
+            cyclone: Raw weight on cyclone severity.
+            weather: Raw weight on the severe-weather index.
+        """
+        total = earthquake + tsunami + cyclone + weather
+        if total <= 0:
+            raise ValueError("DisasterAgent.set_weights: weights must sum to > 0.")
+        self._weights = {
+            "earthquake": earthquake / total,
+            "tsunami": tsunami / total,
+            "cyclone": cyclone / total,
+            "severe_weather": weather / total,
+        }
+
+    def set_threshold(
+        self,
+        threshold: float,
+        single_event_threshold: float | None = None,
+    ) -> None:
+        """Override the composite cutoff (and optionally single-event cutoff)."""
+        self._composite_threshold = float(threshold)
+        if single_event_threshold is not None:
+            self._single_event_threshold = float(single_event_threshold)
+
     # ----------------------------------------------------------------- fit
     def fit(self, df: pd.DataFrame) -> None:
         missing = [c for c in self._feature_columns if c not in df.columns]

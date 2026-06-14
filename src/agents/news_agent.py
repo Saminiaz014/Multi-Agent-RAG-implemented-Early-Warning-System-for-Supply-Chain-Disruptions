@@ -74,6 +74,53 @@ class NewsAgent(BaseAgent):
         self._location: str = str(self.config.get("location") or _LOCATION)
         self._feature_columns = list(_FEATURE_COLUMNS)
 
+    def set_weights(
+        self,
+        sentiment: float,
+        consensus: float,
+        velocity: float,
+        volume: float,
+    ) -> None:
+        """Override the composite weights, normalised to sum to 1.0.
+
+        Args:
+            sentiment: Raw weight on normalised negative sentiment.
+            consensus: Raw weight on source consensus.
+            velocity: Raw weight on (negative) sentiment velocity.
+            volume: Raw weight on the article-volume spike factor.
+        """
+        total = sentiment + consensus + velocity + volume
+        if total <= 0:
+            raise ValueError("NewsAgent.set_weights: weights must sum to > 0.")
+        self._weights = {
+            "sentiment": sentiment / total,
+            "consensus": consensus / total,
+            "velocity": velocity / total,
+            "volume": volume / total,
+        }
+
+    def set_threshold(
+        self,
+        threshold: float | None = None,
+        *,
+        negative_threshold: float | None = None,
+        consensus_threshold: float | None = None,
+    ) -> None:
+        """Override the composite cutoff and/or the validation gates.
+
+        Args:
+            threshold: Composite anomaly-score cutoff.
+            negative_threshold: Recency-weighted sentiment must be ``<=`` this
+                to validate (more negative = more disruptive).
+            consensus_threshold: Source consensus must be ``>=`` this to validate.
+        """
+        if threshold is not None:
+            self._threshold = float(threshold)
+        if negative_threshold is not None:
+            self._neg_threshold = float(negative_threshold)
+        if consensus_threshold is not None:
+            self._consensus_threshold = float(consensus_threshold)
+
     # ----------------------------------------------------------------- fit
     def fit(self, df: pd.DataFrame) -> None:
         missing = [c for c in self._feature_columns if c not in df.columns]

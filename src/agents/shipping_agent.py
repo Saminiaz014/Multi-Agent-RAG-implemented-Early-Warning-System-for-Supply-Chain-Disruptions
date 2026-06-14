@@ -105,9 +105,30 @@ class ShippingAgent(BaseAgent):
         self._contamination: float = float(self.config.get("contamination", 0.1))
         self._threshold: float = float(self.config.get("threshold", 0.65))
         self._z_threshold: float = float(self.config.get("z_threshold", 3.0))
+        # Isolation-Forest vs Z-score blend for the combined anomaly score.
+        # Hand-tuned default is 0.70 / 0.30; the optimizer can retune it.
+        weights_cfg = self.config.get("weights") or {}
+        self._if_weight: float = float(weights_cfg.get("isolation_forest", 0.70))
+        self._zscore_weight: float = float(weights_cfg.get("zscore", 0.30))
         self._resolved_location: str = str(
             self.config.get("location") or _DEFAULT_LOCATION
         )
+
+    def set_weights(self, if_weight: float, zscore_weight: float) -> None:
+        """Override the Isolation-Forest / Z-score blend weights.
+
+        Args:
+            if_weight: Weight on the normalised Isolation-Forest score.
+            zscore_weight: Weight on the normalised max-|z| fallback score.
+                The two are used as given (no internal renormalisation), so
+                pass values that sum to 1.0 for a convex blend.
+        """
+        self._if_weight = float(if_weight)
+        self._zscore_weight = float(zscore_weight)
+
+    def set_threshold(self, threshold: float) -> None:
+        """Override the minimum combined score to flag a row anomalous."""
+        self._threshold = float(threshold)
 
     # ------------------------------------------------------------------ fit
     def fit(self, df: pd.DataFrame) -> None:
@@ -243,7 +264,7 @@ class ShippingAgent(BaseAgent):
         max_abs_z = np.max(np.abs(scaled), axis=1)
         max_z_norm = np.minimum(max_abs_z / self._z_threshold, 1.0)
 
-        combined = 0.7 * iforest_norm + 0.3 * max_z_norm
+        combined = self._if_weight * iforest_norm + self._zscore_weight * max_z_norm
 
         out = data.copy()
         for idx, feat in enumerate(active):

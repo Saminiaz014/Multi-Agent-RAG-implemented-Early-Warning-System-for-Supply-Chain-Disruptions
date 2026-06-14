@@ -141,6 +141,48 @@ class MarketAgent(BaseAgent):
         self._resolved_location: str = str(
             self.config.get("location") or _DEFAULT_LOCATION
         )
+        # Optional override of the three base feature weights (oil / trade /
+        # freight). When set, it replaces the module-level schedule; the
+        # optional freight-services weight keeps its default share.
+        self._weight_override: dict[str, float] | None = None
+        weights_cfg = self.config.get("weights") or {}
+        if {"oil", "trade_volume", "freight"} & set(weights_cfg):
+            self.set_weights(
+                float(weights_cfg.get("oil", 0.40)),
+                float(weights_cfg.get("trade_volume", 0.35)),
+                float(weights_cfg.get("freight", 0.25)),
+            )
+
+    def set_weights(self, oil: float, trade_volume: float, freight: float) -> None:
+        """Override the oil / trade-volume / freight feature weights.
+
+        Values are normalised to sum to 1.0 across the three base features.
+        When the optional FRED ``freight_services_pct_change`` feature is
+        active, the three base weights are scaled to occupy 0.85 of the mass
+        and the freight-services feature keeps a fixed 0.15 share (mirroring
+        the hand-tuned 4-feature schedule).
+
+        Args:
+            oil: Raw weight on the Brent-crude z-score.
+            trade_volume: Raw weight on the trade-volume z-score.
+            freight: Raw weight on the freight-rate z-score.
+        """
+        total = oil + trade_volume + freight
+        if total <= 0:
+            raise ValueError("MarketAgent.set_weights: weights must sum to > 0.")
+        self._weight_override = {
+            "brent_crude_usd": oil / total,
+            "trade_volume_index": trade_volume / total,
+            "freight_rate_index": freight / total,
+        }
+
+    def set_threshold(self, threshold: float) -> None:
+        """Override the minimum combined score to flag a row anomalous."""
+        self._threshold = float(threshold)
+
+    def set_z_threshold(self, z_threshold: float) -> None:
+        """Override the per-feature absolute z-score elevation threshold."""
+        self._z_threshold = float(z_threshold)
 
     # ------------------------------------------------------------------ fit
     def fit(self, df: pd.DataFrame) -> None:
@@ -531,6 +573,16 @@ class MarketAgent(BaseAgent):
 
     def _feature_weights(self) -> dict[str, float]:
         """Return the per-feature weights for the current active set."""
+        if self._weight_override is not None:
+            base = dict(self._weight_override)
+            if _OPTIONAL_FREIGHT_SERVICES in self._extra_features:
+                # Reserve a fixed 0.15 share for freight-services, scale the
+                # three base weights into the remaining 0.85.
+                fs_share = _FEATURE_WEIGHTS_4[_OPTIONAL_FREIGHT_SERVICES]
+                scale = 1.0 - fs_share
+                base = {k: v * scale for k, v in base.items()}
+                base[_OPTIONAL_FREIGHT_SERVICES] = fs_share
+            return base
         if _OPTIONAL_FREIGHT_SERVICES in self._extra_features:
             return dict(_FEATURE_WEIGHTS_4)
         return dict(_FEATURE_WEIGHTS_3)

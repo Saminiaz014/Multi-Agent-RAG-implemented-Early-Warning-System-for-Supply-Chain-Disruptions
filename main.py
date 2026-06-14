@@ -83,6 +83,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Start the FastAPI HTTP service instead of running the pipeline.",
     )
+    parser.add_argument(
+        "--optimize",
+        action="store_true",
+        help="Run Optuna weight optimization (train/val/test split) and write "
+        "config/optimized_weights.yaml + data/processed/optimization_results.json.",
+    )
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=None,
+        help="Override optimization.n_trials for this --optimize run.",
+    )
     return parser.parse_args()
 
 
@@ -194,12 +206,28 @@ def run_pipeline(mode: str | None = None) -> dict:
         }
 
     # -- b. DETECT -------------------------------------------------------
+    # Resolve the active weight layout (honours weight_mode). In "optimized"
+    # mode this injects the Optuna-tuned intra-agent weights + thresholds; in
+    # "hand_tuned" mode it re-applies the settings.yaml defaults (a no-op on
+    # behaviour, but keeps both paths identical).
+    from src.optimization.weight_config import (
+        apply_weights_to_agent,
+        resolve_active_weights,
+    )
+
+    weight_layout = resolve_active_weights(config)
+    logger.info(
+        "[main.detect] weight source: %s", weight_layout.get("source", "hand_tuned")
+    )
+
     shipping_agent = ShippingAgent(
         config={"contamination": 0.05, "threshold": 0.55, "z_threshold": 2.0}
     )
     market_agent = MarketAgent(
         config={"z_threshold": 1.5, "threshold": 0.50, "baseline_years": 5}
     )
+    for _agent in (shipping_agent, market_agent):
+        apply_weights_to_agent(_agent, weight_layout)
 
     shipping_windows, shipping_result = _run_agent_safe(
         shipping_agent, combined_df, "shipping", logger
@@ -217,7 +245,8 @@ def run_pipeline(mode: str | None = None) -> dict:
         if frame is None:
             continue
         result = _run_domain_agent_safe(
-            agent_cls, agents_cfg.get(name, {}) or {}, frame, name, logger
+            agent_cls, agents_cfg.get(name, {}) or {}, frame, name, logger,
+            weight_layout=weight_layout,
         )
         if result is not None:
             detection_results.append(result)
@@ -250,6 +279,63 @@ def run_pipeline(mode: str | None = None) -> dict:
         market_windows=market_windows,
     )
     return aggregated
+
+
+def run_optimization(n_trials: int | None = None) -> dict:
+    """Run Optuna weight optimization end-to-end.
+
+    Generates the train/val/test splits, tunes all three weight layers on
+    train→validation, evaluates the best weights once on the held-out test
+    split, and persists ``config/optimized_weights.yaml`` plus
+    ``data/processed/optimization_results.json``. Flip ``weight_mode`` to
+    ``"optimized"`` in ``config/settings.yaml`` afterwards to use the result.
+
+    Args:
+        n_trials: Optional override for ``optimization.n_trials``.
+
+    Returns:
+        The results dict from
+        :meth:`~src.optimization.weight_optimizer.WeightOptimizer.optimize`.
+    """
+    import optuna
+
+    from src.optimization.data_split import DataSplitManager
+    from src.optimization.weight_optimizer import WeightOptimizer
+
+    logger = logging.getLogger(__name__)
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    config = load_config()
+
+    print("Generating train/validation/test splits (seeds 42/43/44)…")
+    data_manager = DataSplitManager(config)
+    data_manager.generate_splits()
+    data_manager.validate_splits()
+
+    optimizer = WeightOptimizer(config, data_manager=data_manager)
+    trials = n_trials if n_trials is not None else optimizer.n_trials
+    print(f"Running Optuna optimization ({trials} trials)…")
+    results = optimizer.optimize(n_trials=trials)
+
+    # Render analysis figures (best-effort — never fail the run on a plot error).
+    try:
+        from src.optimization.optimization_analysis import generate_optimization_report
+
+        figures = generate_optimization_report(optimizer, results)
+        print(f"Wrote {len(figures)} analysis figure(s) to data/processed/.")
+    except Exception as exc:  # pragma: no cover - visualisation is optional
+        logger.warning("[main.optimize] figure generation failed: %s", exc)
+
+    logger.info(
+        "[main.optimize] best trial %d | val objective %.4f | test F1 %.3f",
+        results["best_trial"],
+        results["best_objective_value"],
+        results["test_metrics"]["f1"],
+    )
+    print(
+        "\nOptimization complete. Set weight_mode: \"optimized\" in "
+        "config/settings.yaml to use the tuned weights."
+    )
+    return results
 
 
 def start_api_server() -> None:
@@ -285,7 +371,9 @@ def main() -> None:
     logger.info("Pipeline initialized")
     print("Pipeline initialized")
 
-    if args.serve:
+    if args.optimize:
+        run_optimization(n_trials=args.trials)
+    elif args.serve:
         start_api_server()
     else:
         run_pipeline(mode=args.mode)
@@ -336,15 +424,23 @@ def _run_agent_safe(agent, df, name: str, logger: logging.Logger):
         return 0, None
 
 
-def _run_domain_agent_safe(agent_cls, agent_cfg: dict, df, name: str, logger):
+def _run_domain_agent_safe(
+    agent_cls, agent_cfg: dict, df, name: str, logger, weight_layout: dict | None = None
+):
     """Build + run a single-domain agent on its own frame.
 
     Uses the proven ``fit → run_dataframe → to_detection_result`` path so the
     output is RiskEngine-compatible. Returns the :class:`DetectionResult`, or
     ``None`` if the agent raises (so one failing agent never aborts the run).
+    When ``weight_layout`` is supplied, the active (optimized or hand-tuned)
+    weights are injected before fitting.
     """
     try:
         agent = agent_cls(config=agent_cfg)
+        if weight_layout is not None:
+            from src.optimization.weight_config import apply_weights_to_agent
+
+            apply_weights_to_agent(agent, weight_layout)
         agent.fit(df)
         validated = agent.run_dataframe(df)
         result = agent.to_detection_result(validated)

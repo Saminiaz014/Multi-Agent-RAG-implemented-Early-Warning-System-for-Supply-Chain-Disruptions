@@ -48,10 +48,86 @@ class RiskEngine:
     """
 
     def __init__(self, config: dict) -> None:
-        self.weights: dict[str, float] = config.get("weights", {})
+        self.config = config
+        self.weights: dict[str, float] = dict(config.get("weights", {}))
         self.threshold_critical: float = config["thresholds"]["risk_critical"]
         self.threshold_high: float = config["thresholds"]["risk_high"]
         self.threshold_medium: float = config["thresholds"]["risk_medium"]
+        # Agreement amplification multipliers — instance attributes so the
+        # optimizer (and the optimized-weights file) can override them.
+        thresholds = config.get("thresholds", {}) or {}
+        self.agreement_bonus_3: float = float(
+            thresholds.get("agreement_bonus_3", _AGREEMENT_BONUS_3PLUS)
+        )
+        self.agreement_bonus_5: float = float(
+            thresholds.get("agreement_bonus_5", _AGREEMENT_BONUS_5PLUS)
+        )
+
+        # In "optimized" mode, replace the hand-tuned inter-agent weights and
+        # agreement bonuses with the values produced by Optuna. Falls back to
+        # the hand-tuned config when the optimized file is missing/invalid.
+        if str(config.get("weight_mode", "hand_tuned")).lower() == "optimized":
+            self._apply_optimized_weights()
+
+        self._validate_weights()
+
+    def _apply_optimized_weights(self) -> None:
+        """Load inter-agent weights + agreement bonuses from the Optuna file."""
+        from src.optimization.weight_config import load_optimized_weights
+
+        optimized = load_optimized_weights(self.config)
+        if not optimized:
+            logger.warning(
+                "weight_mode='optimized' but no optimized weights available — "
+                "RiskEngine falling back to hand-tuned weights."
+            )
+            return
+        inter = optimized.get("inter_agent_weights") or {}
+        if inter:
+            self.weights = {k: float(v) for k, v in inter.items()}
+        thr = optimized.get("thresholds") or {}
+        if "risk_high" in thr:
+            self.threshold_high = float(thr["risk_high"])
+        if "risk_medium" in thr:
+            self.threshold_medium = float(thr["risk_medium"])
+        if "agreement_bonus_3" in thr:
+            self.agreement_bonus_3 = float(thr["agreement_bonus_3"])
+        if "agreement_bonus_5" in thr:
+            self.agreement_bonus_5 = float(thr["agreement_bonus_5"])
+        logger.info("[RiskEngine] applied optimized inter-agent weights + thresholds.")
+
+    def set_weights(
+        self,
+        weights: dict[str, float],
+        *,
+        agreement_bonus_3: float | None = None,
+        agreement_bonus_5: float | None = None,
+        risk_high: float | None = None,
+        risk_medium: float | None = None,
+    ) -> None:
+        """Override the inter-agent weights (and optionally thresholds).
+
+        Used by :class:`~src.optimization.weight_optimizer.WeightOptimizer`
+        to inject a trial's proposed Layer-2 weights and Layer-3 thresholds
+        without rebuilding the engine.
+
+        Args:
+            weights: Mapping of agent name → weight. Need not sum to 1.0;
+                :meth:`compute_risk` renormalises across active agents.
+            agreement_bonus_3: Optional 3-agent agreement multiplier.
+            agreement_bonus_5: Optional 5-agent agreement multiplier.
+            risk_high: Optional HIGH risk-level threshold.
+            risk_medium: Optional MEDIUM risk-level threshold.
+        """
+        self.weights = {k: float(v) for k, v in weights.items()}
+        if agreement_bonus_3 is not None:
+            self.agreement_bonus_3 = float(agreement_bonus_3)
+        if agreement_bonus_5 is not None:
+            self.agreement_bonus_5 = float(agreement_bonus_5)
+        if risk_high is not None:
+            self.threshold_high = float(risk_high)
+        if risk_medium is not None:
+            self.threshold_medium = float(risk_medium)
         self._validate_weights()
 
     def _validate_weights(self) -> None:
@@ -250,9 +326,9 @@ class RiskEngine:
         agreement = sum(1 for s in scores.values() if s > _AGREEMENT_THRESHOLD)
         amplification = 1.0
         if agreement >= 5:
-            amplification = _AGREEMENT_BONUS_5PLUS
+            amplification = self.agreement_bonus_5
         elif agreement >= 3:
-            amplification = _AGREEMENT_BONUS_3PLUS
+            amplification = self.agreement_bonus_3
         base_risk *= amplification
 
         risk_score = float(min(base_risk, 1.0))
