@@ -407,6 +407,77 @@ class ShippingConnector(BaseConnector):
             "Set source_mode='csv' or 'synthetic' in config/settings.yaml."
         )
 
+    # Synthetic-schema CSV columns produced by generate_synthetic / save_raw.
+    _SYNTHETIC_SCHEMA: tuple[str, ...] = (
+        "timestamp",
+        "vessel_count",
+        "avg_delay_hours",
+        "congestion_index",
+        "oil_price_usd",
+        "is_disruption",
+    )
+
+    def load_csv(self, path: str | Path | None = None) -> pd.DataFrame:
+        """Load a *synthetic-schema* shipping CSV (the :meth:`save_raw` format).
+
+        This is the round-trip counterpart to :meth:`save_raw`: it reads back
+        a file written by ``generate_synthetic → save_raw`` and returns it as
+        a typed DataFrame. It is distinct from :meth:`load_from_csv`, which
+        parses the very different real-world IMF PortWatch arrivals layout.
+
+        Args:
+            path: CSV location. When ``None``, ``config["csv_path"]`` is used,
+                defaulting to ``data/raw/shipping_hormuz.csv``.
+
+        Returns:
+            DataFrame with the six synthetic-schema columns, ``timestamp``
+            parsed to datetime and ``is_disruption`` cast to ``bool``.
+
+        Raises:
+            FileNotFoundError: If the CSV file does not exist.
+            ValueError: If required columns are missing or ``timestamp`` /
+                ``vessel_count`` contain NaN (non-recoverable schema breaks).
+        """
+        csv_path = Path(path) if path is not None else Path(
+            self.config.get("csv_path", "data/raw/shipping_hormuz.csv")
+        )
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Shipping CSV not found at {csv_path}.")
+
+        df = pd.read_csv(csv_path)
+        missing = [c for c in self._SYNTHETIC_SCHEMA if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"Shipping CSV {csv_path} missing required columns: {missing}"
+            )
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        df["is_disruption"] = df["is_disruption"].astype(bool)
+        for col in ("vessel_count", "avg_delay_hours", "congestion_index", "oil_price_usd"):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        if df["timestamp"].isna().any() or df["vessel_count"].isna().any():
+            raise ValueError(
+                f"Shipping CSV {csv_path} has NaN in critical columns "
+                "('timestamp' / 'vessel_count')."
+            )
+        return df[list(self._SYNTHETIC_SCHEMA)]
+
+    def fetch_api(self) -> pd.DataFrame:
+        """Graceful API fallback — warn and return a synthetic dataset.
+
+        Unlike :meth:`fetch_from_api` (which hard-raises for the planned live
+        aisstream.io integration), this convenience hook never fails: it logs
+        a warning and returns :meth:`generate_dataset` so callers selecting
+        ``api`` mode before keys are configured still get usable data.
+
+        Returns:
+            A freshly generated synthetic shipping DataFrame.
+        """
+        logger.warning("API mode not configured — using synthetic")
+        return self.generate_dataset(
+            days=int(self.config.get("days", 365)),
+            seed=int(self.config.get("seed", 42)),
+        )
+
     def validate(self, df: pd.DataFrame) -> pd.DataFrame:
         """Schema, domain, and gap checks; returns a cleaned DataFrame.
 

@@ -784,3 +784,78 @@ def test_cross_correlation_real_data(
     assert r_brent_vc < 0, (
         f"Expected negative Brent ↔ vessel_count correlation; got {r_brent_vc:+.3f}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Synthetic-schema CSV round-trip (load_csv) + graceful API fallback (fetch_api)
+# ---------------------------------------------------------------------------
+def test_shipping_load_csv_round_trip(tmp_path: Path) -> None:
+    """save_raw(synthetic) → load_csv() reproduces schema, length, and labels."""
+    conn = ShippingConnector(source_mode="synthetic")
+    original = conn.generate_dataset(days=365, seed=42)
+    csv_path = tmp_path / "shipping_hormuz.csv"
+    conn.save_raw(original, path=csv_path)
+
+    loaded = conn.load_csv(path=csv_path)
+    assert list(loaded.columns) == [
+        "timestamp", "vessel_count", "avg_delay_hours",
+        "congestion_index", "oil_price_usd", "is_disruption",
+    ]
+    assert len(loaded) == len(original)
+    assert loaded["is_disruption"].dtype == bool
+    assert int(loaded["is_disruption"].sum()) == int(original["is_disruption"].sum())
+    assert not loaded[["timestamp", "vessel_count"]].isna().any().any()
+
+
+def test_market_load_csv_round_trip(tmp_path: Path) -> None:
+    """save_raw(synthetic) → load_csv() reproduces schema, length, and labels."""
+    conn = MarketConnector(source_mode="synthetic")
+    original = conn.generate_dataset(days=365, seed=42)
+    csv_path = tmp_path / "market_data.csv"
+    conn.save_raw(original, path=csv_path)
+
+    loaded = conn.load_csv(path=csv_path)
+    assert list(loaded.columns) == [
+        "timestamp", "brent_crude_usd", "trade_volume_index",
+        "freight_rate_index", "is_disruption",
+    ]
+    assert len(loaded) == len(original)
+    assert int(loaded["is_disruption"].sum()) == int(original["is_disruption"].sum())
+
+
+def test_shipping_load_csv_rejects_bad_schema(tmp_path: Path) -> None:
+    """load_csv raises ValueError when required columns are absent."""
+    bad = tmp_path / "bad.csv"
+    pd.DataFrame({"timestamp": ["2025-01-01"], "foo": [1]}).to_csv(bad, index=False)
+    with pytest.raises(ValueError):
+        ShippingConnector(source_mode="synthetic").load_csv(path=bad)
+
+
+def test_load_csv_missing_file_raises(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        ShippingConnector(source_mode="synthetic").load_csv(path=tmp_path / "nope.csv")
+    with pytest.raises(FileNotFoundError):
+        MarketConnector(source_mode="synthetic").load_csv(path=tmp_path / "nope.csv")
+
+
+def test_shipping_fetch_api_falls_back_to_synthetic(caplog) -> None:
+    """fetch_api warns and returns a usable synthetic frame instead of raising."""
+    import logging
+
+    conn = ShippingConnector(source_mode="synthetic")
+    with caplog.at_level(logging.WARNING):
+        df = conn.fetch_api()
+    assert "API mode not configured" in caplog.text
+    assert len(df) == 365
+    assert {"vessel_count", "is_disruption"}.issubset(df.columns)
+
+
+def test_market_fetch_api_falls_back_to_synthetic(caplog) -> None:
+    import logging
+
+    conn = MarketConnector(source_mode="synthetic")
+    with caplog.at_level(logging.WARNING):
+        df = conn.fetch_api()
+    assert "API mode not configured" in caplog.text
+    assert len(df) == 365
+    assert {"brent_crude_usd", "is_disruption"}.issubset(df.columns)

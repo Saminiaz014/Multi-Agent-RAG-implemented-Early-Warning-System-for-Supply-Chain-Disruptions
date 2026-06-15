@@ -410,6 +410,74 @@ class MarketConnector(BaseConnector):
             "Set source_mode='csv' or 'synthetic' in config/settings.yaml."
         )
 
+    # Synthetic-schema CSV columns produced by generate_synthetic / save_raw.
+    _SYNTHETIC_SCHEMA: tuple[str, ...] = (
+        "timestamp",
+        "brent_crude_usd",
+        "trade_volume_index",
+        "freight_rate_index",
+        "is_disruption",
+    )
+
+    def load_csv(self, path: str | Path | None = None) -> pd.DataFrame:
+        """Load a *synthetic-schema* market CSV (the :meth:`save_raw` format).
+
+        Round-trip counterpart to :meth:`save_raw`, distinct from
+        :meth:`load_from_csv` (which merges the three real FRED exports).
+
+        Args:
+            path: CSV location. When ``None``, ``config["csv_path"]`` is used,
+                defaulting to ``data/raw/market_data.csv``.
+
+        Returns:
+            DataFrame with the five synthetic-schema columns, ``timestamp``
+            parsed to datetime and ``is_disruption`` cast to ``bool``.
+
+        Raises:
+            FileNotFoundError: If the CSV file does not exist.
+            ValueError: If required columns are missing or ``timestamp`` /
+                ``brent_crude_usd`` contain NaN.
+        """
+        csv_path = Path(path) if path is not None else Path(
+            self.config.get("csv_path", "data/raw/market_data.csv")
+        )
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Market CSV not found at {csv_path}.")
+
+        df = pd.read_csv(csv_path)
+        missing = [c for c in self._SYNTHETIC_SCHEMA if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"Market CSV {csv_path} missing required columns: {missing}"
+            )
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        df["is_disruption"] = df["is_disruption"].astype(bool)
+        for col in ("brent_crude_usd", "trade_volume_index", "freight_rate_index"):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        if df["timestamp"].isna().any() or df["brent_crude_usd"].isna().any():
+            raise ValueError(
+                f"Market CSV {csv_path} has NaN in critical columns "
+                "('timestamp' / 'brent_crude_usd')."
+            )
+        return df[list(self._SYNTHETIC_SCHEMA)]
+
+    def fetch_api(self) -> pd.DataFrame:
+        """Graceful API fallback — warn and return a synthetic dataset.
+
+        Unlike :meth:`fetch_from_api` (which hard-raises for the planned live
+        FRED / Alpha Vantage integration), this hook logs a warning and
+        returns :meth:`generate_dataset` so ``api`` mode degrades gracefully.
+
+        Returns:
+            A freshly generated synthetic market DataFrame.
+        """
+        logger.warning("API mode not configured — using synthetic")
+        return self.generate_dataset(
+            days=int(self.config.get("days", 365)),
+            seed=int(self.config.get("seed", 42)),
+            lag_days=int(self.config.get("lag_days", _DEFAULT_LAG_DAYS)),
+        )
+
     def validate(self, df: pd.DataFrame) -> pd.DataFrame:
         """Schema and domain checks; returns a sorted, cleaned DataFrame.
 
