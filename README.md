@@ -71,6 +71,23 @@ The Strait of Hormuz is one of the world's most critical maritime chokepoints, c
 
 ---
 
+## Data Sources
+
+Each of the six agents is backed by a free, public data source. Every source has a CSV and a `synthetic` mode, so the full pipeline runs locally with **no API keys required at this stage** — the live API integrations below are wired in config (`agents.<name>.api` / `ingestion.<name>.api`) and stubbed in code (`NotImplementedError` with planned-integration docstrings). All keys are optional and blank by default.
+
+| Agent | Source(s) | Access | Notes |
+|---|---|---|---|
+| **Shipping** | [aisstream.io](https://aisstream.io) | Free WebSocket AIS | Live vessel positions/arrivals, bounding-box filtered to the Shuaiba / Hormuz corridor |
+| **Market** | [FRED API](https://fred.stlouisfed.org/docs/api/fred/) | Free (key) | Brent Crude `DCOILBRENTEU`, Freight PPI `PCU4831114831111`, Freight Services Index `PCUATFREIATFREI` |
+| **Geopolitical** | [ACLED](https://acleddata.com), [OpenSanctions](https://www.opensanctions.org), [GDELT](https://www.gdeltproject.org) | ACLED/OpenSanctions (key), GDELT (no key) | Conflict events · sanctions data · global event database |
+| **Natural Disaster** | [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/), [NOAA IBTrACS](https://www.ncei.noaa.gov/products/international-best-track-archive) | No key | Earthquakes (GeoJSON, no key) · cyclones (public-domain CSV, North-Indian basin) |
+| **Routing** | [aisstream.io](https://aisstream.io) | Free WebSocket AIS | Vessel positions with Hormuz / Cape-of-Good-Hope bounding-box filters for rerouting detection |
+| **News Sentiment** | [GDELT DOC API](https://www.gdeltproject.org/), [NewsAPI.org](https://newsapi.org) | GDELT (no key), NewsAPI (free dev tier) | GDELT tone scores (no key) · NewsAPI free tier (1,000 req/day) |
+
+> All sources are currently exercised in `synthetic` mode for reproducible, label-bearing evaluation; flip `data_mode` / `source_mode` to `csv` to use downloaded extracts, or `api` once keys are supplied.
+
+---
+
 ## What Was Built (Week 1)
 
 > **Summary.** Project scaffold + ABCs + skeleton modules.

@@ -62,6 +62,36 @@ class BaseAgent(ABC):
             :class:`DetectionResult` with scores and flags for each row.
         """
 
+    @abstractmethod
+    def set_weights(self, *args: float, **kwargs: float) -> None:
+        """Override the agent's internal (Layer-1) feature weights.
+
+        Every agent blends its own per-feature signals (e.g. the market
+        agent's oil / trade / freight z-scores, the shipping agent's
+        Isolation-Forest vs Z-score mix). This hook lets the weight optimizer
+        inject a tuned blend without rebuilding the agent. Concrete agents
+        accept their own named weights and are expected to renormalise them
+        so the active group sums to 1.0.
+
+        Args:
+            *args: Positional weights in the agent's documented order.
+            **kwargs: Named weights, equivalently.
+        """
+
+    @abstractmethod
+    def set_threshold(self, *args: float, **kwargs: float) -> None:
+        """Override the agent's (Layer-3) detection threshold(s).
+
+        Lets the optimizer retune the score/severity cutoff(s) at which the
+        agent flags an anomaly. Agents with multiple gates (e.g. composite +
+        single-event, or sentiment + consensus) accept the extra cutoffs as
+        keyword arguments.
+
+        Args:
+            *args: Positional threshold(s) in the agent's documented order.
+            **kwargs: Named threshold(s), equivalently.
+        """
+
     def fit_detect(self, df: pd.DataFrame) -> DetectionResult:
         """Convenience method: fit then detect on the same data.
 

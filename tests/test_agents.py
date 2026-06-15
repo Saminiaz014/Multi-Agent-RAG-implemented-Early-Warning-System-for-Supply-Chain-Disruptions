@@ -33,6 +33,12 @@ class _ConcreteAgent(BaseAgent):
             feature_names=list(df.columns),
         )
 
+    def set_weights(self, *args: float, **kwargs: float) -> None:
+        """No-op — this minimal mock has no internal feature weights."""
+
+    def set_threshold(self, *args: float, **kwargs: float) -> None:
+        """No-op — this minimal mock has a fixed 0.5 cutoff."""
+
     """SO ITS JUST AGENTS LOGIC IS TESTED THAT IF ITS ABOVE =:% THEN TRUE ELSE FALSE,
     AND THE SHAPE OF THE SCORES AND FLAGS ARE CORRECT, AND THE DETECT FUNCTION RETURNS
     THE RIGHT DATACLASS, AND THE FIT FUNCTION SETS THE FITTED FLAG TO TRUE. ALSO TESTS 

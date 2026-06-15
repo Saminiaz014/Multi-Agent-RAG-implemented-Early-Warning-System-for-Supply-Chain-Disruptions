@@ -40,6 +40,12 @@ class _ThresholdAgent(BaseAgent):
             feature_names=list(df.columns),
         )
 
+    def set_weights(self, *args: float, **kwargs: float) -> None:
+        """No-op — this mock scores by the mean of its features."""
+
+    def set_threshold(self, *args: float, **kwargs: float) -> None:
+        """No-op — this mock uses a fixed 0.5 cutoff."""
+
 
 @pytest.fixture()
 def orchestrator() -> Orchestrator:
