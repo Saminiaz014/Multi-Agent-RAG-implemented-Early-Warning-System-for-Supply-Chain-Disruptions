@@ -324,6 +324,31 @@ class Orchestrator:
         except Exception as exc:
             logger.warning("[Orchestrator] SHAP explainability failed: %s", exc)
 
+        # RAG: retrieve historical precedents matching the current signal profile.
+        # Failures are logged and never abort the pipeline.
+        output["historical_context"] = []
+        try:
+            from src.rag.context_retriever import ContextRetriever
+
+            rag_cfg = self.config.get("rag", {}) or {}
+            if rag_cfg:
+                _rag = ContextRetriever(rag_cfg)
+                _rag.build_index("data/knowledge_base/disruption_cases.json")
+                agent_scores: dict[str, float] = {
+                    name: float(v) if isinstance(v, (int, float)) else float(v.get("score", 0.0))
+                    for name, v in (output.get("agent_scores") or {}).items()
+                }
+                ctx_results = _rag.query(
+                    agent_scores, top_k=rag_cfg.get("top_k", 3)
+                )
+                output["historical_context"] = ctx_results
+                logger.info(
+                    "[Orchestrator] RAG retrieved %d historical case(s).",
+                    len(ctx_results),
+                )
+        except Exception as exc:
+            logger.warning("[Orchestrator] RAG context retrieval failed: %s", exc)
+
         logger.info(
             "[Orchestrator.run_full_pipeline] complete | score=%.4f | level=%s "
             "| agents_active=%s | weight_mode=%s",
