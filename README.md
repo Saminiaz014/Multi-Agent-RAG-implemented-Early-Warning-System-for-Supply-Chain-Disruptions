@@ -1062,6 +1062,77 @@ optimization:
 
 ---
 
+## What Was Built (Week 14)
+
+> **Summary.** The six-agent architecture is now wired end-to-end and the Optuna search re-run against the integrated pipeline.
+> **Phase 2F.1** rebuilds `Orchestrator.run_full_pipeline()` so a single call drives all six agents: shipping + market on the merged daily frame, and geopolitical / natural-disaster / routing / news each on their own connector frame. Agents enabled in `config["agents"]` are auto-built and registered (honouring `weight_mode`), every `DetectionResult` flows into both `RiskEngine.aggregate()` (legacy keys) and `RiskEngine.compute_risk()` (agreement-amplified `risk_score` + `contributing_agents`), and the output carries a `metadata` block (`agents_active`, `data_modes`, `weight_mode`). `python main.py` now prints a JSON risk assessment with **all six agents contributing**, plus the summary box. **Phase 2F.1b** re-runs Optuna now that the evaluator scores the fully-integrated pipeline. **160/160 tests passing.**
+
+This session closes the gap flagged in the Week 9 *What's Next* — the four domain agents were built but never registered with the orchestrator, so `python main.py` still drove the two-agent path. Phase 2F.1 wires all six in; Phase 2F.1b re-validates the optimized weights against that integrated pipeline.
+
+### Phase 2F.1 — Six-Agent Orchestrator Integration
+
+`Orchestrator.run_full_pipeline()` is now the single integration point. Its mechanics:
+
+- **Auto-registration** — `_build_enabled_agents()` constructs and registers every agent whose `agents.<name>.enabled` flag is true (default `true`), applying the active weight layout on registration so the roster always respects `weight_mode`. It only fires when no agents were registered manually, so the existing `register_agent(...)` test paths are unchanged.
+- **Domain-aware routing** — `_frame_for_agent()` sends shipping + market to the merged shipping⨝market frame and each of the four domain agents (geopolitical, natural_disaster, routing, news_sentiment) to its **own** connector frame via `fetch_domain()`. A disabled or failed connector returns `None` and the agent is simply skipped.
+- **Dual aggregation** — collected `DetectionResult`s are passed to both `RiskEngine.aggregate()` (legacy `composite_score` / `agent_scores`) and `RiskEngine.compute_risk()` (the richer `risk_score` / `contributing_agents` / `agent_agreement` / `reason`, with the 3-agent → 1.15× and 5-agent → 1.25× agreement bonus active).
+- **Graceful degradation** — every agent and connector call is wrapped; one failure is logged and skipped, never aborting the run.
+- **Run metadata** — the output gains a `metadata` block reporting `agents_active` (agents that ran successfully), `data_modes` (each agent's ingest mode), and `weight_mode`.
+
+`run_timeseries_analysis()` received the same auto-registration + domain-aware frame routing so the per-day composite series also spans all six agents.
+
+### CLI Output
+
+`main.py run_pipeline()` now delegates to `run_full_pipeline()` and prints a machine-readable JSON assessment followed by the human-readable box:
+
+```json
+{
+  "risk_score": 0.333,
+  "risk_level": "LOW",
+  "reason": "LOW risk. Primary driver: market (mean anomaly 0.71, 32% of weighted risk). 1 agent(s) above the alert threshold (0.50).",
+  "agent_agreement": 1,
+  "contributing_agents": {
+    "shipping":        {"score": 0.371669, "weight": 0.25, "contribution": 0.092917},
+    "market":          {"score": 0.710327, "weight": 0.15, "contribution": 0.106549},
+    "geopolitical":    {"score": 0.156497, "weight": 0.25, "contribution": 0.039124},
+    "natural_disaster":{"score": 0.066784, "weight": 0.10, "contribution": 0.006678},
+    "routing":         {"score": 0.428574, "weight": 0.15, "contribution": 0.064286},
+    "news_sentiment":  {"score": 0.234448, "weight": 0.10, "contribution": 0.023445}
+  },
+  "metadata": {
+    "agents_active": ["shipping", "market", "geopolitical", "natural_disaster", "routing", "news_sentiment"],
+    "data_modes": {"shipping": "csv", "market": "csv", "geopolitical": "synthetic", "natural_disaster": "synthetic", "routing": "synthetic", "news_sentiment": "synthetic"},
+    "weight_mode": "hand_tuned"
+  }
+}
+```
+
+The `market` agent — previously `enabled: false` — was switched on in `settings.yaml` so the default run exercises the full six. Disabling any agent (`agents.<name>.enabled: false`) removes it from the pipeline and `RiskEngine.compute_risk()` redistributes the remaining weights so they sum to 1.0.
+
+### Phase 2F.1b — Optuna Re-Run on the Integrated Pipeline
+
+The previous optimization (Phase 3.5) predates the orchestrator wiring. This re-run confirms the tuned weights remain valid now that the evaluator scores the fully-integrated six-agent pipeline. Two findings worth recording:
+
+- **No optimizer changes were needed.** `WeightOptimizer.define_parameter_space()` already searched all six inter-agent weights, all six intra-agent weight groups, and every threshold; `PipelineEvaluator` already built all six agents and applied the agreement bonus. Steps 2–3 of the re-run were verification, not code.
+- **The search is deterministic** (TPESampler `seed=42`, split seeds 42/43/44), so the re-run reproduced best trial 26 with byte-identical weights — only the YAML header date changed. The prior 2-agent-era artifacts were preserved as `config/optimized_weights_2agent_backup.yaml` and `data/processed/optimization_results_2agent_backup.json`.
+
+Held-out **test** comparison under the integrated pipeline (best trial 26, validation objective 0.7435, 52/100 trials completed after median pruning):
+
+| Metric (test) | Hand-Tuned | Optimized | Δ |
+|---|---|---|---|
+| F1 | 0.956 | 0.935 | −0.021 |
+| Lead time (days) | 2.67 | **5.00** | **+2.33** |
+| FPR | 0.000 | 0.006 | +0.006 |
+| **Blended objective** (F1·0.5 + lead·0.3 − FPR·0.2) | 0.638 | **0.766** | **+0.128** |
+
+The optimizer maximises the blended objective, not raw F1: it trades ~2 F1 points for **nearly doubling early-warning lead time** (2.7 → 5.0 days, saturating the horizon), lifting the composite objective by +0.128 — the intended trade-off for an early-warning DSS. `weight_mode` stays `hand_tuned` by default; flip to `optimized` in `settings.yaml` to use the tuned set.
+
+### Test Coverage (Week 14)
+
+No production behaviour broke: the integration preserves every existing contract (legacy `run()` and `register_agent(...)` paths, the four historical-event scenarios, the no-leakage guarantee — agents still select their own feature columns and never consume `is_disruption`). Full project: **160/160 tests passing**, no regressions.
+
+---
+
 ## Project Structure
 
 ```
@@ -1171,7 +1242,7 @@ pytest tests/test_agents.py::test_market_agent_evaluation -v -s
 | `agents.shipping.contamination` | `0.1` | Expected anomaly fraction for Isolation Forest |
 | `agents.shipping.threshold` | `0.65` | Minimum combined score to raise a shipping flag (eval harness uses 0.55) |
 | `agents.shipping.z_threshold` | `3.0` | Z-score normalisation cap for the secondary fallback channel |
-| `agents.market.enabled` | `false` | Toggle market agent |
+| `agents.market.enabled` | `true` | Toggle market agent (enabled in Week 14 so the default run exercises all six agents) |
 | `agents.market.detection_method` | `zscore` | Algorithm for market anomaly detection |
 | `agents.market.z_threshold` | `2.5` | Per-feature absolute z-score elevation cutoff (eval harness uses 1.2) |
 | `agents.market.threshold` | `0.55` | Minimum combined score to raise a market flag (eval harness uses 0.40) |
