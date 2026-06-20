@@ -88,7 +88,7 @@ Each of the six agents is backed by a free, public data source. Every source has
 
 ---
 
-## What Was Built (Week 1)
+## Phase 0 — Project Scaffolding
 
 > **Summary.** Project scaffold + ABCs + skeleton modules.
 > Adds: `config/settings.yaml`, `main.py` entrypoint, `src/orchestrator.py`, `BaseConnector` and `BaseAgent` ABCs (with `DetectionResult` dataclass), `RiskEngine` with weighted aggregation and `RiskLevel` enum, SHAP explainer wrapper, ChromaDB RAG retriever, FastAPI `/predict` `/explain` `/health` endpoints, and the initial 16-test suite (`tests/test_agents.py`, `test_risk_engine.py`, `test_scenarios.py`).
@@ -141,7 +141,7 @@ Both use Python's `ABC` / `@abstractmethod` pattern, ensuring domain implementat
 
 ---
 
-## What Was Built (Week 2)
+## Phase 1 — Data Ingestion
 
 > **Summary.** Two synthetic data connectors with shared ground truth.
 > Adds: `src/ingestion/shipping_connector.py` (365-day Hormuz dataset with three injected disruption scenarios — Moderate Tension days 60-74, Major Blockage days 150-170, Brief Incident days 280-290) and `src/ingestion/market_connector.py` (Brent / trade volume / freight rate signals lag-aligned to shipping with 2-day propagation and mean-reverting tails). Welch t = 10.04 on vessel_count separation, Pearson r = 0.746 between shipping vessel_count and market trade_volume_index in disruption windows. 30 new ingestion tests; 46/46 total passing.
@@ -233,7 +233,7 @@ Because both connectors share the same disruption windows, market signals confir
 
 A correlation above 0.5 confirms the two synthetic sources are mutually consistent during disruption windows — the precondition for meaningful multi-agent validation.
 
-### Test Coverage (Week 2)
+### Test Coverage (Phase 1)
 
 | Test file | Coverage |
 |---|---|
@@ -243,12 +243,12 @@ All 30 ingestion tests pass alongside the 16 prior-week tests — **46/46 total*
 
 ---
 
-## What Was Built (Week 3)
+## Phase 2 — Detection Agents
 
 > **Summary.** First two concrete detection agents wired to the Week-2 datasets.
 > Adds: `src/agents/shipping_agent.py` (Isolation Forest + Z-score fallback with leak-free fit on non-disruption rows, persistence + multi-feature validation, **TPR = 0.936 / FPR = 0.003**) and `src/agents/market_agent.py` (trailing 30-day rolling Z-scores, oil-led validation gate, **TPR = 0.809 / FPR = 0.022**). Both expose `run_dataframe` + `to_detection_result` for `RiskEngine` integration. 8 new agent tests; 54/54 total passing.
 
-This session delivered the **first two concrete detection agents** of the multi-agent pipeline — `ShippingAgent` (physical-flow side: vessel counts, transit delays, corridor congestion) and `MarketAgent` (price-side: Brent crude, trade volume, freight rates) — both wired to the synthetic Strait of Hormuz datasets produced in Week 2. Together they form a two-channel early-warning system: the shipping agent fires first on the physical event, and the market agent corroborates it 1-2 days later as the price reaction propagates. Both agents conform to the same `BaseAgent` ABC, emit the same dict schema, and slot into the existing `RiskEngine.aggregate()` call site without any orchestrator changes.
+This session delivered the **first two concrete detection agents** of the multi-agent pipeline — `ShippingAgent` (physical-flow side: vessel counts, transit delays, corridor congestion) and `MarketAgent` (price-side: Brent crude, trade volume, freight rates) — both wired to the synthetic Strait of Hormuz datasets produced in Phase 1. Together they form a two-channel early-warning system: the shipping agent fires first on the physical event, and the market agent corroborates it 1-2 days later as the price reaction propagates. Both agents conform to the same `BaseAgent` ABC, emit the same dict schema, and slot into the existing `RiskEngine.aggregate()` call site without any orchestrator changes.
 
 | Agent | File | Detection Strategy | TPR | FPR |
 |---|---|---|---|---|
@@ -646,7 +646,7 @@ Both agents emit the same dict schema, slot into the same `RiskEngine.aggregate(
 
 ---
 
-## What Was Built (Week 8)
+## Phase 2.1 — Real-Data Integration
 
 > **Summary.** Real-data integration end-to-end.
 > Changes: both connectors gain a hybrid `source_mode` ∈ {`csv`, `synthetic`, `api`} (IMF PortWatch Shuaiba 2,699 days + FRED Brent / freight 14,252 days), both agents auto-discover real-data feature extras (`tanker_count`, `vessel_count_trend`, `freight_services_pct_change`) and adapt their weight schedules, market agent gains a recent-baseline clip (default 5 years). New: `src/orchestrator.py` `ingest()` + `run_full_pipeline()` + `run_timeseries_analysis()` with per-connector CSV→synthetic fallback, `main.py` CLI (`--mode {csv,synthetic}` / `--serve`) with a formatted summary box, four historical-event scenario tests (2026 Hormuz, 2019 tanker, 2023 normal, COVID), `tests/test_fred_api.py` standalone API connectivity check. **Real-data evaluation:** ShippingAgent TPR = 0.827 / FPR = 0.060 on Shuaiba, MarketAgent TPR = 0.966 / FPR = 0.184 on FRED. 108/108 tests passing.
@@ -741,14 +741,14 @@ Pipeline run sequence:
 | `test_normal_period_2023` | Jan-Jun 2023 | ≥ 50% LOW, ≤ 5% CRITICAL | 114/181 (63%) LOW, 0% CRITICAL |
 | `test_covid_impact` | Mar-Apr 2020 | ≥ 5 days at MEDIUM+ | 25 elevated days, avg 0.391 |
 
-### Test Coverage (Week 8)
+### Test Coverage (Phase 2.1)
 
 | File | Tests | Coverage |
 |---|---|---|
 | `tests/test_ingestion.py` | 49 | shipping CSV/synthetic/API + validate (`assert`-style) + `test_synthetic_fallback`; market CSV/synthetic/API + alignment + cross-correlation on real data (`r = −0.085` for brent ↔ vessel_count) |
 | `tests/test_agents.py` | 25 | 5 ABC + 9 shipping (4 synthetic + 5 real-data including feature discovery, location override, signal-key extras) + 11 market (4 synthetic + 7 real-data including weight redistribution and baseline clip) |
 | `tests/test_scenarios.py` | 17 | 4 legacy + 9 hybrid orchestrator + 4 historical-event |
-| `tests/test_risk_engine.py` | 7 | unchanged from Week 1 |
+| `tests/test_risk_engine.py` | 7 | unchanged from Phase 0 |
 | **Total** | **108 / 108 passing** | |
 
 ### Configuration Additions (`config/settings.yaml`)
@@ -776,12 +776,12 @@ ingestion:
 
 ---
 
-## What Was Built (Week 9)
+## Phase 2.2 — Four New Domain Agents
 
 > **Summary.** Four new signal domains land the pipeline at six active agents.
 > Adds: `GeopoliticalConnector` + `GeopoliticalAgent`, `DisasterConnector` + `DisasterAgent`, `RoutingConnector` + `RoutingAgent`, `NewsConnector` + `NewsAgent`. Every new connector exposes the three-mode `data_mode` ∈ {`synthetic`, `csv`, `api`} dispatcher (API stubbed with planned-integration docstrings); every new agent emits the unified anomaly-window dict and a `DetectionResult` so `RiskEngine.aggregate()` accepts all six agents unchanged. Six-agent weight split (shipping 0.25, market 0.15, geopolitical 0.25, natural_disaster 0.10, routing 0.15, news_sentiment 0.10). 27 new tests in `tests/test_new_agents.py` including a 6-agent integration ranking Scenario B > Scenario A > normal. **135/135 tests passing.**
 
-This session brought the multi-agent architecture to its full six-agent breadth. Where Weeks 2-3 covered the *physical-flow* (shipping) and *price-side* (market) axes, Week 9 fills in **geopolitical**, **natural-disaster**, **routing**, and **news-sentiment** — each with its own bespoke detection strategy, each leading or lagging the shipping disruption by an agent-specific delay so the orchestrator sees realistic propagation behaviour. No existing module was changed: the six agents are additive.
+This session brought the multi-agent architecture to its full six-agent breadth. Where Phase 2 covered the *physical-flow* (shipping) and *price-side* (market) axes, this phase fills in **geopolitical**, **natural-disaster**, **routing**, and **news-sentiment** — each with its own bespoke detection strategy, each leading or lagging the shipping disruption by an agent-specific delay so the orchestrator sees realistic propagation behaviour. No existing module was changed: the six agents are additive.
 
 ### Three-Mode Data Ingestion (applies to all four new connectors)
 
@@ -854,7 +854,7 @@ weights:
 
 `RiskEngine` auto-renormalises when any agent is toggled off via `agents.{name}.enabled: false`, so the orchestrator stays valid in any sub-configuration.
 
-### Test Coverage (Week 9)
+### Test Coverage (Phase 2.2)
 
 `tests/test_new_agents.py` — 27 new tests, all passing:
 
@@ -921,14 +921,67 @@ agents:
 
 ### What's Next
 
-The new agents are not yet registered with the orchestrator's `run_full_pipeline()` — `python main.py` still drives the two-agent (shipping + market) path. Phase 2F will wire all six into the orchestrator, extend the SHAP explainer to the 6-agent feature space, expand the RAG knowledge base with cases relevant to the new signal types, and surface the new agent panels in the FastAPI endpoints and the dashboard.
+The new agents are not yet registered with the orchestrator's `run_full_pipeline()` — `python main.py` still drives the two-agent (shipping + market) path. Phase 3 will wire all six into the orchestrator's risk aggregation, Phase 5 will extend the SHAP explainer to the 6-agent feature space, Phase 6 will expand the RAG knowledge base with cases relevant to the new signal types, and Phase 7 will surface the new agent panels in a dashboard.
 
 ---
 
-## What Was Built (Phase 3.5 — Optuna Weight Optimization)
+## Phase 3 — Six-Agent Risk Aggregation
+
+> **Summary.** The six-agent architecture is wired end-to-end into the risk engine.
+> `Orchestrator.run_full_pipeline()` rebuilds so a single call drives all six agents: shipping + market on the merged daily frame, and geopolitical / natural-disaster / routing / news each on their own connector frame. Agents enabled in `config["agents"]` are auto-built and registered (honouring `weight_mode`), every `DetectionResult` flows into both `RiskEngine.aggregate()` (legacy keys) and `RiskEngine.compute_risk()` (agreement-amplified `risk_score` + `contributing_agents`), and the output carries a `metadata` block (`agents_active`, `data_modes`, `weight_mode`). `python main.py` now prints a JSON risk assessment with **all six agents contributing**, plus the summary box. **160/160 tests passing.**
+
+This session closes the gap flagged in Phase 2.2's *What's Next* — the four domain agents were built but never registered with the orchestrator, so `python main.py` still drove the two-agent path. This phase wires all six in; the weight search built in Phase 4 is later re-validated against this integrated pipeline.
+
+### Orchestrator Integration
+
+`Orchestrator.run_full_pipeline()` is now the single integration point. Its mechanics:
+
+- **Auto-registration** — `_build_enabled_agents()` constructs and registers every agent whose `agents.<name>.enabled` flag is true (default `true`), applying the active weight layout on registration so the roster always respects `weight_mode`. It only fires when no agents were registered manually, so the existing `register_agent(...)` test paths are unchanged.
+- **Domain-aware routing** — `_frame_for_agent()` sends shipping + market to the merged shipping⨝market frame and each of the four domain agents (geopolitical, natural_disaster, routing, news_sentiment) to its **own** connector frame via `fetch_domain()`. A disabled or failed connector returns `None` and the agent is simply skipped.
+- **Dual aggregation** — collected `DetectionResult`s are passed to both `RiskEngine.aggregate()` (legacy `composite_score` / `agent_scores`) and `RiskEngine.compute_risk()` (the richer `risk_score` / `contributing_agents` / `agent_agreement` / `reason`, with the 3-agent → 1.15× and 5-agent → 1.25× agreement bonus active).
+- **Graceful degradation** — every agent and connector call is wrapped; one failure is logged and skipped, never aborting the run.
+- **Run metadata** — the output gains a `metadata` block reporting `agents_active` (agents that ran successfully), `data_modes` (each agent's ingest mode), and `weight_mode`.
+
+`run_timeseries_analysis()` received the same auto-registration + domain-aware frame routing so the per-day composite series also spans all six agents.
+
+### CLI Output
+
+`main.py run_pipeline()` now delegates to `run_full_pipeline()` and prints a machine-readable JSON assessment followed by the human-readable box:
+
+```json
+{
+  "risk_score": 0.333,
+  "risk_level": "LOW",
+  "reason": "LOW risk. Primary driver: market (mean anomaly 0.71, 32% of weighted risk). 1 agent(s) above the alert threshold (0.50).",
+  "agent_agreement": 1,
+  "contributing_agents": {
+    "shipping":        {"score": 0.371669, "weight": 0.25, "contribution": 0.092917},
+    "market":          {"score": 0.710327, "weight": 0.15, "contribution": 0.106549},
+    "geopolitical":    {"score": 0.156497, "weight": 0.25, "contribution": 0.039124},
+    "natural_disaster":{"score": 0.066784, "weight": 0.10, "contribution": 0.006678},
+    "routing":         {"score": 0.428574, "weight": 0.15, "contribution": 0.064286},
+    "news_sentiment":  {"score": 0.234448, "weight": 0.10, "contribution": 0.023445}
+  },
+  "metadata": {
+    "agents_active": ["shipping", "market", "geopolitical", "natural_disaster", "routing", "news_sentiment"],
+    "data_modes": {"shipping": "csv", "market": "csv", "geopolitical": "synthetic", "natural_disaster": "synthetic", "routing": "synthetic", "news_sentiment": "synthetic"},
+    "weight_mode": "hand_tuned"
+  }
+}
+```
+
+The `market` agent — previously `enabled: false` — was switched on in `settings.yaml` so the default run exercises the full six. Disabling any agent (`agents.<name>.enabled: false`) removes it from the pipeline and `RiskEngine.compute_risk()` redistributes the remaining weights so they sum to 1.0.
+
+### Test Coverage (Phase 3)
+
+No production behaviour broke: the integration preserves every existing contract (legacy `run()` and `register_agent(...)` paths, the four historical-event scenarios, the no-leakage guarantee — agents still select their own feature columns and never consume `is_disruption`). Full project: **160/160 tests passing**, no regressions.
+
+---
+
+## Phase 4 — Optuna Weight Optimization
 
 > **Summary.** Every learnable weight across the pipeline is now tunable by **Optuna**, evaluated on a proper train/validation/test split, with a one-line YAML switch between hand-tuned and optimized weights.
-> Adds: `src/optimization/` (`data_split.py`, `weight_optimizer.py`, `pipeline_evaluator.py`, `optimization_analysis.py`, `weight_config.py`), `config/optimized_weights.yaml`, `weight_mode` + `optimization` blocks in `settings.yaml`, `set_weights()` / `set_threshold()` on all six agents and `RiskEngine`, a `python main.py --optimize` CLI path, and `tests/test_optimization.py` (9 tests). All three weight layers are searched at once (Dirichlet-normalised), the detectors are **fit on train and scored on validation**, and the **test split is touched exactly once** for the headline number. On the 100-trial run the optimized weights lift test lead-time from **2.67 → 5.00 days** and F1 from **0.92 → 0.94** at near-zero FPR. **154/154 tests passing.**
+> Adds: `src/optimization/` (`data_split.py`, `weight_optimizer.py`, `pipeline_evaluator.py`, `optimization_analysis.py`, `weight_config.py`), `config/optimized_weights.yaml`, `weight_mode` + `optimization` blocks in `settings.yaml`, `set_weights()` / `set_threshold()` on all six agents and `RiskEngine`, a `python main.py --optimize` CLI path, and `tests/test_optimization.py` (9 tests). All three weight layers are searched at once (Dirichlet-normalised), the detectors are **fit on train and scored on validation**, and the **test split is touched exactly once** for the headline number. On the initial 100-trial run (predating the Phase 3 six-agent wiring) the optimized weights lift test lead-time from **2.67 → 5.00 days** and F1 from **0.92 → 0.94** at near-zero FPR; the search is later re-run against the fully-integrated pipeline (see below). **154/154 tests passing.**
 
 Until now every weight in the system was hand-set: the six inter-agent aggregation weights, each agent's internal feature weights, and the risk / detection thresholds. This phase replaces guess-and-check tuning with a reproducible search that optimises all of them jointly against held-out data, and makes the result a drop-in via a config switch — so the thesis can report a defensible, generalisation-tested weight set rather than intuition.
 
@@ -1021,7 +1074,7 @@ The dominant gain is **early warning**: the optimizer trades a fraction of a per
 - **`Orchestrator`** resolves the active layout on init and injects it into every registered agent.
 - **`main.py`** applies the active layout to the inline shipping/market/domain agents and adds the `--optimize` / `--trials` flags.
 
-### Test Coverage (Phase 3.5)
+### Test Coverage (Phase 4)
 
 `tests/test_optimization.py` — 9 new tests, all passing:
 
@@ -1062,56 +1115,9 @@ optimization:
 
 ---
 
-## What Was Built (Week 14)
+### Re-Validation on the Six-Agent Pipeline
 
-> **Summary.** The six-agent architecture is now wired end-to-end and the Optuna search re-run against the integrated pipeline.
-> **Phase 2F.1** rebuilds `Orchestrator.run_full_pipeline()` so a single call drives all six agents: shipping + market on the merged daily frame, and geopolitical / natural-disaster / routing / news each on their own connector frame. Agents enabled in `config["agents"]` are auto-built and registered (honouring `weight_mode`), every `DetectionResult` flows into both `RiskEngine.aggregate()` (legacy keys) and `RiskEngine.compute_risk()` (agreement-amplified `risk_score` + `contributing_agents`), and the output carries a `metadata` block (`agents_active`, `data_modes`, `weight_mode`). `python main.py` now prints a JSON risk assessment with **all six agents contributing**, plus the summary box. **Phase 2F.1b** re-runs Optuna now that the evaluator scores the fully-integrated pipeline. **160/160 tests passing.**
-
-This session closes the gap flagged in the Week 9 *What's Next* — the four domain agents were built but never registered with the orchestrator, so `python main.py` still drove the two-agent path. Phase 2F.1 wires all six in; Phase 2F.1b re-validates the optimized weights against that integrated pipeline.
-
-### Phase 2F.1 — Six-Agent Orchestrator Integration
-
-`Orchestrator.run_full_pipeline()` is now the single integration point. Its mechanics:
-
-- **Auto-registration** — `_build_enabled_agents()` constructs and registers every agent whose `agents.<name>.enabled` flag is true (default `true`), applying the active weight layout on registration so the roster always respects `weight_mode`. It only fires when no agents were registered manually, so the existing `register_agent(...)` test paths are unchanged.
-- **Domain-aware routing** — `_frame_for_agent()` sends shipping + market to the merged shipping⨝market frame and each of the four domain agents (geopolitical, natural_disaster, routing, news_sentiment) to its **own** connector frame via `fetch_domain()`. A disabled or failed connector returns `None` and the agent is simply skipped.
-- **Dual aggregation** — collected `DetectionResult`s are passed to both `RiskEngine.aggregate()` (legacy `composite_score` / `agent_scores`) and `RiskEngine.compute_risk()` (the richer `risk_score` / `contributing_agents` / `agent_agreement` / `reason`, with the 3-agent → 1.15× and 5-agent → 1.25× agreement bonus active).
-- **Graceful degradation** — every agent and connector call is wrapped; one failure is logged and skipped, never aborting the run.
-- **Run metadata** — the output gains a `metadata` block reporting `agents_active` (agents that ran successfully), `data_modes` (each agent's ingest mode), and `weight_mode`.
-
-`run_timeseries_analysis()` received the same auto-registration + domain-aware frame routing so the per-day composite series also spans all six agents.
-
-### CLI Output
-
-`main.py run_pipeline()` now delegates to `run_full_pipeline()` and prints a machine-readable JSON assessment followed by the human-readable box:
-
-```json
-{
-  "risk_score": 0.333,
-  "risk_level": "LOW",
-  "reason": "LOW risk. Primary driver: market (mean anomaly 0.71, 32% of weighted risk). 1 agent(s) above the alert threshold (0.50).",
-  "agent_agreement": 1,
-  "contributing_agents": {
-    "shipping":        {"score": 0.371669, "weight": 0.25, "contribution": 0.092917},
-    "market":          {"score": 0.710327, "weight": 0.15, "contribution": 0.106549},
-    "geopolitical":    {"score": 0.156497, "weight": 0.25, "contribution": 0.039124},
-    "natural_disaster":{"score": 0.066784, "weight": 0.10, "contribution": 0.006678},
-    "routing":         {"score": 0.428574, "weight": 0.15, "contribution": 0.064286},
-    "news_sentiment":  {"score": 0.234448, "weight": 0.10, "contribution": 0.023445}
-  },
-  "metadata": {
-    "agents_active": ["shipping", "market", "geopolitical", "natural_disaster", "routing", "news_sentiment"],
-    "data_modes": {"shipping": "csv", "market": "csv", "geopolitical": "synthetic", "natural_disaster": "synthetic", "routing": "synthetic", "news_sentiment": "synthetic"},
-    "weight_mode": "hand_tuned"
-  }
-}
-```
-
-The `market` agent — previously `enabled: false` — was switched on in `settings.yaml` so the default run exercises the full six. Disabling any agent (`agents.<name>.enabled: false`) removes it from the pipeline and `RiskEngine.compute_risk()` redistributes the remaining weights so they sum to 1.0.
-
-### Phase 2F.1b — Optuna Re-Run on the Integrated Pipeline
-
-The previous optimization (Phase 3.5) predates the orchestrator wiring. This re-run confirms the tuned weights remain valid now that the evaluator scores the fully-integrated six-agent pipeline. Two findings worth recording:
+The run above predates the Phase 3 orchestrator wiring. Once all six agents were integrated into `RiskEngine`, the search was re-run to confirm the tuned weights still hold against the fully-integrated pipeline. Two findings worth recording:
 
 - **No optimizer changes were needed.** `WeightOptimizer.define_parameter_space()` already searched all six inter-agent weights, all six intra-agent weight groups, and every threshold; `PipelineEvaluator` already built all six agents and applied the agreement bonus. Steps 2–3 of the re-run were verification, not code.
 - **The search is deterministic** (TPESampler `seed=42`, split seeds 42/43/44), so the re-run reproduced best trial 26 with byte-identical weights — only the YAML header date changed. The prior 2-agent-era artifacts were preserved as `config/optimized_weights_2agent_backup.yaml` and `data/processed/optimization_results_2agent_backup.json`.
@@ -1125,15 +1131,11 @@ Held-out **test** comparison under the integrated pipeline (best trial 26, valid
 | FPR | 0.000 | 0.006 | +0.006 |
 | **Blended objective** (F1·0.5 + lead·0.3 − FPR·0.2) | 0.638 | **0.766** | **+0.128** |
 
-The optimizer maximises the blended objective, not raw F1: it trades ~2 F1 points for **nearly doubling early-warning lead time** (2.7 → 5.0 days, saturating the horizon), lifting the composite objective by +0.128 — the intended trade-off for an early-warning DSS. `weight_mode` stays `hand_tuned` by default; flip to `optimized` in `settings.yaml` to use the tuned set.
-
-### Test Coverage (Week 14)
-
-No production behaviour broke: the integration preserves every existing contract (legacy `run()` and `register_agent(...)` paths, the four historical-event scenarios, the no-leakage guarantee — agents still select their own feature columns and never consume `is_disruption`). Full project: **160/160 tests passing**, no regressions.
+The optimizer maximises the blended objective, not raw F1: it trades ~2 F1 points for **nearly doubling early-warning lead time** (2.7 → 5.0 days, saturating the horizon), lifting the composite objective by +0.128 — the intended trade-off for an early-warning DSS. `weight_mode` stays `hand_tuned` by default; flip to `optimized` in `settings.yaml` to use the tuned set. Full project at this point: **160/160 tests passing**, no regressions.
 
 ---
 
-## What Was Built (Phase 2F.2 — Six-Agent SHAP Surrogate)
+## Phase 5 — SHAP Explainability
 
 > **Summary.** SHAP explainability expanded from 2-agent to the full 20-feature, 6-agent space. A `SurrogateShapExplainer` trains a Random Forest surrogate to reproduce the pipeline's composite risk score, then applies `shap.TreeExplainer` for exact Shapley values. Surrogate R² = **0.991** on 364 synthetic days. `run_full_pipeline()` now populates `output["explanation"]` with top-3 drivers, expected value, natural-language text, and surrogate R². **165/165 tests passing** (5 new SHAP tests in `tests/test_shap_6agent.py`).
 
@@ -1191,7 +1193,7 @@ Generates a 364-day training dataset from all 6 connectors:
 
 The surrogate is lazy-trained once per `Orchestrator` instance (`self._shap_explainer`) and cached for all subsequent calls. Raw agent input frames are stored in `self._last_agent_frames` and used by `_build_shap_features_row()` to construct the current-state 20-column feature row for `explain()`. The entire SHAP block is `try/except` guarded — failure logs a warning and never aborts the pipeline.
 
-### Test Coverage (Phase 2F.2)
+### Test Coverage (Phase 5)
 
 `tests/test_shap_6agent.py` — 5 tests:
 
@@ -1205,7 +1207,7 @@ The surrogate is lazy-trained once per `Orchestrator` instance (`self._shap_expl
 
 ---
 
-## What Was Built (Phase 2F.3a — RAG Knowledge Base Expansion)
+## Phase 6 — RAG Knowledge Base
 
 > **Summary.** The RAG knowledge base expanded to 10 real historical disruption cases covering all 6 signal domains. `ContextRetriever` was rebuilt around ChromaDB's built-in `DefaultEmbeddingFunction` (ONNX-backed all-MiniLM-L6-v2 — no HuggingFace download required at runtime). Three new methods handle index rebuild detection, 6-domain signal-profile queries, and readable context formatting. `run_full_pipeline()` now populates `output["historical_context"]` after the SHAP block. **170/170 tests passing** (5 new RAG tests in `tests/test_rag_6domain.py`).
 
@@ -1277,7 +1279,7 @@ Historical Precedents:
 
 `ContextRetriever` is instantiated per pipeline call; `build_index()` returns immediately on the fast path when case count is unchanged. The RAG block is `try/except` guarded — failure logs a warning and never aborts the pipeline.
 
-### Test Coverage (Phase 2F.3a)
+### Test Coverage (Phase 6)
 
 `tests/test_rag_6domain.py` — 5 tests (shared `scope="module"` ChromaDB fixture):
 
@@ -1299,8 +1301,8 @@ supply-chain-dss/
 │   └── settings.yaml           # agent toggles, weights, thresholds, RAG, API, logging
 ├── data/
 │   ├── raw/                    # raw CSV ingestion data (populate per connector)
-│   │   ├── shipping_hormuz.csv # synthetic Hormuz dataset (Week 2 artefact)
-│   │   └── market_data.csv     # synthetic Brent / trade volume / freight data (Week 2 artefact)
+│   │   ├── shipping_hormuz.csv # synthetic Hormuz dataset (Phase 1 artefact)
+│   │   └── market_data.csv     # synthetic Brent / trade volume / freight data (Phase 1 artefact)
 │   ├── processed/              # cleaned, feature-ready DataFrames
 │   └── knowledge_base/         # historical disruption cases as JSON
 ├── src/
@@ -1310,8 +1312,8 @@ supply-chain-dss/
 │   │   └── market_connector.py # synthetic Brent / trade volume / freight data, lag-aligned to shipping
 │   ├── agents/
 │   │   ├── base_agent.py       # ABC + DetectionResult dataclass
-│   │   ├── shipping_agent.py   # IsolationForest + Z-score detector for Hormuz vessel data (Week 3)
-│   │   └── market_agent.py     # Rolling Z-score detector for Brent / trade volume / freight (Week 3)
+│   │   ├── shipping_agent.py   # IsolationForest + Z-score detector for Hormuz vessel data (Phase 2)
+│   │   └── market_agent.py     # Rolling Z-score detector for Brent / trade volume / freight (Phase 2)
 │   ├── aggregation/
 │   │   └── risk_engine.py      # weighted composite risk scoring
 │   ├── explainability/
@@ -1404,7 +1406,7 @@ pytest tests/test_agents.py::test_market_agent_evaluation -v -s
 | `agents.shipping.contamination` | `0.1` | Expected anomaly fraction for Isolation Forest |
 | `agents.shipping.threshold` | `0.65` | Minimum combined score to raise a shipping flag (eval harness uses 0.55) |
 | `agents.shipping.z_threshold` | `3.0` | Z-score normalisation cap for the secondary fallback channel |
-| `agents.market.enabled` | `true` | Toggle market agent (enabled in Week 14 so the default run exercises all six agents) |
+| `agents.market.enabled` | `true` | Toggle market agent (enabled in Phase 3 so the default run exercises all six agents) |
 | `agents.market.detection_method` | `zscore` | Algorithm for market anomaly detection |
 | `agents.market.z_threshold` | `2.5` | Per-feature absolute z-score elevation cutoff (eval harness uses 1.2) |
 | `agents.market.threshold` | `0.55` | Minimum combined score to raise a market flag (eval harness uses 0.40) |
