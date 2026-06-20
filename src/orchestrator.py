@@ -112,6 +112,9 @@ class Orchestrator:
                 continue
             self._domain_connectors[name] = connector_cls(config=agent_cfg)
 
+        self._shap_explainer: Any | None = None
+        self._last_agent_frames: dict[str, pd.DataFrame] = {}
+
         logger.info(
             "Orchestrator initialised | shipping_mode='%s' | market_mode='%s' "
             "| domain_connectors=%s",
@@ -283,10 +286,44 @@ class Orchestrator:
             "agent_agreement": risk["agent_agreement"],
             "reason": risk["reason"],
             "shap": {},
+            "explanation": {},
             "context": [],
             "data": self._summarise_combined(combined),
             "metadata": metadata,
         }
+
+        # SHAP explainability — lazy-train surrogate then explain current state.
+        # Wrapped in try/except so a SHAP failure never aborts the pipeline.
+        try:
+            from src.explainability.shap_explainer import (
+                SurrogateShapExplainer,
+                build_shap_training_data,
+            )
+
+            if self._shap_explainer is None:
+                self._shap_explainer = SurrogateShapExplainer()
+            if not self._shap_explainer.is_trained:
+                features_df, risk_scores = build_shap_training_data(self.config)
+                self._shap_explainer.train_surrogate(
+                    features_df, risk_scores, weight_mode=self._weight_mode
+                )
+            current_features = self._build_shap_features_row(combined)
+            shap_result = self._shap_explainer.explain(current_features)
+            explanation_text = self._shap_explainer.generate_explanation_text(
+                risk_score=output["risk_score"],
+                risk_level=output.get("risk_level_label", "unknown"),
+                weight_mode=self._weight_mode,
+                shap_result=shap_result,
+            )
+            output["explanation"] = {
+                "top_drivers": shap_result["top_drivers"],
+                "expected_value": shap_result["expected_value"],
+                "text": explanation_text,
+                "surrogate_r2": self._shap_explainer.r2,
+            }
+        except Exception as exc:
+            logger.warning("[Orchestrator] SHAP explainability failed: %s", exc)
+
         logger.info(
             "[Orchestrator.run_full_pipeline] complete | score=%.4f | level=%s "
             "| agents_active=%s | weight_mode=%s",
@@ -529,6 +566,7 @@ class Orchestrator:
             frame = self._frame_for_agent(agent.name, combined)
             if frame is None:
                 continue
+            self._last_agent_frames[agent.name] = frame
             try:
                 if hasattr(agent, "run_dataframe") and hasattr(
                     agent, "to_detection_result"
@@ -644,6 +682,35 @@ class Orchestrator:
             len(self._agents),
             [a.name for a in self._agents],
         )
+
+    def _build_shap_features_row(self, combined: pd.DataFrame) -> pd.DataFrame:
+        """Build a single-row 20-feature DataFrame from current pipeline state.
+
+        Shipping and market features are read from the last row of ``combined``.
+        Domain agent features (geopolitical, natural_disaster, routing,
+        news_sentiment) are read from the last row of each agent's cached raw
+        frame in ``self._last_agent_frames``.  Absent columns are filled 0.0.
+        """
+        from src.explainability.shap_explainer import ALL_FEATURE_NAMES, FEATURE_AGENT_MAP
+
+        last_combined = combined.iloc[[-1]] if len(combined) > 0 else pd.DataFrame()
+        row: dict[str, float] = {}
+        for feat in ALL_FEATURE_NAMES:
+            agent_name = FEATURE_AGENT_MAP.get(feat, "")
+            if agent_name in ("shipping", "market"):
+                if not last_combined.empty and feat in last_combined.columns:
+                    val = last_combined.iloc[-1][feat]
+                    row[feat] = float(val) if pd.notna(val) else 0.0
+                else:
+                    row[feat] = 0.0
+            else:
+                frame = self._last_agent_frames.get(agent_name)
+                if frame is not None and not frame.empty and feat in frame.columns:
+                    val = frame.iloc[-1][feat]
+                    row[feat] = float(val) if pd.notna(val) else 0.0
+                else:
+                    row[feat] = 0.0
+        return pd.DataFrame([row], columns=ALL_FEATURE_NAMES)
 
     @staticmethod
     def _summarise_combined(combined: pd.DataFrame) -> dict:
