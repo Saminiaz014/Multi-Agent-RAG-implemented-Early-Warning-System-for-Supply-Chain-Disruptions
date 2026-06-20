@@ -212,23 +212,43 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     def run_full_pipeline(self) -> dict:
-        """End-to-end ingest → detect → aggregate.
+        """End-to-end ingest → detect → aggregate across all six agents.
 
-        Each registered agent is run on the combined frame using
-        ``agent.run_dataframe`` + ``agent.to_detection_result`` when those
-        methods are available (the shipping and market agents both expose
-        them); otherwise the agent's plain ``detect`` is invoked as a
-        fallback for legacy agents.
+        When no agents have been registered explicitly, every agent enabled
+        in ``config["agents"]`` is auto-built and registered (honouring the
+        active ``weight_mode``). Shipping + market run on the merged daily
+        frame; the four single-domain agents (geopolitical, natural disaster,
+        routing, news) each run on their own connector's frame. Any agent or
+        connector that fails is logged and skipped — one failure never aborts
+        the run.
+
+        Collected :class:`DetectionResult` outputs are passed to both
+        :meth:`RiskEngine.aggregate` (legacy ``composite_score`` /
+        ``agent_scores`` keys) and :meth:`RiskEngine.compute_risk` (the richer
+        agreement-amplified ``risk_score`` / ``contributing_agents`` breakdown),
+        so downstream consumers get the full six-agent composite either way.
 
         Returns:
-            Dictionary with keys ``composite_score``, ``risk_level``,
-            ``agent_scores``, ``shap``, ``context``, and ``data`` (the
-            ingest summary).
+            Dictionary with the legacy keys (``composite_score``,
+            ``risk_level``, ``agent_scores``), the rich risk keys
+            (``risk_score``, ``contributing_agents``, ``agent_agreement``,
+            ``reason``), ``shap``, ``context``, ``data`` (ingest summary), and
+            a ``metadata`` block reporting ``agents_active``, ``data_modes``,
+            and ``weight_mode``.
         """
+        if not self._agents:
+            self._build_enabled_agents()
+
         combined = self.ingest()
-        results = self._run_agents(combined)
+        results, agents_active, data_modes = self._run_agents(combined)
 
         from src.aggregation.risk_engine import RiskEngine, RiskLevel
+
+        metadata: dict[str, Any] = {
+            "agents_active": agents_active,
+            "data_modes": data_modes,
+            "weight_mode": self._weight_mode,
+        }
 
         if not results:
             logger.warning(
@@ -239,23 +259,41 @@ class Orchestrator:
                 "composite_score": 0.0,
                 "risk_level": RiskLevel.LOW,
                 "agent_scores": {},
+                "risk_score": 0.0,
+                "risk_level_label": "low",
+                "contributing_agents": {},
+                "agent_agreement": 0,
+                "reason": "No active agents contributed signals; risk defaults to LOW.",
                 "shap": {},
                 "context": [],
                 "data": self._summarise_combined(combined),
+                "metadata": metadata,
             }
 
         engine = RiskEngine(self.config)
         aggregated = engine.aggregate(results)
+        risk = engine.compute_risk(results)
+        metadata.update(risk.get("metadata", {}))
+
         output = {
             **aggregated,
+            "risk_score": risk["risk_score"],
+            "risk_level_label": risk["risk_level"],
+            "contributing_agents": risk["contributing_agents"],
+            "agent_agreement": risk["agent_agreement"],
+            "reason": risk["reason"],
             "shap": {},
             "context": [],
             "data": self._summarise_combined(combined),
+            "metadata": metadata,
         }
         logger.info(
-            "[Orchestrator.run_full_pipeline] complete | score=%.4f | level=%s",
+            "[Orchestrator.run_full_pipeline] complete | score=%.4f | level=%s "
+            "| agents_active=%s | weight_mode=%s",
             output["composite_score"],
             output["risk_level"],
+            agents_active,
+            self._weight_mode,
         )
         return output
 
@@ -279,6 +317,9 @@ class Orchestrator:
             and ``risk_level``. Empty DataFrame when no agents are
             registered or none can produce per-row scores.
         """
+        if not self._agents:
+            self._build_enabled_agents()
+
         combined = self.ingest()
         if not self._agents:
             logger.warning(
@@ -296,8 +337,13 @@ class Orchestrator:
                     agent.name,
                 )
                 continue
+            # Domain agents (geopolitical/disaster/routing/news) consume their
+            # own single-domain frame; shipping + market share the merged frame.
+            frame = self._frame_for_agent(agent.name, combined)
+            if frame is None:
+                continue
             try:
-                validated = agent.run_dataframe(combined)
+                validated = agent.run_dataframe(frame)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
                     "[Orchestrator] agent %s failed during run_dataframe: %s",
@@ -462,23 +508,142 @@ class Orchestrator:
                 mk_min.date(), mk_max.date(), ship_min.date(), ship_max.date(),
             )
 
-    def _run_agents(self, combined: pd.DataFrame) -> list:
-        """Run every registered agent and collect DetectionResults."""
+    def _run_agents(
+        self, combined: pd.DataFrame
+    ) -> tuple[list, list[str], dict[str, str]]:
+        """Run every registered agent and collect DetectionResults.
+
+        Shipping + market run on the merged daily frame; the four single-domain
+        agents each run on their own connector's frame. Failures are logged and
+        skipped (graceful degradation).
+
+        Returns:
+            Tuple of ``(results, agents_active, data_modes)`` where
+            ``agents_active`` lists the agents that ran successfully and
+            ``data_modes`` maps each to the source mode it ingested from.
+        """
         results = []
+        agents_active: list[str] = []
+        data_modes: dict[str, str] = {}
         for agent in self._agents:
+            frame = self._frame_for_agent(agent.name, combined)
+            if frame is None:
+                continue
             try:
                 if hasattr(agent, "run_dataframe") and hasattr(
                     agent, "to_detection_result"
                 ):
-                    validated = agent.run_dataframe(combined)
+                    validated = agent.run_dataframe(frame)
                     results.append(agent.to_detection_result(validated))
                 else:
-                    results.append(agent.detect(combined))
+                    results.append(agent.detect(frame))
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
                     "[Orchestrator] agent %s failed: %s", agent.name, exc
                 )
-        return results
+                continue
+            agents_active.append(agent.name)
+            data_modes[agent.name] = self._agent_data_mode(agent.name)
+        return results, agents_active, data_modes
+
+    def _frame_for_agent(
+        self, name: str, combined: pd.DataFrame
+    ) -> pd.DataFrame | None:
+        """Resolve the input frame for an agent (domain-aware, fail-safe).
+
+        Returns the merged shipping+market frame for the shipping/market
+        agents, the agent's own single-domain frame for the four domain
+        agents, or ``None`` when a domain agent's connector is absent (disabled)
+        or its fetch fails — so the agent is simply skipped, never crashing the
+        run.
+        """
+        if name not in _DOMAIN_CONNECTORS:
+            return combined
+        if name not in self._domain_connectors:
+            logger.warning(
+                "[Orchestrator] domain agent '%s' has no connector — skipping.",
+                name,
+            )
+            return None
+        try:
+            return self.fetch_domain(name)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "[Orchestrator] domain connector '%s' failed: %s — skipping.",
+                name,
+                exc,
+            )
+            return None
+
+    def _agent_data_mode(self, name: str) -> str:
+        """Report the source/data mode an agent's connector ingested from."""
+        if name == "shipping":
+            return self._shipping_mode
+        if name == "market":
+            return self._market_mode
+        connector = self._domain_connectors.get(name)
+        return str(getattr(connector, "data_mode", "unknown")) if connector else "unknown"
+
+    def _build_enabled_agents(self) -> None:
+        """Construct + register every agent enabled in ``config["agents"]``.
+
+        Honours each agent's ``enabled`` flag (default ``True``) so a disabled
+        agent is never built, detected, or weighted. Active weights are applied
+        on registration via :meth:`register_agent`, so the roster respects the
+        configured ``weight_mode``. A domain agent whose connector was skipped
+        (disabled) is not registered.
+        """
+        from src.agents.disaster_agent import DisasterAgent
+        from src.agents.geopolitical_agent import GeopoliticalAgent
+        from src.agents.market_agent import MarketAgent
+        from src.agents.news_agent import NewsAgent
+        from src.agents.routing_agent import RoutingAgent
+        from src.agents.shipping_agent import ShippingAgent
+
+        agents_cfg = self.config.get("agents", {}) or {}
+
+        def _enabled(name: str) -> bool:
+            return bool((agents_cfg.get(name, {}) or {}).get("enabled", True))
+
+        # Shipping + market run on the merged daily frame.
+        if _enabled("shipping"):
+            self.register_agent(
+                ShippingAgent(config=dict(agents_cfg.get("shipping", {}) or {}))
+            )
+        else:
+            logger.info("Agent 'shipping' disabled — not registered.")
+        if _enabled("market"):
+            self.register_agent(
+                MarketAgent(config=dict(agents_cfg.get("market", {}) or {}))
+            )
+        else:
+            logger.info("Agent 'market' disabled — not registered.")
+
+        # The four single-domain agents — only when both enabled and the
+        # matching connector was built.
+        domain_classes: dict[str, type] = {
+            "geopolitical": GeopoliticalAgent,
+            "natural_disaster": DisasterAgent,
+            "routing": RoutingAgent,
+            "news_sentiment": NewsAgent,
+        }
+        for name, agent_cls in domain_classes.items():
+            if not _enabled(name):
+                logger.info("Agent '%s' disabled — not registered.", name)
+                continue
+            if name not in self._domain_connectors:
+                logger.warning(
+                    "Agent '%s' enabled but its connector is absent — skipping.",
+                    name,
+                )
+                continue
+            self.register_agent(agent_cls(config=dict(agents_cfg.get(name, {}) or {})))
+
+        logger.info(
+            "[Orchestrator] built %d enabled agent(s): %s",
+            len(self._agents),
+            [a.name for a in self._agents],
+        )
 
     @staticmethod
     def _summarise_combined(combined: pd.DataFrame) -> dict:

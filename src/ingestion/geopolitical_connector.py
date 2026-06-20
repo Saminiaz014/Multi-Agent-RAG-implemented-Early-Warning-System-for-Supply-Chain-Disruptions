@@ -38,6 +38,13 @@ _DEFAULT_LEAD_DAYS: int = 3
 _LOCATION: str = "Strait of Hormuz"
 _SOURCE: str = "geopolitical"
 
+#Why are we defining baseline levels and noise for the synthetic data generation?
+# Because we want the synthetic data to have realistic variability around typical levels 
+# of geopolitical risk, with occasional spikes during disruption scenarios. 
+# The baselines represent typical "quiet" conditions, while the noise adds day-to-day 
+# fluctuations that make the data more lifelike. This allows us to test the agent's ability 
+# to detect meaningful elevations in risk above normal background levels, rather than just flagging 
+# any non-zero value as a disruption.
 _BASELINE_SANCTIONS: float = 0.10
 _BASELINE_MILITARY: float = 0.15
 _BASELINE_DIPLOMATIC: float = 0.05

@@ -104,7 +104,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_pipeline(mode: str | None = None) -> dict:
-    """Run the full hybrid pipeline and print a risk summary.
+    """Run the full six-agent pipeline and print a JSON risk assessment.
+
+    Delegates ingestion → detection → aggregation to
+    :meth:`~src.orchestrator.Orchestrator.run_full_pipeline`, which wires every
+    agent enabled in ``config["agents"]`` into the pipeline (shipping + market
+    on the merged daily frame; geopolitical, disaster, routing, news each on
+    their own connector frame), honours the active ``weight_mode``, and
+    degrades gracefully when an individual agent or connector fails.
 
     Args:
         mode: Optional override for both connectors' ``source_mode``.
@@ -112,31 +119,17 @@ def run_pipeline(mode: str | None = None) -> dict:
             ``config/settings.yaml``.
 
     Returns:
-        Aggregated output dictionary from
-        :class:`~src.aggregation.risk_engine.RiskEngine` — always
-        populated (with ``LOW`` / 0.0 in degraded scenarios) so callers
+        The full pipeline output dictionary from ``run_full_pipeline`` —
+        always populated (with ``LOW`` / 0.0 in degraded scenarios) so callers
         and the printed summary stay consistent.
     """
-    from src.agents.disaster_agent import DisasterAgent
-    from src.agents.geopolitical_agent import GeopoliticalAgent
-    from src.agents.market_agent import MarketAgent
-    from src.agents.news_agent import NewsAgent
-    from src.agents.routing_agent import RoutingAgent
-    from src.agents.shipping_agent import ShippingAgent
-    from src.aggregation.risk_engine import RiskEngine, RiskLevel
+    import json
+
+    from src.aggregation.risk_engine import RiskLevel
     from src.orchestrator import Orchestrator
 
     logger = logging.getLogger(__name__)
     config = load_config()
-
-    # Config agent-name → agent class for the four single-domain agents. Each
-    # runs on its own connector's frame (fit → run_dataframe → result).
-    _DOMAIN_AGENTS = {
-        "geopolitical": GeopoliticalAgent,
-        "natural_disaster": DisasterAgent,
-        "routing": RoutingAgent,
-        "news_sentiment": NewsAgent,
-    }
 
     if mode is not None:
         ingestion = config.setdefault("ingestion", {})
@@ -144,52 +137,11 @@ def run_pipeline(mode: str | None = None) -> dict:
         ingestion.setdefault("market", {})["source_mode"] = mode
         logger.info("[main] --mode override applied: both connectors → '%s'", mode)
 
-    orchestrator = Orchestrator(config=config)
-
-    # -- a. INGEST -------------------------------------------------------
-    domain_frames: dict = {}
     try:
-        shipping_df = orchestrator._safe_fetch(
-            orchestrator._shipping_connector, "shipping"
-        )
-        market_df = orchestrator._safe_fetch(
-            orchestrator._market_connector, "market"
-        )
-        logger.info(
-            "[main.ingest] shipping rows=%d range=[%s..%s]",
-            len(shipping_df),
-            shipping_df["timestamp"].min(),
-            shipping_df["timestamp"].max(),
-        )
-        logger.info(
-            "[main.ingest] market rows=%d range=[%s..%s]",
-            len(market_df),
-            market_df["timestamp"].min(),
-            market_df["timestamp"].max(),
-        )
-        orchestrator._warn_if_market_coverage_short(shipping_df, market_df)
-        aligned_market = orchestrator._market_connector.align_with_shipping(
-            shipping_df, market_df
-        )
-        combined_df = _merge_shipping_market(shipping_df, aligned_market)
-        logger.info(
-            "[main.ingest] combined rows=%d (shipping ⨝ aligned-market)",
-            len(combined_df),
-        )
-
-        # Single-domain connectors (geopolitical, disaster, routing, news).
-        for name in _DOMAIN_AGENTS:
-            if name not in orchestrator._domain_connectors:
-                continue
-            logger.info("[main.ingest] running %s connector…", name)
-            try:
-                frame = orchestrator.fetch_domain(name)
-                domain_frames[name] = frame
-                logger.info("[main.ingest] %s rows=%d", name, len(frame))
-            except Exception as exc:
-                logger.exception("[main.ingest/%s] connector failed: %s", name, exc)
+        orchestrator = Orchestrator(config=config)
+        result = orchestrator.run_full_pipeline()
     except Exception as exc:
-        logger.exception("[main.ingest] failed: %s", exc)
+        logger.exception("[main.run_pipeline] failed: %s", exc)
         _print_summary(
             composite_score=0.0,
             risk_level=RiskLevel.LOW,
@@ -197,7 +149,7 @@ def run_pipeline(mode: str | None = None) -> dict:
             weights=config.get("weights", {}),
             shipping_windows=0,
             market_windows=0,
-            note=f"INGEST FAILED: {exc}",
+            note=f"PIPELINE FAILED: {exc}",
         )
         return {
             "composite_score": 0.0,
@@ -205,80 +157,24 @@ def run_pipeline(mode: str | None = None) -> dict:
             "agent_scores": {},
         }
 
-    # -- b. DETECT -------------------------------------------------------
-    # Resolve the active weight layout (honours weight_mode). In "optimized"
-    # mode this injects the Optuna-tuned intra-agent weights + thresholds; in
-    # "hand_tuned" mode it re-applies the settings.yaml defaults (a no-op on
-    # behaviour, but keeps both paths identical).
-    from src.optimization.weight_config import (
-        apply_weights_to_agent,
-        resolve_active_weights,
-    )
+    # -- JSON risk assessment (machine-readable, all six agents) ---------
+    print(json.dumps(_jsonable(_assessment_view(result)), indent=2))
 
-    weight_layout = resolve_active_weights(config)
-    logger.info(
-        "[main.detect] weight source: %s", weight_layout.get("source", "hand_tuned")
-    )
-
-    shipping_agent = ShippingAgent(
-        config={"contamination": 0.05, "threshold": 0.55, "z_threshold": 2.0}
-    )
-    market_agent = MarketAgent(
-        config={"z_threshold": 1.5, "threshold": 0.50, "baseline_years": 5}
-    )
-    for _agent in (shipping_agent, market_agent):
-        apply_weights_to_agent(_agent, weight_layout)
-
-    shipping_windows, shipping_result = _run_agent_safe(
-        shipping_agent, combined_df, "shipping", logger
-    )
-    market_windows, market_result = _run_agent_safe(
-        market_agent, combined_df, "market", logger
-    )
-
-    detection_results = [r for r in (shipping_result, market_result) if r is not None]
-
-    # Single-domain agents — each scores its own connector frame.
-    agents_cfg = config.get("agents", {}) or {}
-    for name, agent_cls in _DOMAIN_AGENTS.items():
-        frame = domain_frames.get(name)
-        if frame is None:
-            continue
-        result = _run_domain_agent_safe(
-            agent_cls, agents_cfg.get(name, {}) or {}, frame, name, logger,
-            weight_layout=weight_layout,
-        )
-        if result is not None:
-            detection_results.append(result)
-
-    # -- c. AGGREGATE ----------------------------------------------------
-    try:
-        engine = RiskEngine(config)
-        aggregated = engine.aggregate(detection_results)
-        logger.info(
-            "[main.aggregate] composite=%.4f level=%s agents=%s",
-            aggregated["composite_score"],
-            aggregated["risk_level"],
-            list(aggregated["agent_scores"].keys()),
-        )
-    except Exception as exc:
-        logger.exception("[main.aggregate] failed: %s", exc)
-        aggregated = {
-            "composite_score": 0.0,
-            "risk_level": RiskLevel.LOW,
-            "agent_scores": {},
-        }
-
-    # -- d. SUMMARY / OUTPUT --------------------------------------------
+    # -- Human-readable summary box -------------------------------------
+    metadata = result.get("metadata", {}) or {}
     _print_summary(
-        composite_score=float(aggregated["composite_score"]),
-        risk_level=aggregated["risk_level"],
-        agent_scores=aggregated["agent_scores"],
+        composite_score=float(result.get("composite_score", 0.0)),
+        risk_level=result.get("risk_level", RiskLevel.LOW),
+        agent_scores=result.get("agent_scores", {}),
         weights=config.get("weights", {}),
-        shipping_windows=shipping_windows,
-        market_windows=market_windows,
+        shipping_windows=0,
+        market_windows=0,
+        note=(
+            f"weight_mode={metadata.get('weight_mode', 'hand_tuned')} | "
+            f"agents_active={len(metadata.get('agents_active', []))}/6"
+        ),
     )
-    return aggregated
+    return result
 
 
 def run_optimization(n_trials: int | None = None) -> dict:
@@ -384,72 +280,52 @@ def main() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _merge_shipping_market(shipping_df, aligned_market_df):
-    """Left-join shipping + aligned market on timestamp; backfill oil price."""
-    import pandas as pd
+def _assessment_view(result: dict) -> dict:
+    """Project the pipeline output into a compact JSON risk assessment.
 
-    shipping_df = shipping_df.copy()
-    shipping_df["timestamp"] = pd.to_datetime(shipping_df["timestamp"])
-    market_for_merge = aligned_market_df.copy()
-    market_for_merge["timestamp"] = pd.to_datetime(market_for_merge["timestamp"])
-    if "is_disruption" in market_for_merge.columns:
-        market_for_merge = market_for_merge.rename(
-            columns={"is_disruption": "market_is_disruption"}
-        )
-    combined = shipping_df.merge(
-        market_for_merge, on="timestamp", how="left", suffixes=("", "_market")
-    )
-    if (
-        "brent_crude_usd" in combined.columns
-        and "oil_price_usd" in combined.columns
-    ):
-        combined["oil_price_usd"] = combined["oil_price_usd"].fillna(
-            combined["brent_crude_usd"]
-        )
-    return combined
-
-
-def _run_agent_safe(agent, df, name: str, logger: logging.Logger):
-    """Run an agent, returning (window_count, DetectionResult|None) on failure."""
-    try:
-        windows = agent.run(df)
-        validated = agent.run_dataframe(df)
-        result = agent.to_detection_result(validated)
-        logger.info(
-            "[main.detect/%s] %d anomaly windows produced", name, len(windows)
-        )
-        return len(windows), result
-    except Exception as exc:
-        logger.exception("[main.detect/%s] agent failed: %s", name, exc)
-        return 0, None
-
-
-def _run_domain_agent_safe(
-    agent_cls, agent_cfg: dict, df, name: str, logger, weight_layout: dict | None = None
-):
-    """Build + run a single-domain agent on its own frame.
-
-    Uses the proven ``fit → run_dataframe → to_detection_result`` path so the
-    output is RiskEngine-compatible. Returns the :class:`DetectionResult`, or
-    ``None`` if the agent raises (so one failing agent never aborts the run).
-    When ``weight_layout`` is supplied, the active (optimized or hand-tuned)
-    weights are injected before fitting.
+    Pulls out the six-agent composite, the per-agent contribution breakdown,
+    and the run metadata (``agents_active`` / ``data_modes`` / ``weight_mode``)
+    so the printed JSON is the canonical machine-readable assessment.
     """
-    try:
-        agent = agent_cls(config=agent_cfg)
-        if weight_layout is not None:
-            from src.optimization.weight_config import apply_weights_to_agent
+    metadata = result.get("metadata", {}) or {}
+    risk_level = result.get("risk_level")
+    return {
+        "risk_score": result.get("risk_score", result.get("composite_score", 0.0)),
+        "risk_level": risk_level.value if hasattr(risk_level, "value") else risk_level,
+        "composite_score": result.get("composite_score", 0.0),
+        "reason": result.get("reason", ""),
+        "agent_agreement": result.get("agent_agreement", 0),
+        "contributing_agents": result.get("contributing_agents", {}),
+        "metadata": {
+            "agents_active": metadata.get("agents_active", []),
+            "data_modes": metadata.get("data_modes", {}),
+            "weight_mode": metadata.get("weight_mode", "hand_tuned"),
+            "active_agents": metadata.get("active_agents"),
+            "weights_used": metadata.get("weights_used", {}),
+        },
+        "data": result.get("data", {}),
+    }
 
-            apply_weights_to_agent(agent, weight_layout)
-        agent.fit(df)
-        validated = agent.run_dataframe(df)
-        result = agent.to_detection_result(validated)
-        n_flags = int(result.anomaly_flags.sum())
-        logger.info("[main.detect/%s] agent flagged %d anomalies", name, n_flags)
-        return result
-    except Exception as exc:
-        logger.exception("[main.detect/%s] agent failed: %s", name, exc)
-        return None
+
+def _jsonable(obj):
+    """Recursively coerce numpy/enum values so ``json.dumps`` never fails."""
+    import enum
+
+    import numpy as np
+
+    if isinstance(obj, dict):
+        return {k: _jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonable(v) for v in obj]
+    if isinstance(obj, enum.Enum):
+        return obj.value
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return _jsonable(obj.tolist())
+    return obj
 
 
 def _print_summary(
