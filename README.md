@@ -1133,6 +1133,164 @@ No production behaviour broke: the integration preserves every existing contract
 
 ---
 
+## What Was Built (Phase 2F.2 — Six-Agent SHAP Surrogate)
+
+> **Summary.** SHAP explainability expanded from 2-agent to the full 20-feature, 6-agent space. A `SurrogateShapExplainer` trains a Random Forest surrogate to reproduce the pipeline's composite risk score, then applies `shap.TreeExplainer` for exact Shapley values. Surrogate R² = **0.991** on 364 synthetic days. `run_full_pipeline()` now populates `output["explanation"]` with top-3 drivers, expected value, natural-language text, and surrogate R². **165/165 tests passing** (5 new SHAP tests in `tests/test_shap_6agent.py`).
+
+### Feature Space
+
+20 canonical SHAP features map across 6 agent domains:
+
+| Domain | Features |
+|---|---|
+| `shipping` | `vessel_count`, `avg_delay_hours`, `congestion_index` |
+| `market` | `brent_crude_usd`, `trade_volume_index`, `freight_rate_index` |
+| `geopolitical` | `sanctions_severity`, `military_activity_index`, `diplomatic_incident_score`, `regime_stability_index` |
+| `natural_disaster` | `earthquake_severity`, `tsunami_risk`, `cyclone_severity`, `severe_weather_index` |
+| `routing` | `rerouting_percentage`, `avg_route_deviation_km`, `transit_volume_ratio` |
+| `news_sentiment` | `sentiment_score`, `source_consensus`, `article_volume` |
+
+`ALL_FEATURE_NAMES` (list, length 20) and `FEATURE_AGENT_MAP` (dict mapping each feature to its domain) are module-level constants in `src/explainability/shap_explainer.py` and shared with the orchestrator.
+
+### `SurrogateShapExplainer`
+
+A wrapper around `RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)` and `shap.TreeExplainer`:
+
+- **`train_surrogate(features_df, risk_scores)`** — trains the surrogate; logs a warning if R² < 0.85. Returns R² (0.991 on the 364-day synthetic dataset).
+- **`explain(features_row)`** — returns `{shap_values, top_drivers, feature_names, expected_value}`. `top_drivers` is a list of 3 dicts, each `{feature, agent, shap_value}`.
+- **`generate_explanation_text(risk_score, risk_level, weight_mode, shap_result)`** — produces a natural-language sentence such as: `"Risk is HIGH (0.82) [hand_tuned weights]. Primary drivers: brent_crude_usd (market, +0.21), vessel_count (shipping, +0.14), sentiment_score (news_sentiment, +0.09)."`.
+- **`generate_shap_plot(features_df, risk_scores)`** — saves `shap_beeswarm_6agent.png` and `shap_waterfall_6agent.png` via Matplotlib Agg; returns file paths.
+
+### `build_shap_training_data(config)`
+
+Generates a 364-day training dataset from all 6 connectors:
+
+- Feature values come from **raw connector frames** (not scaled agent outputs), preserving interpretable real-world ranges.
+- Anomaly scores come from each agent's `run_dataframe()` output for the per-day risk target.
+- Market agent outputs 364 rows (one dropped for rolling window); all domains aligned to 364 via `iloc[-n:]`.
+- Disabled agents contribute zero-filled columns so the matrix is always (364, 20).
+
+### Orchestrator Integration
+
+`run_full_pipeline()` populates `output["explanation"]` after the risk score is computed:
+
+```json
+{
+  "explanation": {
+    "top_drivers": [
+      {"feature": "brent_crude_usd", "agent": "market",        "shap_value": 0.214},
+      {"feature": "vessel_count",    "agent": "shipping",       "shap_value": 0.138},
+      {"feature": "sentiment_score", "agent": "news_sentiment", "shap_value": 0.091}
+    ],
+    "expected_value": 0.312,
+    "text": "Risk is MEDIUM (0.55) [hand_tuned weights]. Primary drivers: brent_crude_usd (market, +0.21), vessel_count (shipping, +0.14), sentiment_score (news_sentiment, +0.09).",
+    "surrogate_r2": 0.991
+  }
+}
+```
+
+The surrogate is lazy-trained once per `Orchestrator` instance (`self._shap_explainer`) and cached for all subsequent calls. Raw agent input frames are stored in `self._last_agent_frames` and used by `_build_shap_features_row()` to construct the current-state 20-column feature row for `explain()`. The entire SHAP block is `try/except` guarded — failure logs a warning and never aborts the pipeline.
+
+### Test Coverage (Phase 2F.2)
+
+`tests/test_shap_6agent.py` — 5 tests:
+
+| Test | What it verifies |
+|---|---|
+| `test_surrogate_full_features` | R² > 0.85 on 20-feature synthetic data |
+| `test_explain_scenario_b` | High-anomaly row: top SHAP driver from an elevated-signal domain |
+| `test_explain_normal_day` | Zero input: total absolute SHAP < 1.0 |
+| `test_explanation_text_mentions_agents` | Text output contains known domain names |
+| `test_disabled_agent` | Zeroed routing columns: model still trains and produces a valid explanation |
+
+---
+
+## What Was Built (Phase 2F.3a — RAG Knowledge Base Expansion)
+
+> **Summary.** The RAG knowledge base expanded to 10 real historical disruption cases covering all 6 signal domains. `ContextRetriever` was rebuilt around ChromaDB's built-in `DefaultEmbeddingFunction` (ONNX-backed all-MiniLM-L6-v2 — no HuggingFace download required at runtime). Three new methods handle index rebuild detection, 6-domain signal-profile queries, and readable context formatting. `run_full_pipeline()` now populates `output["historical_context"]` after the SHAP block. **170/170 tests passing** (5 new RAG tests in `tests/test_rag_6domain.py`).
+
+### Knowledge Base (`data/knowledge_base/disruption_cases.json`)
+
+10 real-world disruption cases committed to git. Each case contains:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | str | Unique slug (e.g. `"hormuz_2019"`) |
+| `event` | str | Human-readable event name |
+| `date` | str | ISO date |
+| `region` | str | Geographic region |
+| `description` | str | Narrative description |
+| `features` | dict | Quantitative signals: vessel count drop, delay factor, congestion peak, oil spike, rerouting %, geopolitical risk level, disaster involvement flag, sentiment drop |
+| `impact` | str | Economic/operational impact summary |
+| `duration_days` | int | Disruption duration |
+| `recovery_days` | int | Days to full recovery |
+| `primary_agents` | list[str] | Active signal domains (subset of the 6 agents) |
+| `lessons` | str | Key takeaway for early-warning systems |
+
+Cases cover all 6 domains: Hormuz tension (2019), Ever Given Suez Canal (2021), Houthi Red Sea attacks (2024), Hormuz mine threat (2010), Somali piracy (2011), Japan earthquake/tsunami (2011), COVID port congestion (2021), US West Coast port strikes (2014), Iran sanctions (2012), Cyclone Gonu (2007).
+
+### `ContextRetriever` Updates
+
+Three new methods alongside the legacy `load_knowledge_base()` / `retrieve()` path:
+
+**`build_index(kb_json_path)`** — count-based rebuild detection. If `collection.count() == len(cases)`, returns 0 (fast path, no re-embedding). Otherwise clears stale entries and rebuilds from scratch. ChromaDB auto-embeds via `DefaultEmbeddingFunction` when `add(documents=...)` is called.
+
+**`query(current_signals, top_k)`** — high-level entry point. Builds a natural-language query string from domains whose anomaly score exceeds 0.40, then delegates to `retrieve()`. Example for a shipping + geopolitical scenario:
+```
+"Supply chain disruption signals: high shipping disruption with vessel count reduction and transit delays;
+elevated geopolitical tension with sanctions, military activity, or diplomatic incidents."
+```
+Falls back to a generic normal-conditions string when no domain is active.
+
+**`format_context(results)`** — converts retrieval results to a numbered readable block:
+```
+Historical Precedents:
+1. [2019-06-01] Iran Strait of Hormuz Tension (similarity: 0.89) [Domains: shipping, geopolitical, news_sentiment]
+   Iran Strait of Hormuz Tension (2019-06-01). Region: Strait of Hormuz...
+```
+
+**Embedding backend:** Switched from `sentence-transformers` to ChromaDB's `DefaultEmbeddingFunction`. The ONNX model (79.3MB) is downloaded once to `~/.cache/chroma/onnx_models/` on first use; subsequent runs use the local cache with no network dependency. The `.chromadb/` persistence directory (`data/knowledge_base/.chromadb/`) is gitignored; `disruption_cases.json` is committed.
+
+### Orchestrator Integration
+
+`run_full_pipeline()` queries RAG after SHAP and writes results to `output["historical_context"]`:
+
+```json
+{
+  "historical_context": [
+    {
+      "id": "hormuz_2019",
+      "document": "Iran Strait of Hormuz Tension (2019-06-01). Region: ...",
+      "distance": 0.112,
+      "similarity": 0.888,
+      "metadata": {
+        "event": "Iran Strait of Hormuz Tension",
+        "date": "2019-06-01",
+        "primary_agents": "[\"shipping\", \"geopolitical\", \"news_sentiment\"]",
+        "duration_days": 45,
+        "geopolitical_risk_level": "critical"
+      }
+    }
+  ]
+}
+```
+
+`ContextRetriever` is instantiated per pipeline call; `build_index()` returns immediately on the fast path when case count is unchanged. The RAG block is `try/except` guarded — failure logs a warning and never aborts the pipeline.
+
+### Test Coverage (Phase 2F.3a)
+
+`tests/test_rag_6domain.py` — 5 tests (shared `scope="module"` ChromaDB fixture):
+
+| Test | What it verifies |
+|---|---|
+| `test_knowledge_base_completeness` | ≥ 10 cases, all 6 domains represented, all required fields present |
+| `test_query_scenario_b` | Multi-domain signals (ship=0.8, geo=0.85, disaster=0.7, routing=0.75, news=0.72): similarity > 0.6, top match covers ≥ 2 domains |
+| `test_query_geopolitical_only` | geo=0.90, others low: top result has `"geopolitical"` in `primary_agents` |
+| `test_query_disaster` | disaster=0.88, others low: at least one top-3 result has `"natural_disaster"` in `primary_agents` |
+| `test_format_context` | Output contains `"Historical Precedents:"`, `"similarity:"`, and known event keywords |
+
+---
+
 ## Project Structure
 
 ```
@@ -1167,7 +1325,11 @@ supply-chain-dss/
 │   ├── test_agents.py
 │   ├── test_ingestion.py       # shipping + market connector schema, ranges, separation, cross-source correlation
 │   ├── test_risk_engine.py
-│   └── test_scenarios.py
+│   ├── test_scenarios.py
+│   ├── test_new_agents.py      # geopolitical, natural-disaster, routing, news-sentiment agents + 6-agent integration
+│   ├── test_optimization.py    # Optuna weight optimizer, parameter space, objective function, no-leakage guard
+│   ├── test_shap_6agent.py     # 20-feature SHAP surrogate, explain output, text generation, disabled-agent path
+│   └── test_rag_6domain.py     # 10-case knowledge base, multi-domain query, similarity thresholds, format_context
 ├── logs/                       # pipeline execution logs (gitignored)
 ├── notebooks/                  # exploration and evaluation notebooks
 ├── requirements.txt
@@ -1183,7 +1345,7 @@ supply-chain-dss/
 pip install -r requirements.txt
 ```
 
-Dependencies: `pandas`, `numpy`, `scikit-learn`, `shap`, `chromadb`, `sentence-transformers`, `fastapi`, `uvicorn`, `pyyaml`, `plotly`, `optuna`, `kaleido`, `pytest`, `httpx`. (`optuna` + `kaleido` back the Phase 3.5 weight optimizer and its figure export.)
+Dependencies: `pandas`, `numpy`, `scikit-learn`, `shap`, `chromadb`, `fastapi`, `uvicorn`, `pyyaml`, `plotly`, `optuna`, `kaleido`, `pytest`, `httpx`. (`optuna` + `kaleido` back the weight optimizer and its figure export. `chromadb` bundles its own ONNX embedding model — `sentence-transformers` is no longer required.)
 
 ---
 
@@ -1224,7 +1386,7 @@ API docs available at `http://localhost:8000/docs`.
 pytest tests/ -v
 ```
 
-End of Week 3, the suite is **54 tests / 54 passing** (5 ABC contract + 4 ShippingAgent + 4 MarketAgent + 30 ingestion + 7 risk-engine + 4 scenario). Run the agent evaluations with output:
+The full suite is **170 tests / 170 passing** across 8 test files. Run the agent evaluations with output:
 
 ```bash
 pytest tests/test_agents.py::test_shipping_agent_evaluation -v -s
