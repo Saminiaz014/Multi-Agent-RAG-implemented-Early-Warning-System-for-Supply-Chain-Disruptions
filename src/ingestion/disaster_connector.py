@@ -19,7 +19,9 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import requests
 
+from src.extractors.base_extractor import resolve_env_value
 from src.ingestion.base_connector import BaseConnector
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,23 @@ _QUAKE_MAGNITUDE: float = 6.5
 
 _MINOR_TREMOR_RATE: float = 0.04  # P(minor tremor on any day)
 _MINOR_TREMOR_MAG_RANGE: tuple[float, float] = (2.0, 3.5)
+
+# Ambee categorical -> numerical [0,1] severity mapping (live api mode).
+# Ambee's /disasters endpoints expose two categorical fields only — no
+# magnitude / wind-speed number — so this is a deliberate approximation,
+# unlike the Richter-scale severity used by the synthetic/CSV paths above.
+_AMBEE_PROXIMITY_MAP: dict[str, float] = {"Low": 0.20, "Moderate": 0.50, "High Risk": 0.85}
+_AMBEE_ALERT_MAP: dict[str, float] = {"Green": 0.10, "Yellow": 0.35, "Orange": 0.65, "Red": 0.90}
+_AMBEE_PROXIMITY_WEIGHT: float = 0.6
+_AMBEE_ALERT_WEIGHT: float = 0.4
+
+_AMBEE_EVENT_TYPE_TO_FEATURE: dict[str, str] = {
+    "EQ": "earthquake_severity",
+    "CY": "cyclone_severity",
+    "FL": "severe_weather_index",
+    "SW": "severe_weather_index",
+    "Misc": "severe_weather_index",
+}
 
 
 class DisasterConnector(BaseConnector):
@@ -193,22 +212,126 @@ class DisasterConnector(BaseConnector):
         return df
 
     def fetch_api(self) -> pd.DataFrame:
-        """Planned USGS + Ambee integration.
+        """Fetch current disaster risk from the Ambee Disasters API.
 
-        Planned implementation:
-            * USGS Earthquake API — bbox lat 20-35, lon 48-65, minmag 3.0;
-              daily-aggregate magnitude-weighted severity scaled by
-              great-circle distance to (26.5°N, 56.5°E).
-            * Ambee Natural Disasters API — cyclone + severe-weather feed.
-            * Tsunami risk derived from earthquake depth + offshore flag.
+        Queries ``/disasters/latest/by-lat-lng`` for every monitoring point
+        configured under ``monitoring_points[location]`` (``location``
+        defaults to ``"hormuz"``), maps Ambee's two categorical severity
+        fields (``proximity_severity_level``, ``default_alert_levels``) onto
+        a ``[0, 1]`` score via ``severity_mapping`` in config, and takes the
+        worst-case (max) severity per feature column across all points and
+        events. ``tsunami_risk`` has no Ambee equivalent — it is approximated
+        from any sufficiently severe earthquake event (damped by 0.7), per
+        the project's documented design decision; this is a coarse proxy,
+        not a real tsunami signal.
+
+        Earthquake magnitude/depth (and a real USGS-based ``tsunami_risk``)
+        remain on the FRED-style "planned" path noted in the class docs —
+        USGS is unused here because Ambee already covers the chokepoint
+        bounding box end to end for this connector.
+
+        Returns:
+            Single-row DataFrame matching the synthetic-mode schema
+            (``timestamp``, the four feature columns, ``composite_disaster_risk``,
+            ``active_events``, ``is_disruption``).
 
         Raises:
-            NotImplementedError: Wiring stubbed for thesis scope.
+            ValueError: If no Ambee API key or no monitoring points are
+                configured — callers (e.g. :class:`~src.orchestrator.Orchestrator`)
+                catch ``ValueError`` and fall back to synthetic.
         """
-        raise NotImplementedError(
-            "API mode not yet implemented. Planned: USGS earthquake + "
-            "Ambee feeds. Set data_mode='synthetic' or 'csv' in config."
+        api_key = resolve_env_value(self.config.get("api", {}).get("ambee_api_key", ""))
+        if not api_key:
+            raise ValueError(
+                "Ambee API key not configured — set agents.natural_disaster.api."
+                "ambee_api_key (or AMBEE_API_KEY in .env)."
+            )
+
+        location = str(self.config.get("location", "hormuz"))
+        monitoring_points = self.config.get("monitoring_points", {}).get(location, [])
+        if not monitoring_points:
+            raise ValueError(f"No monitoring_points configured for location={location!r}.")
+
+        severity_cfg = self.config.get("severity_mapping", {}) or {}
+        proximity_map = severity_cfg.get("proximity", _AMBEE_PROXIMITY_MAP)
+        alert_map = severity_cfg.get("alert", _AMBEE_ALERT_MAP)
+        prox_weight = float(severity_cfg.get("proximity_weight", _AMBEE_PROXIMITY_WEIGHT))
+        alert_weight = float(severity_cfg.get("alert_weight", _AMBEE_ALERT_WEIGHT))
+        base_url = self.config.get("api", {}).get("ambee_base_url", "https://api.ambeedata.com")
+
+        feature_maxes: dict[str, float] = {
+            "earthquake_severity": 0.0,
+            "tsunami_risk": 0.0,
+            "cyclone_severity": 0.0,
+            "severe_weather_index": 0.0,
+        }
+        active_events: list[str] = []
+        headers = {"x-api-key": api_key, "Content-type": "application/json"}
+
+        for point in monitoring_points:
+            lat, lng, name = point["lat"], point["lng"], point.get("name", "")
+            try:
+                response = requests.get(
+                    f"{base_url}/disasters/latest/by-lat-lng",
+                    headers=headers,
+                    params={"lat": lat, "lng": lng},
+                    timeout=30,
+                )
+                response.raise_for_status()
+                events = response.json().get("result", [])
+            except requests.RequestException as exc:
+                logger.error("[DisasterConnector/api] Ambee request failed for %s: %s", name, exc)
+                continue
+
+            for event in events:
+                event_type = event.get("event_type", "Misc")
+                feature_col = _AMBEE_EVENT_TYPE_TO_FEATURE.get(event_type, "severe_weather_index")
+                base_sev = proximity_map.get(event.get("proximity_severity_level", "Low"), 0.2)
+                alert_sev = alert_map.get(event.get("default_alert_levels", "Green"), 0.1)
+                severity = round(prox_weight * base_sev + alert_weight * alert_sev, 4)
+
+                if severity > feature_maxes[feature_col]:
+                    feature_maxes[feature_col] = severity
+                if event_type == "EQ" and severity > 0.5:
+                    feature_maxes["tsunami_risk"] = max(
+                        feature_maxes["tsunami_risk"], severity * 0.7
+                    )
+                if severity >= 0.35:
+                    active_events.append(
+                        f"{event.get('event_name', event_type)} near {name} "
+                        f"(severity={severity:.2f})"
+                    )
+
+        weights = self.config.get("weights") or _DEFAULT_WEIGHTS
+        composite = float(np.clip(
+            weights["earthquake"] * feature_maxes["earthquake_severity"]
+            + weights["tsunami"] * feature_maxes["tsunami_risk"]
+            + weights["cyclone"] * feature_maxes["cyclone_severity"]
+            + weights["severe_weather"] * feature_maxes["severe_weather_index"],
+            0.0, 1.0,
+        ))
+        max_single = max(feature_maxes.values())
+        is_disruption = (
+            composite >= float(self.config.get("threshold", 0.30))
+            or max_single >= float(self.config.get("single_event_threshold", 0.40))
         )
+
+        df = pd.DataFrame([{
+            "timestamp": pd.Timestamp.utcnow().tz_localize(None),
+            "earthquake_severity": round(feature_maxes["earthquake_severity"], 4),
+            "tsunami_risk": round(feature_maxes["tsunami_risk"], 4),
+            "cyclone_severity": round(feature_maxes["cyclone_severity"], 4),
+            "severe_weather_index": round(feature_maxes["severe_weather_index"], 4),
+            "composite_disaster_risk": round(composite, 4),
+            "active_events": json.dumps(active_events),
+            "is_disruption": is_disruption,
+        }])
+        logger.info(
+            "[DisasterConnector/api] Ambee live fetch | location=%s | composite=%.4f | "
+            "is_disruption=%s | events=%d",
+            location, composite, is_disruption, len(active_events),
+        )
+        return df
 
     def validate(self, df: pd.DataFrame) -> bool:
         """Schema + range checks; returns True iff all checks pass."""

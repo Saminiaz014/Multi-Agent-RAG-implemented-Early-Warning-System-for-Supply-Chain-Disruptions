@@ -172,8 +172,11 @@ class TestDisasterConnector:
         ).fetch()
         assert len(df) == 365
 
-    def test_api_mode_raises(self) -> None:
-        with pytest.raises(NotImplementedError):
+    def test_api_mode_raises_without_ambee_key(self) -> None:
+        """fetch_api() is now implemented (Ambee live scoring); without a
+        configured key it raises ValueError so the orchestrator's existing
+        fallback-to-synthetic path (which catches ValueError) applies."""
+        with pytest.raises(ValueError):
             DisasterConnector(config={"data_mode": "api"}).fetch()
 
 

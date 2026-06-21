@@ -105,11 +105,48 @@ agents:
       full_weight_radius_km: 500
       decay_radius_km: 1500
     csv_path: "data/raw/disaster_events.csv"
+    location: "hormuz"  # key into monitoring_points below, used by fetch_api()
     api:
       usgs_url: "https://earthquake.usgs.gov/fdsnws/event/1/query"
       ambee_url: "https://api.ambeedata.com/disasters/latest/by-lat-lng"
-      ambee_api_key: ""
+      ambee_base_url: "https://api.ambeedata.com"
+      ambee_api_key: "${AMBEE_API_KEY}"
       refresh_interval_hours: 6
+
+    # Categorical (Ambee) -> numerical [0,1] severity mapping.
+    # Ambee's /disasters endpoints return two categorical fields —
+    # proximity_severity_level and default_alert_levels — with no
+    # underlying magnitude/wind-speed number, so this is a deliberate
+    # approximation rather than the Richter-scale severity used for the
+    # synthetic/CSV paths.
+    severity_mapping:
+      proximity:
+        "Low": 0.20
+        "Moderate": 0.50
+        "High Risk": 0.85
+      alert:
+        "Green": 0.10
+        "Yellow": 0.35
+        "Orange": 0.65
+        "Red": 0.90
+      proximity_weight: 0.6
+      alert_weight: 0.4
+
+    # Chokepoint monitoring coordinates queried against Ambee.
+    monitoring_points:
+      hormuz:
+        - { name: "Hormuz Strait Center", lat: 26.56, lng: 56.25 }
+        - { name: "Fujairah Port", lat: 25.12, lng: 56.33 }
+        - { name: "Bandar Abbas", lat: 27.18, lng: 56.27 }
+      red_sea:
+        - { name: "Bab el-Mandeb", lat: 12.58, lng: 43.33 }
+        - { name: "Jeddah Port", lat: 21.49, lng: 39.17 }
+      malacca:
+        - { name: "Malacca Strait Center", lat: 2.50, lng: 101.80 }
+        - { name: "Singapore Strait", lat: 1.25, lng: 103.80 }
+      suez:
+        - { name: "Suez Canal North", lat: 31.27, lng: 32.31 }
+        - { name: "Suez Canal South", lat: 29.95, lng: 32.55 }
   routing:
     enabled: true
     data_mode: "synthetic"
@@ -178,7 +215,75 @@ thresholds:
 
 rag:
   collection_name: "disruption_cases"
-  top_k: 3  # Number of similar cases to retrieve for RAG
+  top_k: 3  # Number of similar cases to retrieve for RAG (legacy ContextRetriever.query)
+
+  # --- Composite-threshold-gated historical similarity lookup ---
+  # query_gated() only fires when the composite risk score clears this bar.
+  composite_threshold: 0.65     # hand_tuned default; Optuna can optimize this
+  min_similarity: 0.55          # minimum cosine similarity to include a result
+  embedding_model: "all-MiniLM-L6-v2"
+  collections:
+    static_cases: "disruption_cases"        # existing 10 historical cases
+    live_context: "live_extracted_context"  # API-extracted events (new)
+
+# --- API Keys (resolve from environment / .env; never commit real secrets here) ---
+api_keys:
+  fred: "${FRED_API_KEY}"
+  newsapi: "${NEWSAPI_KEY}"
+  acled_username: "${ACLED_USERNAME}"
+  acled_password: "${ACLED_PASSWORD}"
+  aisstream: "${AISSTREAM_API_KEY}"
+  serpapi: "${SERPAPI_API_KEY}"
+
+# --- Live API extraction settings (RAG knowledge base population) ---
+extraction:
+  enabled_extractors:
+    - newsapi
+    - serpapi     # date-unbounded Google News, for historical RAG backfill (NewsAPI free tier is ~30-day only)
+    - ambee       # replaces reliefweb (gated by an unapproved appname); see severity_mapping note above
+    - fred
+    - acled
+    # aisstream is live-only, not used for historical RAG population
+    # reliefweb is kept available (src/extractors/reliefweb_extractor.py) as a
+    # fallback once an approved ReliefWeb appname is obtained.
+
+  historical_range:
+    start_year: 2007   # Cyclone Gonu (earliest RAG case)
+    end_year: 2025
+
+  chokepoints:
+    hormuz:
+      countries: ["Iran", "Oman", "United Arab Emirates", "Saudi Arabia", "Qatar", "Bahrain", "Kuwait", "Iraq"]
+      bounding_box: { lat_min: 25.0, lat_max: 27.5, lon_min: 55.0, lon_max: 58.0 }
+    red_sea:
+      countries: ["Yemen", "Saudi Arabia", "Egypt", "Eritrea", "Djibouti", "Sudan", "Somalia"]
+      bounding_box: { lat_min: 12.0, lat_max: 30.0, lon_min: 32.0, lon_max: 44.0 }
+    malacca:
+      countries: ["Malaysia", "Indonesia", "Singapore"]
+      bounding_box: { lat_min: 0.5, lat_max: 4.0, lon_min: 99.0, lon_max: 105.0 }
+    suez:
+      countries: ["Egypt"]
+      bounding_box: { lat_min: 29.5, lat_max: 31.5, lon_min: 32.0, lon_max: 33.0 }
+
+  rate_limits:
+    newsapi: 30       # Free tier: 100/day, so ~30/min is safe
+    reliefweb: 60     # No published limit, be respectful
+    ambee: 60         # Be respectful, free tier
+    fred: 100         # Official: 120/min
+    acled: 20         # Be respectful, free research tier
+    serpapi: 10       # conservative — free tier allows 50/hour; one-time backfill of ~20 queries
+
+# --- aisstream Live Monitoring (shipping + routing agents, live only) ---
+aisstream:
+  enabled: false
+  websocket_url: "wss://stream.aisstream.io/v0/stream"
+  monitor_regions:
+    - name: "hormuz"
+      bbox: [[25.0, 55.0], [27.5, 58.0]]   # [[lat_min, lon_min], [lat_max, lon_max]]
+  metrics:
+    vessel_count_window_hours: 24
+    delay_baseline_hours: 3.0
+    congestion_baseline: 0.3
 
 api:
   host: "0.0.0.0"

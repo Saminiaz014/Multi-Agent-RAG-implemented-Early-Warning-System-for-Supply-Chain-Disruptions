@@ -324,28 +324,41 @@ class Orchestrator:
         except Exception as exc:
             logger.warning("[Orchestrator] SHAP explainability failed: %s", exc)
 
-        # RAG: retrieve historical precedents matching the current signal profile.
-        # Failures are logged and never abort the pipeline.
-        output["historical_context"] = []
+        # RAG: retrieve historical precedents only when the composite risk
+        # score clears the configured threshold. Failures are logged and
+        # never abort the pipeline.
+        output["historical_context"] = None
         try:
             from src.rag.context_retriever import ContextRetriever
 
             rag_cfg = self.config.get("rag", {}) or {}
             if rag_cfg:
                 _rag = ContextRetriever(rag_cfg)
-                _rag.build_index("data/knowledge_base/disruption_cases.json")
+                _rag.build_both_indexes("data/knowledge_base/disruption_cases.json")
                 agent_scores: dict[str, float] = {
                     name: float(v) if isinstance(v, (int, float)) else float(v.get("score", 0.0))
                     for name, v in (output.get("agent_scores") or {}).items()
                 }
-                ctx_results = _rag.query(
-                    agent_scores, top_k=rag_cfg.get("top_k", 3)
+                composite_score = float(output.get("composite_score", 0.0))
+                historical_context = _rag.query_gated(
+                    current_signals=agent_scores,
+                    composite_risk_score=composite_score,
                 )
-                output["historical_context"] = ctx_results
-                logger.info(
-                    "[Orchestrator] RAG retrieved %d historical case(s).",
-                    len(ctx_results),
-                )
+                output["historical_context"] = historical_context
+                if historical_context:
+                    logger.info(
+                        "[Orchestrator] RAG triggered: %d historical match(es) "
+                        "(composite=%.3f, threshold=%.3f).",
+                        len(historical_context["matches"]),
+                        composite_score,
+                        historical_context["threshold"],
+                    )
+                else:
+                    logger.debug(
+                        "[Orchestrator] RAG not triggered: composite=%.3f < threshold=%.3f",
+                        composite_score,
+                        _rag.composite_threshold,
+                    )
         except Exception as exc:
             logger.warning("[Orchestrator] RAG context retrieval failed: %s", exc)
 

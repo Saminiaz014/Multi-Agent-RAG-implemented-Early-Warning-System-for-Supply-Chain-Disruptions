@@ -84,12 +84,26 @@ class ContextRetriever:
         config: dict,
         persist_directory: str = "data/knowledge_base/.chromadb",
     ) -> None:
+        self.config = config
         self.collection_name: str = config["collection_name"]
         self.top_k: int = config.get("top_k", 3)
+
+        # Composite-threshold-gated lookup settings (Phase: live extraction).
+        self.composite_threshold: float = float(config.get("composite_threshold", 0.65))
+        self.min_similarity: float = float(config.get("min_similarity", 0.55))
+        self._live_collection_name: str = (
+            config.get("collections", {}).get("live_context", "live_extracted_context")
+        )
+
         self._ef = DefaultEmbeddingFunction()
         self._client = chromadb.PersistentClient(path=persist_directory)
         self._collection = self._client.get_or_create_collection(
             name=self.collection_name,
+            embedding_function=self._ef,
+            metadata={"hnsw:space": "cosine"},
+        )
+        self._live_collection = self._client.get_or_create_collection(
+            name=self._live_collection_name,
             embedding_function=self._ef,
             metadata={"hnsw:space": "cosine"},
         )
@@ -281,6 +295,123 @@ class ContextRetriever:
         query_text = self._build_query_string(current_signals)
         logger.debug("[ContextRetriever.query] query='%s'", query_text)
         return self.retrieve(query_text, top_k=top_k)
+
+    # ------------------------------------------------------------------
+    # Dual-collection, composite-threshold-gated query (live extraction)
+    # ------------------------------------------------------------------
+
+    def build_both_indexes(
+        self, kb_json_path: str = "data/knowledge_base/disruption_cases.json"
+    ) -> dict[str, int]:
+        """Ensure both the static and live ChromaDB collections are populated.
+
+        Args:
+            kb_json_path: Path to the static disruption-cases JSON array.
+
+        Returns:
+            ``{"static_cases": <count>, "live_context": <count>}`` document
+            counts currently held in each collection.
+        """
+        self.build_index(kb_json_path)
+        return {
+            "static_cases": self._collection.count(),
+            "live_context": self._live_collection.count(),
+        }
+
+    def query_gated(
+        self,
+        current_signals: dict[str, float],
+        composite_risk_score: float,
+        top_k: int | None = None,
+        min_similarity: float | None = None,
+    ) -> dict | None:
+        """Retrieve historical precedents only when risk clears the threshold.
+
+        Queries both the static ``disruption_cases`` collection and the live
+        ``live_extracted_context`` collection (populated by
+        :class:`~src.extractors.knowledge_base_builder.KnowledgeBaseBuilder`),
+        merges results by similarity, and filters out anything below
+        ``min_similarity``.
+
+        Args:
+            current_signals: Mapping of agent name -> anomaly score in
+                ``[0, 1]``.
+            composite_risk_score: The aggregated composite risk score for the
+                current pipeline run.
+            top_k: Override the default number of merged results to return.
+            min_similarity: Override the default minimum cosine similarity.
+
+        Returns:
+            ``None`` when ``composite_risk_score`` is below
+            ``self.composite_threshold``. Otherwise a dict::
+
+                {
+                    "triggered": True,
+                    "composite_score": float,
+                    "threshold": float,
+                    "matches": [{"source": "static"|"live", "text": str,
+                                  "similarity": float, "metadata": dict}, ...],
+                    "formatted_summary": str,
+                }
+        """
+        if composite_risk_score < self.composite_threshold:
+            logger.debug(
+                "[ContextRetriever.query_gated] not triggered: composite=%.3f < threshold=%.3f",
+                composite_risk_score,
+                self.composite_threshold,
+            )
+            return None
+
+        k = top_k if top_k is not None else self.top_k
+        sim_floor = min_similarity if min_similarity is not None else self.min_similarity
+        query_text = self._build_query_string(current_signals)
+
+        matches: list[dict] = []
+        for source, collection in (("static", self._collection), ("live", self._live_collection)):
+            if collection.count() == 0:
+                continue
+            n = min(k, collection.count())
+            results = collection.query(
+                query_texts=[query_text],
+                n_results=n,
+                include=["documents", "distances", "metadatas"],
+            )
+            for doc, dist, meta in zip(
+                results["documents"][0], results["distances"][0], results["metadatas"][0]
+            ):
+                similarity = round(1.0 - float(dist), 4)
+                if similarity < sim_floor:
+                    continue
+                matches.append(
+                    {"source": source, "text": doc, "similarity": similarity, "metadata": meta}
+                )
+
+        matches.sort(key=lambda m: m["similarity"], reverse=True)
+        matches = matches[:k]
+
+        return {
+            "triggered": True,
+            "composite_score": composite_risk_score,
+            "threshold": self.composite_threshold,
+            "matches": matches,
+            "formatted_summary": self._format_gated_matches(matches),
+        }
+
+    @staticmethod
+    def _format_gated_matches(matches: list[dict]) -> str:
+        """Readable summary of :meth:`query_gated` matches for dashboard display."""
+        if not matches:
+            return "No historical precedents found above the similarity threshold."
+        lines = ["Historical Precedents:"]
+        for i, m in enumerate(matches, 1):
+            meta = m.get("metadata", {})
+            event = meta.get("event") or meta.get("disaster_name") or meta.get("title") or "Untitled event"
+            date = meta.get("date") or meta.get("event_date") or ""
+            preview = (m.get("text") or "")[:200].replace("\n", " ")
+            lines.append(
+                f"{i}. [{m['source']}] [{date}] {event} (similarity: {m['similarity']:.2f})\n   {preview}..."
+            )
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Formatting

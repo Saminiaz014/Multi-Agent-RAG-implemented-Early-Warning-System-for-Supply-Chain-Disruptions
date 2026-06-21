@@ -31,6 +31,8 @@ data/processed/
 
 # ChromaDB persistence
 data/knowledge_base/.chromadb/
+data/knowledge_base/.chromadb_test_*/
+data/knowledge_base/live_extracted_backup.json
 
 # Jupyter
 .ipynb_checkpoints/
