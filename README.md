@@ -1293,6 +1293,138 @@ Historical Precedents:
 
 ---
 
+## Phase 7 — Live API Extraction Layer & Composite-Threshold RAG Gating
+
+> **Summary.** A new `src/extractors/` layer pulls real data from seven external APIs to populate a second ChromaDB collection (`live_extracted_context`), queried alongside the static `disruption_cases` collection. `ContextRetriever` gained `query_gated()` — historical-precedent lookup now fires only when the composite risk score clears a configurable threshold (default `0.65`), instead of running unconditionally on every pipeline call. `DisasterConnector.fetch_api()` went from a stub to a real live-scoring path against the Ambee Disasters API. `ACLEDExtractor` was rewritten against ACLED's 2024+ OAuth scheme. A one-time historical backfill via SerpAPI's Google News engine populated **170 real documents** spanning 2007–2024 — the only source able to clear every other API's free-tier lookback cap. **203/203 tests passing** (26 new tests in `tests/test_extractors.py`, one outdated test fixed in `test_new_agents.py`).
+
+### Extraction Layer (`src/extractors/`)
+
+Each extractor subclasses `BaseExtractor` (rate limiting, `${VAR}`-style env-var resolution against `.env`, and a common ChromaDB document schema) and implements `extract_historical(region)` for one of the four chokepoints (`hormuz`, `red_sea`, `malacca`, `suez`):
+
+| Extractor | Covers | Source | Status / discovered limitation |
+|---|---|---|---|
+| `NewsAPIExtractor` | `news_sentiment` | NewsAPI.org `/v2/everything` | Free Developer plan rejects `from`/`to` older than ~30 days (`426 Upgrade Required`, confirmed live) — current/recent news only |
+| `SerpAPIExtractor` | all domains (case-dependent) | SerpAPI Google News engine | The only source with no lookback cap — `after:`/`before:` operators in the query string. Used for the one-time historical backfill (10 cases × 2 queries = 20 of 250 free monthly searches) |
+| `AmbeeExtractor` | `natural_disaster` | Ambee Disasters API | Primary source, replacing ReliefWeb. `/history` capped at ~30 days on this plan (`400`, "data older than one month, contact us"); falls back to `/latest` |
+| `ReliefWebExtractor` | `natural_disaster` | UN OCHA ReliefWeb | Kept as a fallback — blocked by a `403` until an appname is approved at apidoc.reliefweb.int |
+| `FREDExtractor` | `market` | FRED `/series/observations` | Pulls Brent/WTI/USD-index/HY-spread around 5 known disruption windows (2007–2024) |
+| `ACLEDExtractor` | `geopolitical` | ACLED via the `acled` PyPI client | Rewritten for ACLED's 2024+ OAuth scheme (24h access + 14-day refresh token, handled internally by `AcledClient`) — the legacy email+key query-param auth no longer works |
+| `AISStreamMonitor` | `shipping`, `routing` (live only) | aisstream.io WebSocket | `extract_historical()` always returns `[]` — no historical API exists; real-time vessel tracking only, disabled by default (`aisstream.enabled: false`) |
+
+**`KnowledgeBaseBuilder`** (`knowledge_base_builder.py`) orchestrates every extractor enabled in `extraction.enabled_extractors`: extract per chokepoint → deduplicate by document `id` → write a JSON backup (`data/knowledge_base/live_extracted_backup.json`, gitignored) → upsert into the `live_extracted_context` ChromaDB collection. Run it directly via `scripts/populate_knowledge_base.py [--extractors a,b,c]`.
+
+### `ContextRetriever.query_gated()` — dual-collection, threshold-gated lookup
+
+Added alongside the existing `query()`/`retrieve()`/`build_index()` methods (left untouched so `test_rag_6domain.py` keeps passing unmodified):
+
+```python
+def query_gated(
+    self,
+    current_signals: dict[str, float],
+    composite_risk_score: float,
+    top_k: int | None = None,
+    min_similarity: float | None = None,
+) -> dict | None:
+```
+
+- Returns `None` immediately if `composite_risk_score < rag.composite_threshold` (default `0.65`) — no embedding call, no ChromaDB query.
+- Otherwise queries **both** the static `disruption_cases` collection and the live `live_extracted_context` collection, merges results by similarity, drops anything below `rag.min_similarity` (default `0.55`), and returns:
+
+```json
+{
+  "triggered": true,
+  "composite_score": 0.82,
+  "threshold": 0.65,
+  "matches": [
+    {"source": "static", "text": "...", "similarity": 0.91, "metadata": {...}},
+    {"source": "live", "text": "...", "similarity": 0.74, "metadata": {...}}
+  ],
+  "formatted_summary": "Historical Precedents:\n1. [static] ..."
+}
+```
+
+`build_both_indexes(kb_json_path)` ensures both collections are populated and returns their document counts.
+
+### Orchestrator Integration (supersedes the Phase 6 example above)
+
+`run_full_pipeline()`'s RAG block now calls `query_gated()` instead of the old unconditional `query()`. `output["historical_context"]` is therefore **`None`** on most runs (composite score below threshold) and only becomes the `matches`/`formatted_summary` dict above once risk is genuinely elevated. Still `try/except` guarded — a RAG failure logs a warning and never aborts the pipeline.
+
+### `DisasterConnector.fetch_api()` — live Ambee scoring
+
+Previously raised `NotImplementedError` unconditionally. Now, when `agents.natural_disaster.data_mode: "api"`:
+
+1. Queries Ambee `/disasters/latest/by-lat-lng` for every point in `monitoring_points[location]` (`location` defaults to `"hormuz"`; 4 chokepoints × 2–3 points each are pre-configured).
+2. Maps Ambee's two categorical fields onto `[0, 1]`: `severity = 0.6 * proximity_severity_level + 0.4 * default_alert_levels` (mapping table in `severity_mapping`) — a deliberate approximation, since Ambee exposes no magnitude/wind-speed number the way USGS would for earthquakes.
+3. Takes the worst-case severity per feature column across all points/events, derives `tsunami_risk` from any sufficiently severe earthquake event (damped ×0.7 — no real tsunami signal exists in this feed), and computes `composite_disaster_risk` via the same agent weights used elsewhere.
+4. Raises `ValueError` (not `NotImplementedError`) when no key/monitoring points are configured, so the orchestrator's existing fallback-to-synthetic path (which catches `ValueError`) applies automatically.
+
+Verified against the live API: returns a schema-valid row and correctly flagged `is_disruption=True` via a real M-something earthquake near Hormuz during testing.
+
+### Known free-tier limitations (discovered live, not assumed)
+
+| Source | Limitation | Evidence |
+|---|---|---|
+| NewsAPI | `from`/`to` capped to ~30 days on the free Developer plan | Live `426`: *"you may need to upgrade to a paid plan"* |
+| ReliefWeb | Requires a pre-approved `appname` | Live `403 AccessDeniedHttpException` |
+| Ambee | `/history` capped to ~30 days | Live `400`: *"For data older than one month, contact us!"* |
+| ACLED | Legacy email+key auth retired in favour of OAuth | Library rewrite required; no historical data without registered credentials |
+
+SerpAPI is the only one of the five with no such cap, which is why it carried the entire 2007–2024 historical backfill.
+
+### Test Coverage (Phase 7)
+
+`tests/test_extractors.py` — 26 tests, all HTTP calls mocked (no live network access required in CI):
+
+| Class | Covers |
+|---|---|
+| `TestBaseExtractor` | document normalization schema, rate limiting, `${VAR}` env-var resolution |
+| `TestNewsAPIExtractor` | article search + normalization, missing-key graceful empty |
+| `TestReliefWebExtractor` | disaster search parsing |
+| `TestFREDExtractor` | observation parsing, spike/volatility metrics |
+| `TestACLEDExtractor` | risk-profile classification, `AcledClient` transport delegation, client-error graceful empty |
+| `TestAISStreamMonitor` | historical always `[]`, empty-state metrics |
+| `TestAmbeeExtractor` | `/latest` ↔ `/history` response-key handling (`result` vs `data`), severity math, cross-point dedup |
+| `TestSerpAPIExtractor` | flat + grouped (`stories`) result handling, all-10-cases coverage, region/agent-domain completeness |
+| `TestKnowledgeBaseBuilder` | document deduplication by id |
+| `TestRAGCompositeThreshold` | `query_gated()` below/above threshold behaviour |
+
+Plus one updated test in `tests/test_new_agents.py`: `DisasterConnector(data_mode="api")` without an Ambee key now asserts `ValueError` (the real, intentional exception) instead of the old `NotImplementedError` stub.
+
+### Configuration Additions (`config/settings.yaml`)
+
+```yaml
+api_keys:
+  fred: "${FRED_API_KEY}"
+  newsapi: "${NEWSAPI_KEY}"
+  acled_username: "${ACLED_USERNAME}"
+  acled_password: "${ACLED_PASSWORD}"
+  aisstream: "${AISSTREAM_API_KEY}"
+  serpapi: "${SERPAPI_API_KEY}"
+
+extraction:
+  enabled_extractors: [newsapi, serpapi, ambee, fred, acled]
+  historical_range: {start_year: 2007, end_year: 2025}
+  chokepoints: {hormuz: {...}, red_sea: {...}, malacca: {...}, suez: {...}}  # countries + bounding boxes
+  rate_limits: {newsapi: 30, reliefweb: 60, ambee: 60, fred: 100, acled: 20, serpapi: 10}
+
+rag:
+  composite_threshold: 0.65   # query_gated() fires only above this
+  min_similarity: 0.55
+  collections: {static_cases: disruption_cases, live_context: live_extracted_context}
+
+agents.natural_disaster:
+  location: "hormuz"
+  severity_mapping: {proximity: {...}, alert: {...}, proximity_weight: 0.6, alert_weight: 0.4}
+  monitoring_points: {hormuz: [...], red_sea: [...], malacca: [...], suez: [...]}
+
+aisstream:
+  enabled: false   # live AIS WebSocket monitoring, off by default
+```
+
+All API keys/credentials live in `.env` (gitignored) and are resolved at runtime via `${VAR_NAME}` placeholders — see `src/extractors/base_extractor.py::resolve_env_value`.
+
+---
+
 ## Project Structure
 
 ```
@@ -1319,10 +1451,22 @@ supply-chain-dss/
 │   ├── explainability/
 │   │   └── shap_explainer.py   # SHAP Tree/Kernel explainer wrapper
 │   ├── rag/
-│   │   └── context_retriever.py # ChromaDB similarity search
+│   │   └── context_retriever.py # ChromaDB similarity search; query_gated() adds dual-collection, threshold-gated lookup (Phase 7)
+│   ├── extractors/              # Phase 7 — live API extraction layer for RAG knowledge base
+│   │   ├── base_extractor.py        # ABC: rate limiting, ${VAR} env-var resolution, doc normalization
+│   │   ├── newsapi_extractor.py     # current news (news_sentiment), ~30-day lookback cap
+│   │   ├── serpapi_extractor.py     # date-unbounded Google News — historical RAG backfill (10 cases x 2007-2024)
+│   │   ├── ambee_extractor.py       # natural_disaster, primary source (replaces reliefweb)
+│   │   ├── reliefweb_extractor.py   # natural_disaster fallback (needs an approved appname)
+│   │   ├── fred_extractor.py        # market signals around known disruption windows
+│   │   ├── acled_extractor.py       # geopolitical conflict events, OAuth via the `acled` client
+│   │   ├── aisstream_monitor.py     # live-only AIS WebSocket monitor (shipping/routing)
+│   │   └── knowledge_base_builder.py # orchestrates all extractors -> dedupe -> ChromaDB upsert
 │   ├── api/
 │   │   └── endpoints.py        # FastAPI /predict, /explain, /health
-│   └── orchestrator.py         # main pipeline runner
+│   └── orchestrator.py         # main pipeline runner; RAG block now calls query_gated() (Phase 7)
+├── scripts/
+│   └── populate_knowledge_base.py  # CLI: python scripts/populate_knowledge_base.py [--extractors a,b,c]
 ├── tests/
 │   ├── test_agents.py
 │   ├── test_ingestion.py       # shipping + market connector schema, ranges, separation, cross-source correlation
@@ -1331,9 +1475,12 @@ supply-chain-dss/
 │   ├── test_new_agents.py      # geopolitical, natural-disaster, routing, news-sentiment agents + 6-agent integration
 │   ├── test_optimization.py    # Optuna weight optimizer, parameter space, objective function, no-leakage guard
 │   ├── test_shap_6agent.py     # 20-feature SHAP surrogate, explain output, text generation, disabled-agent path
-│   └── test_rag_6domain.py     # 10-case knowledge base, multi-domain query, similarity thresholds, format_context
+│   ├── test_rag_6domain.py     # 10-case knowledge base, multi-domain query, similarity thresholds, format_context
+│   ├── test_extractors.py      # Phase 7 — 26 tests, all extractors + KnowledgeBaseBuilder + query_gated(), HTTP fully mocked
+│   └── test_fred_api.py        # standalone (non-pytest) FRED connectivity diagnostic, run by hand
 ├── logs/                       # pipeline execution logs (gitignored)
 ├── notebooks/                  # exploration and evaluation notebooks
+├── .env                        # API keys/credentials (gitignored) — see Phase 7 Configuration Additions
 ├── requirements.txt
 ├── main.py                     # entrypoint
 └── README.md
@@ -1348,6 +1495,20 @@ pip install -r requirements.txt
 ```
 
 Dependencies: `pandas`, `numpy`, `scikit-learn`, `shap`, `chromadb`, `fastapi`, `uvicorn`, `pyyaml`, `plotly`, `optuna`, `kaleido`, `pytest`, `httpx`. (`optuna` + `kaleido` back the weight optimizer and its figure export. `chromadb` bundles its own ONNX embedding model — `sentence-transformers` is no longer required.)
+
+**Phase 7 additions:** `acled` (OAuth-authenticated ACLED client), `requests` (HTTP transport for every extractor + `DisasterConnector.fetch_api()`), `python-dotenv` (loads `.env` for API-key resolution), `websockets` (only needed if `aisstream.enabled: true`).
+
+Copy your own keys into `.env` at the project root (gitignored — never commit real values):
+```
+FRED_API_KEY=
+NEWSAPI_KEY=
+AISSTREAM_API_KEY=
+ACLED_USERNAME=
+ACLED_PASSWORD=
+AMBEE_API_KEY=
+SERPAPI_API_KEY=
+```
+Every key is optional — each extractor and `DisasterConnector.fetch_api()` log a warning and degrade gracefully (empty results / fallback to synthetic) when its key is missing, so a partial `.env` never breaks the pipeline.
 
 ---
 
@@ -1374,6 +1535,15 @@ python -c "from src.ingestion import MarketConnector; MarketConnector(config={})
 
 The first command writes `data/raw/shipping_hormuz.csv` (365 rows) and prints the Welch t-statistic separating normal vs. disruption vessel counts. The second writes `data/raw/market_data.csv` (365 rows) with Brent crude, trade volume, and freight rate signals lag-aligned to the shipping disruption windows.
 
+### Populate the RAG knowledge base from live APIs (Phase 7)
+
+```bash
+python scripts/populate_knowledge_base.py                       # all extractors in extraction.enabled_extractors
+python scripts/populate_knowledge_base.py --extractors serpapi   # one-time historical backfill only
+```
+
+Extracts → deduplicates by document id → backs up to `data/knowledge_base/live_extracted_backup.json` (gitignored) → upserts into the `live_extracted_context` ChromaDB collection. Safe to re-run; missing API keys degrade individual extractors to zero documents rather than failing the run.
+
 ### API server
 
 ```bash
@@ -1388,7 +1558,7 @@ API docs available at `http://localhost:8000/docs`.
 pytest tests/ -v
 ```
 
-The full suite is **170 tests / 170 passing** across 8 test files. Run the agent evaluations with output:
+The full suite is **203 tests / 203 passing** across 9 collected test files (`test_fred_api.py` is a standalone diagnostic, not collected by pytest). Run the agent evaluations with output:
 
 ```bash
 pytest tests/test_agents.py::test_shipping_agent_evaluation -v -s
@@ -1422,6 +1592,16 @@ pytest tests/test_agents.py::test_market_agent_evaluation -v -s
 | `optimization.seeds` | `{train: 42, validation: 43, test: 44}` | Per-split RNG seeds for the train/val/test realisations |
 | `rag.collection_name` | `disruption_cases` | ChromaDB collection name |
 | `rag.top_k` | `3` | Number of historical precedents to retrieve |
+| `rag.composite_threshold` | `0.65` | *(Phase 7)* Minimum composite risk score for `query_gated()` to fire at all |
+| `rag.min_similarity` | `0.55` | *(Phase 7)* Minimum cosine similarity for a match to be included |
+| `rag.collections.static_cases` / `.live_context` | `disruption_cases` / `live_extracted_context` | *(Phase 7)* The two ChromaDB collections `query_gated()` merges results from |
+| `api_keys.*` | `"${VAR_NAME}"` | *(Phase 7)* `fred`, `newsapi`, `acled_username`, `acled_password`, `aisstream`, `serpapi` — resolved from `.env` at runtime |
+| `extraction.enabled_extractors` | `[newsapi, serpapi, ambee, fred, acled]` | *(Phase 7)* Extractors run by `KnowledgeBaseBuilder.build()` / `scripts/populate_knowledge_base.py` |
+| `extraction.chokepoints` | `{hormuz, red_sea, malacca, suez}` | *(Phase 7)* Per-region countries + bounding boxes used by every extractor |
+| `extraction.rate_limits` | per-source `requests/min` caps | *(Phase 7)* Enforced by `BaseExtractor._rate_limit_wait()` |
+| `agents.natural_disaster.location` | `"hormuz"` | *(Phase 7)* Which `monitoring_points` region `DisasterConnector.fetch_api()` queries against Ambee |
+| `agents.natural_disaster.severity_mapping` | proximity/alert → `[0,1]` tables | *(Phase 7)* Categorical→numerical mapping for Ambee's two severity fields |
+| `aisstream.enabled` | `false` | *(Phase 7)* Toggle for the live AIS WebSocket monitor (no historical backfill exists for this source) |
 
 ---
 
