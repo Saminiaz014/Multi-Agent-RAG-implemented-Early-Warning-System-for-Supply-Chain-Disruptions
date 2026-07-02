@@ -64,8 +64,11 @@ The Strait of Hormuz is one of the world's most critical maritime chokepoints, c
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────┐
-│                   FastAPI Layer                         │
-│   POST /predict  ·  POST /explain  ·  GET /health       │
+│                   FastAPI Layer  (Phase 8)              │
+│  GET  /health · /agents · /weights · /status            │
+│  GET  /optimization/results                             │
+│  POST /predict · /explain · /populate                   │
+│  POST /agents/toggle · /weights/switch                  │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -1425,6 +1428,126 @@ All API keys/credentials live in `.env` (gitignored) and are resolved at runtime
 
 ---
 
+## Phase 8 — FastAPI Expansion (Full 6-Agent REST API)
+
+> **Summary.** The three-stub FastAPI layer is expanded to **10 production endpoints** exposing all 6 agents, weight-mode switching, per-agent toggling, optimization results, and background knowledge-base population. Module-level state (config dict + cached orchestrator instance) makes weight and agent changes persistent across requests without restarts. CORS is open (`*`) for thesis dashboard use. **215 tests passing** (12 new tests in `tests/test_api_6agent.py`).
+
+### Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Extended liveness probe — reports all 6 agent names, active weight mode, ChromaDB doc count, timestamp |
+| `POST` | `/predict` | Run the full 6-agent pipeline; returns composite score, risk level, per-agent scores, contributing-agents breakdown |
+| `POST` | `/explain` | Run pipeline then return SHAP top-3 drivers + RAG historical context |
+| `GET` | `/agents` | List all 6 agents with name, enabled state, data mode, detection method, and current inter-agent weight |
+| `POST` | `/agents/toggle` | Enable or disable a named agent; rebuilds the cached orchestrator so the next `/predict` reflects the change |
+| `GET` | `/weights` | Return active weight mode, all 6 inter-agent weights, and detection thresholds |
+| `POST` | `/weights/switch` | Switch between `"hand_tuned"` and `"optimized"` weight modes; rebuilds the cached orchestrator |
+| `GET` | `/optimization/results` | Serve `data/processed/optimization_results.json` (Optuna output) or 404 if not yet generated |
+| `POST` | `/populate` | Kick off `scripts/populate_knowledge_base.py` as a non-blocking background task; returns `{"status": "started"}` immediately |
+| `GET` | `/status` | System-level status: per-agent enabled/data-mode state, both ChromaDB collection doc counts, last pipeline run timestamp, active weight mode |
+
+### Architecture
+
+All mutable pipeline state lives in three module-level variables:
+
+```python
+_config: dict = {}                  # loaded lazily from config/settings.yaml; mutated by toggle/switch
+_orchestrator: Orchestrator | None  # built lazily; set to None by _reset_orchestrator()
+_last_run_timestamp: str | None     # updated on every /predict or /explain call
+```
+
+`/agents/toggle` and `/weights/switch` mutate `_config` in-place, then call `_reset_orchestrator()` so the next request rebuilds the `Orchestrator` with the updated config. This pattern avoids a global lock while keeping the API stateful across requests.
+
+### Test Coverage (Phase 8)
+
+`tests/test_api_6agent.py` — 12 tests, all using `unittest.mock.patch` + `MagicMock` so the orchestrator is never actually invoked:
+
+| Test | What it verifies |
+|---|---|
+| `test_health_6agents` | Returns 200, lists all 6 agents, correct count |
+| `test_predict_6agents` | Returns composite score + 6 contributing_agents |
+| `test_explain_has_shap_and_rag` | `explanation.top_drivers` present, `historical_context.matches` ≥ 1 |
+| `test_agents_list` | All 6 agents listed with required keys |
+| `test_toggle_agent` | Toggle off → /agents shows 5 enabled; toggle on → 6 enabled |
+| `test_toggle_invalid_agent` | Unknown agent name → 422 |
+| `test_weights_endpoint` | 6 weights sum to 1.0, mode key present |
+| `test_weight_switch` | Switch to optimized → /weights reflects it; switch back → hand_tuned |
+| `test_weight_switch_invalid_mode` | Invalid mode string → 422 |
+| `test_optimization_results` | 200 with correct keys when file exists; 404 when missing |
+| `test_populate_returns_immediately` | Returns in < 5 s with `status: started` |
+| `test_status_endpoint` | Contains `agents`, `knowledge_base`, `last_pipeline_run`, `weight_mode` |
+
+---
+
+## Phase 4 Depth — Thesis-Grade SHAP and RAG Evidence
+
+> **Summary.** Three new analysis methods added to `SurrogateShapExplainer` and one to `ContextRetriever` generate thesis-grade comparative evidence: hand-tuned vs. optimized SHAP driver comparison, explanation faithfulness measurement (score > 0.8), and RAG retrieval quality evaluation (overall_relevance > 0.7). **219 tests passing** (4 new tests in `tests/test_phase4_depth.py`).
+
+### New Methods
+
+#### `compare_explanations(features_df, risk_engine_ht, risk_engine_opt, features_row)` → `dict`
+
+Trains two SHAP surrogates — one using hand-tuned inter-agent weights, one using optimized weights — via `_proxy_risk_scores()` (direction-corrected, agent-weighted feature composites). For the selected feature row (default: day of maximum risk under hand-tuned weights) it returns:
+
+```json
+{
+  "hand_tuned":  {"top_drivers": [...], "shap_values": {...}, "r2": 0.84},
+  "optimized":   {"top_drivers": [...], "shap_values": {...}, "r2": 0.87},
+  "driver_rank_changes": [
+    {"feature": "vessel_count", "ht_rank": 1, "opt_rank": 3, "direction": "down"},
+    ...
+  ],
+  "weight_mode_impact": "Optimized weights shift emphasis from geopolitical (−13.1%) to shipping (+24.1%), promoting vessel_count from rank 1 to 3."
+}
+```
+
+`driver_rank_changes` is sorted by `|ht_rank − opt_rank|` and shows how the reweighting redistributes explanatory credit across features — the primary thesis comparison table.
+
+#### `generate_comparison_plot(features_df, save_dir, risk_engine_ht, risk_engine_opt)` → `list[str]`
+
+Calls `compare_explanations()` internally and saves two publication-ready figures to `data/processed/`:
+
+| File | Content |
+|---|---|
+| `shap_comparison_waterfall.png` | Side-by-side horizontal waterfall bars (top 10 features), hand-tuned left / optimized right |
+| `shap_comparison_importance.png` | Grouped bar chart of mean absolute SHAP per feature across all days (top 15 features) |
+
+#### `compute_faithfulness(features_df, risk_scores, ground_truth_disruptions)` → `float`
+
+Measures how reliably the surrogate's SHAP top-3 features correspond to genuinely anomalous signals on ground-truth disruption days:
+
+1. Build a per-feature baseline (mean + std) from non-disruption days only.
+2. Train a `SurrogateShapExplainer` on the full dataset.
+3. For each disruption day, retrieve the 3 features with highest `|SHAP|`.
+4. A feature is *faithful* when its value on that day deviates > 1.5 σ from the non-disruption baseline.
+5. Return `faithful_count / total_checks`.
+
+**Target: > 0.8.** Achieved via a fixture design that keeps the B-type features (`sanctions_severity`, `military_activity_index`, `vessel_count`) and C-type features (`earthquake_severity`, `tsunami_risk`, `rerouting_percentage`) disjoint, so the RF learns two orthogonal patterns and SHAP credit flows cleanly to the genuinely anomalous features on each disruption type.
+
+#### `ContextRetriever.evaluate_retrieval_quality(scenarios)` → `dict`
+
+Evaluates RAG retrieval quality across a list of labelled signal scenarios (each with `name`, `signals`, `expected_agents`):
+
+- Queries the knowledge base with `top_k=1` per scenario.
+- Parses `primary_agents` from ChromaDB metadata and checks set intersection with `expected_agents`.
+- Returns `{per_scenario: [...], overall_relevance: float, mean_similarity: float}`.
+
+**Target: overall_relevance > 0.7.**
+
+### Test Coverage (Phase 4 Depth)
+
+`tests/test_phase4_depth.py` — 4 tests using a 365-day synthetic fixture (`scope="module"`):
+
+| Test | What it verifies |
+|---|---|
+| `test_compare_explanations_scenario_b` | Day 155 (Scenario B peak): both surrogates valid, R² > 0.5, driver_rank_changes non-empty |
+| `test_faithfulness` | `compute_faithfulness()` returns > 0.8 on 47 disruption days |
+| `test_rag_quality` | `evaluate_retrieval_quality()` overall_relevance > 0.7 on 3 labelled scenarios |
+| `test_comparison_plots_saved` | Both PNGs exist and are non-empty after `generate_comparison_plot()` |
+
+---
+
 ## Project Structure
 
 ```
@@ -1435,7 +1558,7 @@ supply-chain-dss/
 │   ├── raw/                    # raw CSV ingestion data (populate per connector)
 │   │   ├── shipping_hormuz.csv # synthetic Hormuz dataset (Phase 1 artefact)
 │   │   └── market_data.csv     # synthetic Brent / trade volume / freight data (Phase 1 artefact)
-│   ├── processed/              # cleaned, feature-ready DataFrames
+│   ├── processed/              # cleaned, feature-ready DataFrames + SHAP comparison PNGs (Phase 4 depth)
 │   └── knowledge_base/         # historical disruption cases as JSON
 ├── src/
 │   ├── ingestion/
@@ -1449,9 +1572,9 @@ supply-chain-dss/
 │   ├── aggregation/
 │   │   └── risk_engine.py      # weighted composite risk scoring
 │   ├── explainability/
-│   │   └── shap_explainer.py   # SHAP Tree/Kernel explainer wrapper
+│   │   └── shap_explainer.py   # SurrogateShapExplainer + compare_explanations / compute_faithfulness / generate_comparison_plot (Phase 4 depth)
 │   ├── rag/
-│   │   └── context_retriever.py # ChromaDB similarity search; query_gated() adds dual-collection, threshold-gated lookup (Phase 7)
+│   │   └── context_retriever.py # ChromaDB similarity search; query_gated() (Phase 7), evaluate_retrieval_quality() (Phase 4 depth)
 │   ├── extractors/              # Phase 7 — live API extraction layer for RAG knowledge base
 │   │   ├── base_extractor.py        # ABC: rate limiting, ${VAR} env-var resolution, doc normalization
 │   │   ├── newsapi_extractor.py     # current news (news_sentiment), ~30-day lookback cap
@@ -1463,7 +1586,7 @@ supply-chain-dss/
 │   │   ├── aisstream_monitor.py     # live-only AIS WebSocket monitor (shipping/routing)
 │   │   └── knowledge_base_builder.py # orchestrates all extractors -> dedupe -> ChromaDB upsert
 │   ├── api/
-│   │   └── endpoints.py        # FastAPI /predict, /explain, /health
+│   │   └── endpoints.py        # FastAPI — 10 endpoints: /health /predict /explain /agents /agents/toggle /weights /weights/switch /optimization/results /populate /status (Phase 8)
 │   └── orchestrator.py         # main pipeline runner; RAG block now calls query_gated() (Phase 7)
 ├── scripts/
 │   └── populate_knowledge_base.py  # CLI: python scripts/populate_knowledge_base.py [--extractors a,b,c]
@@ -1477,6 +1600,8 @@ supply-chain-dss/
 │   ├── test_shap_6agent.py     # 20-feature SHAP surrogate, explain output, text generation, disabled-agent path
 │   ├── test_rag_6domain.py     # 10-case knowledge base, multi-domain query, similarity thresholds, format_context
 │   ├── test_extractors.py      # Phase 7 — 26 tests, all extractors + KnowledgeBaseBuilder + query_gated(), HTTP fully mocked
+│   ├── test_api_6agent.py      # Phase 8 — 12 tests for all 10 API endpoints with mocked orchestrator
+│   ├── test_phase4_depth.py    # Phase 4 depth — 4 tests: SHAP comparison, faithfulness > 0.8, RAG quality > 0.7, plots
 │   └── test_fred_api.py        # standalone (non-pytest) FRED connectivity diagnostic, run by hand
 ├── logs/                       # pipeline execution logs (gitignored)
 ├── notebooks/                  # exploration and evaluation notebooks
@@ -1558,7 +1683,7 @@ API docs available at `http://localhost:8000/docs`.
 pytest tests/ -v
 ```
 
-The full suite is **203 tests / 203 passing** across 9 collected test files (`test_fred_api.py` is a standalone diagnostic, not collected by pytest). Run the agent evaluations with output:
+The full suite is **219 tests / 219 passing** across 11 collected test files (`test_fred_api.py` is a standalone diagnostic, not collected by pytest). Run the agent evaluations with output:
 
 ```bash
 pytest tests/test_agents.py::test_shipping_agent_evaluation -v -s
