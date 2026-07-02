@@ -397,6 +397,103 @@ class ContextRetriever:
             "formatted_summary": self._format_gated_matches(matches),
         }
 
+    # ------------------------------------------------------------------
+    # Retrieval quality evaluation
+    # ------------------------------------------------------------------
+
+    def evaluate_retrieval_quality(self, scenarios: list[dict]) -> dict:
+        """Evaluate RAG retrieval quality against known-relevant scenarios.
+
+        For each scenario, queries the static knowledge base and checks whether
+        the top retrieved match overlaps with the expected agent domains.
+
+        Args:
+            scenarios: List of dicts, each containing:
+
+                - ``"name"`` (str): Scenario identifier.
+                - ``"signals"`` (dict[str, float]): 6-agent signal profile
+                  (keys are agent names, values are anomaly scores in
+                  ``[0, 1]``).
+                - ``"expected_agents"`` (list[str]): Agent domains that a
+                  relevant match should include in its ``primary_agents``.
+
+        Returns:
+            Dict with:
+
+            - ``"per_scenario"`` (list[dict]): Per-scenario results, each
+              with ``"scenario"``, ``"top_match"``, ``"similarity"``,
+              ``"relevant"``, ``"matched_agents"``, ``"expected_agents"``.
+            - ``"overall_relevance"`` (float): Fraction of scenarios for
+              which the top match is relevant. Target > 0.7.
+            - ``"mean_similarity"`` (float): Mean cosine similarity of the
+              top match across all scenarios. Target > 0.6.
+        """
+        per_scenario: list[dict] = []
+
+        for scenario in scenarios:
+            name = str(scenario.get("name", "unknown"))
+            signals: dict[str, float] = dict(scenario.get("signals", {}))
+            expected: set[str] = set(scenario.get("expected_agents", []))
+
+            matches = self.query(signals, top_k=1)
+
+            if not matches:
+                per_scenario.append({
+                    "scenario": name,
+                    "top_match": None,
+                    "similarity": 0.0,
+                    "relevant": False,
+                    "matched_agents": [],
+                    "expected_agents": sorted(expected),
+                })
+                continue
+
+            top = matches[0]
+            similarity = float(top.get("similarity", 0.0))
+            meta = top.get("metadata", {})
+
+            agents_raw = meta.get("primary_agents", "[]")
+            try:
+                match_agents: set[str] = (
+                    set(json.loads(agents_raw))
+                    if isinstance(agents_raw, str)
+                    else set(agents_raw)
+                )
+            except (json.JSONDecodeError, TypeError):
+                match_agents = set()
+
+            relevant = bool(expected & match_agents)
+
+            per_scenario.append({
+                "scenario": name,
+                "top_match": str(meta.get("event", top.get("id", "unknown"))),
+                "similarity": similarity,
+                "relevant": relevant,
+                "matched_agents": sorted(match_agents),
+                "expected_agents": sorted(expected),
+            })
+
+        if not per_scenario:
+            return {"per_scenario": [], "overall_relevance": 0.0, "mean_similarity": 0.0}
+
+        n = len(per_scenario)
+        overall_relevance = sum(1 for s in per_scenario if s["relevant"]) / n
+        mean_similarity = sum(s["similarity"] for s in per_scenario) / n
+
+        logger.info(
+            "[evaluate_retrieval_quality] scenarios=%d | relevant=%d | "
+            "overall_relevance=%.3f | mean_similarity=%.3f",
+            n,
+            sum(1 for s in per_scenario if s["relevant"]),
+            overall_relevance,
+            mean_similarity,
+        )
+        return {
+            "per_scenario": per_scenario,
+            "overall_relevance": overall_relevance,
+            "mean_similarity": mean_similarity,
+        }
+
     @staticmethod
     def _format_gated_matches(matches: list[dict]) -> str:
         """Readable summary of :meth:`query_gated` matches for dashboard display."""

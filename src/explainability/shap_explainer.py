@@ -688,3 +688,411 @@ def build_shap_training_data(
         [k for k, v in scored_frames.items() if v is not None],
     )
     return features_df, risk_scores
+
+
+# ---------------------------------------------------------------------------
+# Proxy risk-score helper (used by compare_explanations)
+# ---------------------------------------------------------------------------
+
+
+def _proxy_risk_scores(
+    features_df: pd.DataFrame,
+    weights: dict[str, float],
+) -> np.ndarray:
+    """Derive per-row composite risk from raw features and inter-agent weights.
+
+    Each agent's contribution is the direction-corrected normalised mean of its
+    columns (higher = more anomalous). The weighted sum is re-normalised so
+    the output stays in ``[0, 1]``.
+
+    Args:
+        features_df: n × 20 feature DataFrame.
+        weights: Mapping of agent name → inter-agent weight.
+
+    Returns:
+        Risk-score array of shape ``(n,)``.
+    """
+    n = len(features_df)
+
+    def _norm(col: str, *, invert: bool = False) -> np.ndarray:
+        v = features_df[col].to_numpy(dtype=float) if col in features_df.columns else np.zeros(n)
+        lo, hi = v.min(), v.max()
+        v = (v - lo) / (hi - lo) if hi > lo else np.zeros(n)
+        return 1.0 - v if invert else v
+
+    per_agent: dict[str, np.ndarray] = {
+        "shipping": np.column_stack([
+            _norm("vessel_count", invert=True),
+            _norm("avg_delay_hours"),
+            _norm("congestion_index"),
+        ]).mean(axis=1),
+        "market": np.column_stack([
+            _norm("brent_crude_usd"),
+            _norm("trade_volume_index", invert=True),
+            _norm("freight_rate_index"),
+        ]).mean(axis=1),
+        "geopolitical": np.column_stack([
+            _norm("sanctions_severity"),
+            _norm("military_activity_index"),
+            _norm("diplomatic_incident_score"),
+            _norm("regime_stability_index", invert=True),
+        ]).mean(axis=1),
+        "natural_disaster": np.column_stack([
+            _norm("earthquake_severity"),
+            _norm("tsunami_risk"),
+            _norm("cyclone_severity"),
+            _norm("severe_weather_index"),
+        ]).mean(axis=1),
+        "routing": np.column_stack([
+            _norm("rerouting_percentage"),
+            _norm("avg_route_deviation_km"),
+            _norm("transit_volume_ratio", invert=True),
+        ]).mean(axis=1),
+        "news_sentiment": np.column_stack([
+            _norm("sentiment_score", invert=True),
+            _norm("source_consensus"),
+            _norm("article_volume"),
+        ]).mean(axis=1),
+    }
+
+    risk = np.zeros(n)
+    total_w = sum(float(weights.get(a, 0.0)) for a in per_agent)
+    if total_w <= 0:
+        return risk
+    for agent, scores in per_agent.items():
+        risk += float(weights.get(agent, 0.0)) * scores
+    return np.clip(risk / total_w, 0.0, 1.0)
+
+
+# ---------------------------------------------------------------------------
+# compare_explanations
+# ---------------------------------------------------------------------------
+
+
+def compare_explanations(
+    features_df: pd.DataFrame,
+    risk_engine_ht: Any,
+    risk_engine_opt: Any,
+    features_row: pd.DataFrame | None = None,
+) -> dict:
+    """Compare SHAP explanations between hand-tuned and optimized RiskEngines.
+
+    Trains two :class:`SurrogateShapExplainer` instances on the same
+    ``features_df`` but with risk scores derived from each engine's
+    inter-agent weights, then compares the per-feature SHAP attributions on a
+    single row.
+
+    Args:
+        features_df: n × 20 feature DataFrame (same format as
+            :func:`build_shap_training_data`).
+        risk_engine_ht: :class:`~src.aggregation.risk_engine.RiskEngine`
+            initialised with hand-tuned weights.
+        risk_engine_opt: :class:`~src.aggregation.risk_engine.RiskEngine`
+            initialised with optimized weights.
+        features_row: Single-row DataFrame to explain.  Defaults to the
+            row with the highest hand-tuned risk score.
+
+    Returns:
+        Dict with:
+
+        - ``"hand_tuned"`` — ``{"top_drivers", "shap_values", "r2"}``.
+        - ``"optimized"``  — ``{"top_drivers", "shap_values", "r2"}``.
+        - ``"driver_rank_changes"`` — list of ``{"feature", "ht_rank",
+          "opt_rank", "direction"}`` sorted by magnitude of rank shift.
+        - ``"weight_mode_impact"`` — 1-2 sentence natural-language summary.
+    """
+    ht_scores = _proxy_risk_scores(features_df, risk_engine_ht.weights)
+    opt_scores = _proxy_risk_scores(features_df, risk_engine_opt.weights)
+
+    ht_explainer = SurrogateShapExplainer()
+    ht_r2 = ht_explainer.train_surrogate(features_df, ht_scores, weight_mode="hand_tuned")
+
+    opt_explainer = SurrogateShapExplainer()
+    opt_r2 = opt_explainer.train_surrogate(features_df, opt_scores, weight_mode="optimized")
+
+    if features_row is None:
+        peak_idx = int(np.argmax(ht_scores))
+        features_row = features_df.iloc[[peak_idx]]
+
+    ht_result = ht_explainer.explain(features_row)
+    opt_result = opt_explainer.explain(features_row)
+
+    # Build absolute-SHAP rank maps (rank 1 = most important).
+    def _ranks(shap_dict: dict[str, float]) -> dict[str, int]:
+        ordered = sorted(shap_dict.items(), key=lambda kv: abs(kv[1]), reverse=True)
+        return {feat: idx + 1 for idx, (feat, _) in enumerate(ordered)}
+
+    ht_ranks = _ranks(ht_result["shap_values"])
+    opt_ranks = _ranks(opt_result["shap_values"])
+
+    rank_changes = []
+    for feat in ALL_FEATURE_NAMES:
+        ht_r = ht_ranks.get(feat, len(ALL_FEATURE_NAMES))
+        opt_r = opt_ranks.get(feat, len(ALL_FEATURE_NAMES))
+        if ht_r != opt_r:
+            rank_changes.append({
+                "feature": feat,
+                "ht_rank": ht_r,
+                "opt_rank": opt_r,
+                "direction": "up" if ht_r > opt_r else "down",
+            })
+    rank_changes.sort(key=lambda x: abs(x["ht_rank"] - x["opt_rank"]), reverse=True)
+
+    # Natural-language impact summary.
+    ht_w = risk_engine_ht.weights
+    opt_w = risk_engine_opt.weights
+    all_agents = set(ht_w) | set(opt_w)
+    deltas = {a: float(opt_w.get(a, 0.0)) - float(ht_w.get(a, 0.0)) for a in all_agents}
+    gained = max(deltas, key=lambda k: deltas[k], default="shipping")
+    lost = min(deltas, key=lambda k: deltas[k], default="geopolitical")
+
+    if rank_changes:
+        top = rank_changes[0]
+        feat_str = top["feature"].replace("_", " ")
+        agent_str = FEATURE_AGENT_MAP.get(top["feature"], "unknown").replace("_", " ")
+        impact = (
+            f"Optimization raised the inter-agent weight for '{gained}' "
+            f"(Δ{deltas[gained]:+.3f}) and reduced '{lost}' "
+            f"(Δ{deltas[lost]:+.3f}), causing '{feat_str}' "
+            f"({agent_str} agent) to move {top['direction']} in SHAP importance rankings."
+        )
+    else:
+        impact = (
+            "Optimization produced no significant change in SHAP feature rankings "
+            "for this sample."
+        )
+
+    return {
+        "hand_tuned": {
+            "top_drivers": ht_result["top_drivers"],
+            "shap_values": ht_result["shap_values"],
+            "r2": ht_r2,
+        },
+        "optimized": {
+            "top_drivers": opt_result["top_drivers"],
+            "shap_values": opt_result["shap_values"],
+            "r2": opt_r2,
+        },
+        "driver_rank_changes": rank_changes,
+        "weight_mode_impact": impact,
+    }
+
+
+# ---------------------------------------------------------------------------
+# generate_comparison_plot
+# ---------------------------------------------------------------------------
+
+
+def generate_comparison_plot(
+    features_df: pd.DataFrame,
+    save_dir: str = "data/processed/",
+    risk_engine_ht: Any = None,
+    risk_engine_opt: Any = None,
+) -> list[str]:
+    """Generate side-by-side SHAP comparison plots for hand-tuned vs optimized.
+
+    Saves two files:
+
+    - ``shap_comparison_waterfall.png`` — horizontal-bar waterfall showing the
+      top-10 SHAP values for both weight modes on the peak-disruption row.
+    - ``shap_comparison_importance.png`` — grouped bar chart comparing mean
+      |SHAP| across all features for both weight modes.
+
+    Args:
+        features_df: n × 20 feature DataFrame.
+        save_dir: Output directory (created if absent).
+        risk_engine_ht: Optional pre-built hand-tuned
+            :class:`~src.aggregation.risk_engine.RiskEngine`.  When ``None``
+            the engine is built from ``config/settings.yaml``.
+        risk_engine_opt: Optional pre-built optimized
+            :class:`~src.aggregation.risk_engine.RiskEngine`.  When ``None``
+            the engine is built from ``config/optimized_weights.yaml``.
+
+    Returns:
+        List of paths of the saved PNG files (only those that succeeded).
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from pathlib import Path as _Path
+
+    _Path(save_dir).mkdir(parents=True, exist_ok=True)
+
+    # Build RiskEngines from config when not supplied.
+    if risk_engine_ht is None or risk_engine_opt is None:
+        from src.aggregation.risk_engine import RiskEngine
+
+        ht_weights = dict(_DEFAULT_WEIGHTS)
+        opt_weights = dict(_DEFAULT_WEIGHTS)
+        try:
+            import yaml
+            cfg_path = _Path("config/settings.yaml")
+            if cfg_path.exists():
+                cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+                ht_weights = {k: float(v) for k, v in cfg.get("weights", _DEFAULT_WEIGHTS).items()}
+        except Exception as exc:
+            logger.warning("[generate_comparison_plot] settings.yaml load failed: %s", exc)
+
+        try:
+            import yaml
+            opt_path = _Path("config/optimized_weights.yaml")
+            if opt_path.exists():
+                opt_data = yaml.safe_load(opt_path.read_text(encoding="utf-8")) or {}
+                inter = opt_data.get("inter_agent_weights", {})
+                if inter:
+                    opt_weights = {k: float(v) for k, v in inter.items()}
+        except Exception as exc:
+            logger.warning("[generate_comparison_plot] optimized_weights.yaml load failed: %s", exc)
+
+        _thr = {"risk_critical": 0.8, "risk_high": 0.6, "risk_medium": 0.4}
+        if risk_engine_ht is None:
+            risk_engine_ht = RiskEngine({"weights": ht_weights, "thresholds": _thr})
+        if risk_engine_opt is None:
+            risk_engine_opt = RiskEngine({"weights": opt_weights, "thresholds": _thr})
+
+    comparison = compare_explanations(features_df, risk_engine_ht, risk_engine_opt)
+    ht_shap = comparison["hand_tuned"]["shap_values"]
+    opt_shap = comparison["optimized"]["shap_values"]
+
+    ht_vals = np.array([ht_shap.get(f, 0.0) for f in ALL_FEATURE_NAMES])
+    opt_vals = np.array([opt_shap.get(f, 0.0) for f in ALL_FEATURE_NAMES])
+    feat_labels = [f.replace("_", " ") for f in ALL_FEATURE_NAMES]
+
+    paths: list[str] = []
+
+    # ---- Side-by-side waterfall ----
+    try:
+        top_n = 10
+        fig, axes = plt.subplots(1, 2, figsize=(18, 7))
+        for ax, vals, title in zip(
+            axes,
+            [ht_vals, opt_vals],
+            ["Hand-Tuned Weights", "Optimized Weights"],
+        ):
+            sorted_idx = np.argsort(np.abs(vals))[::-1][:top_n]
+            s_feats = [feat_labels[i] for i in sorted_idx][::-1]
+            s_vals = vals[sorted_idx][::-1]
+            colors = ["#d62728" if v > 0 else "#1f77b4" for v in s_vals]
+            ax.barh(range(len(s_feats)), s_vals, color=colors, edgecolor="white", linewidth=0.4)
+            ax.set_yticks(range(len(s_feats)))
+            ax.set_yticklabels(s_feats, fontsize=8)
+            ax.axvline(0, color="black", linewidth=0.8, linestyle="--")
+            ax.set_title(title, fontsize=11, fontweight="bold")
+            ax.set_xlabel("SHAP value", fontsize=9)
+        fig.suptitle(
+            "SHAP Waterfall: Hand-Tuned vs Optimized Weights (peak-disruption day)",
+            fontsize=12, fontweight="bold",
+        )
+        plt.tight_layout()
+        wf_path = str(_Path(save_dir) / "shap_comparison_waterfall.png")
+        plt.savefig(wf_path, dpi=120, bbox_inches="tight")
+        plt.close("all")
+        paths.append(wf_path)
+        logger.info("[generate_comparison_plot] saved %s", wf_path)
+    except Exception as exc:
+        logger.warning("[generate_comparison_plot] waterfall plot failed: %s", exc)
+
+    # ---- Feature importance bar chart ----
+    try:
+        ht_abs = np.abs(ht_vals)
+        opt_abs = np.abs(opt_vals)
+        avg_imp = (ht_abs + opt_abs) / 2.0
+        top_idx = np.argsort(avg_imp)[::-1][:15]
+        x_labels = [feat_labels[i] for i in top_idx]
+
+        x = np.arange(len(x_labels))
+        w = 0.38
+        fig, ax = plt.subplots(figsize=(14, 5))
+        ax.bar(x - w / 2, ht_abs[top_idx], w, label="Hand-Tuned", color="#1f77b4", alpha=0.85)
+        ax.bar(x + w / 2, opt_abs[top_idx], w, label="Optimized", color="#ff7f0e", alpha=0.85)
+        ax.set_xticks(x)
+        ax.set_xticklabels(x_labels, rotation=40, ha="right", fontsize=8)
+        ax.set_ylabel("|SHAP value|", fontsize=10)
+        ax.set_title(
+            "Feature Importance: Hand-Tuned vs Optimized Weights",
+            fontsize=12, fontweight="bold",
+        )
+        ax.legend(fontsize=10)
+        plt.tight_layout()
+        imp_path = str(_Path(save_dir) / "shap_comparison_importance.png")
+        plt.savefig(imp_path, dpi=120, bbox_inches="tight")
+        plt.close("all")
+        paths.append(imp_path)
+        logger.info("[generate_comparison_plot] saved %s", imp_path)
+    except Exception as exc:
+        logger.warning("[generate_comparison_plot] importance plot failed: %s", exc)
+
+    return paths
+
+
+# ---------------------------------------------------------------------------
+# compute_faithfulness
+# ---------------------------------------------------------------------------
+
+
+def compute_faithfulness(
+    features_df: pd.DataFrame,
+    risk_scores: np.ndarray,
+    ground_truth_disruptions: "np.ndarray | list[bool]",
+) -> float:
+    """Measure how faithfully SHAP top-3 features identify genuine anomalies.
+
+    For each ground-truth disruption day, the three features with the largest
+    absolute SHAP values are compared against a per-feature baseline built from
+    non-disruption days.  A feature is *genuinely anomalous* when it deviates
+    more than 1.5 standard deviations from that baseline mean.  Faithfulness
+    is the fraction of top-3 SHAP features that passed this check, averaged
+    over all disruption days.
+
+    Args:
+        features_df: n × 20 feature DataFrame.
+        risk_scores: Per-row composite risk scores of shape ``(n,)``.
+        ground_truth_disruptions: Boolean mask of shape ``(n,)`` — ``True``
+            for confirmed disruption days.
+
+    Returns:
+        Faithfulness score in ``[0, 1]``.  Target: > 0.8.
+    """
+    flags = np.asarray(ground_truth_disruptions, dtype=bool)
+    disruption_idx = np.where(flags)[0]
+    baseline_mask = ~flags
+
+    if baseline_mask.sum() == 0:
+        logger.warning("[compute_faithfulness] no baseline days available.")
+        return 0.0
+    if len(disruption_idx) == 0:
+        logger.warning("[compute_faithfulness] no disruption days in ground truth.")
+        return 0.0
+
+    baseline_df = features_df.iloc[baseline_mask]
+    b_mean = baseline_df.mean(axis=0)
+    b_std = baseline_df.std(axis=0)
+    b_std = b_std.where(b_std > 1e-8, 1e-8)  # prevent div-by-zero
+
+    explainer = SurrogateShapExplainer()
+    explainer.train_surrogate(features_df, risk_scores)
+
+    faithful = 0
+    total = 0
+    for idx in disruption_idx:
+        row = features_df.iloc[[idx]]
+        result = explainer.explain(row)
+        top3 = result["top_drivers"][:3]
+        for driver in top3:
+            feat = driver["feature"]
+            if feat not in features_df.columns:
+                total += 1
+                continue
+            deviation = abs(float(features_df.iloc[idx][feat]) - float(b_mean[feat])) / float(b_std[feat])
+            if deviation > 1.5:
+                faithful += 1
+            total += 1
+
+    score = faithful / total if total > 0 else 0.0
+    logger.info(
+        "[compute_faithfulness] faithful=%d / %d = %.3f",
+        faithful,
+        total,
+        score,
+    )
+    return score
