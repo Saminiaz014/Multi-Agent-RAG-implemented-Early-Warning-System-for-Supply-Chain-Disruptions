@@ -1548,6 +1548,77 @@ Evaluates RAG retrieval quality across a list of labelled signal scenarios (each
 
 ---
 
+## Phase 9a — Evaluation Suite (8 Metrics, incl. Decision Effectiveness / SRQ5)
+
+> **Summary.** A single executable script, `notebooks/evaluation.py`, produces the full thesis evidence bundle — eight metrics computed on the same train/validation/test realisations the optimizer used (seeds 42/43/44), reported side by side for the hand-tuned and optimized weight modes. The eighth metric, **Decision Effectiveness**, answers SRQ5 directly: it measures whether the system's risk score + explanation would actually lead a decision-maker to the *correct action*, not merely whether it detects and explains. New module `src/evaluation/decision_effectiveness.py` and auditable label file `data/knowledge_base/decision_labels.json`. **229 tests passing** (5 new tests in `tests/test_evaluation.py`, on top of the 5 detection/diversity tests added with the suite).
+
+Run it:
+
+```bash
+python notebooks/evaluation.py
+```
+
+It prints eight tables and writes two artefacts to `data/processed/` (gitignored, regenerated each run): `evaluation_results.json` (all raw metrics) and `thesis_comparison_table.json` (flattened for direct thesis use). It reuses the existing `PipelineEvaluator`, `DataSplitManager`, `compute_faithfulness`, and `ContextRetriever` — no core pipeline code was changed.
+
+### The Eight Metrics
+
+| # | Metric | What it measures | Headline result (hand-tuned, TEST) |
+|---|---|---|---|
+| 1 | Detection performance | Per-agent + system precision/recall/F1, both weight modes | System F1 = 0.956 |
+| 2 | Explainability faithfulness | SHAP top-3 vs. planted anomalies, both modes | 0.908 / 0.915 (target > 0.8) |
+| 3 | **Agent-diversity value** | 6-agent vs. 2-agent vs. 1-agent (F1 / lead / FPR) | 6-agent F1 0.956 › 1-agent 0.711 › 2-agent 0.610 |
+| 4 | Baseline comparison | Naive 2σ vs. hand-tuned vs. optimized | 0.522 vs. 0.956 vs. 0.935 |
+| 5 | **Weight-optimization impact** | Metric deltas + top-5 shifted params from `optimization_results.json` | F1 −0.024, lead +1.67 d, objective +0.088 |
+| 6 | RAG relevance | `evaluate_retrieval_quality()` on 3 scenarios | relevance 1.00, mean sim 0.656 |
+| 7 | Generalization | Validation vs. test for optimized weights | val F1 0.967 vs. test 0.935 — no overfit |
+| 8 | **Decision effectiveness (SRQ5)** | Predicted action vs. correct action | overall 0.866 (target > 0.75), > baseline 0.797 |
+
+Agent diversity (3) and optimization impact (5) reprise the two key findings from Phase 4; the ablation disables agents through the inter-agent weight mask, never by deleting code.
+
+### METRIC 8 — Decision Effectiveness (SRQ5)
+
+The rest of the suite measures *detection* and *explanation*. METRIC 8 measures the step that matters to a decision-maker: given the risk level, the SHAP drivers, and any retrieved historical precedent, would a human be led to the **correct action**?
+
+**Action space** (`src/evaluation/decision_effectiveness.py`): `["no_action", "monitor", "reroute", "escalate"]`.
+
+**Ground-truth labelling** comes from two auditable sources:
+
+- **10 historical RAG cases** — `derive_case_action()` maps each case's `impact` / `lessons` / feature fields to a correct action via a documented rubric (catastrophic disaster or sustained high-intensity geopolitical crisis → `escalate`; physical blockage with active rerouting → `reroute`; credible threat or gradual congestion → `monitor`). The result is persisted to `data/knowledge_base/decision_labels.json` (4 `escalate` / 4 `reroute` / 2 `monitor`) so labels are inspectable and manually correctable rather than buried in code.
+- **Synthetic Scenarios A/B/C** — `scenario_correct_action()` assigns correct actions by day range: Scenario A (moderate tension, days 60-74) → `monitor`; Scenario B (major blockage, days 150-170) → `reroute` at onset, `escalate` once risk stays HIGH for > 5 consecutive days; Scenario C (brief incident, days 280-290) → `monitor`; normal days → `no_action`.
+
+**Evidence → action mapper** — `predict_action(risk_level, top_shap_drivers, historical_context, sustained=False)` is a deliberately transparent rule set (not another ML model — decision support has to stay interpretable):
+
+- `low` → `no_action`; `medium` → `monitor`
+- `high` + sustained (HIGH > 5 consecutive days) → `escalate`
+- `high` + top driver agent in {routing, shipping} → `reroute`
+- `high` + top driver agent in {geopolitical, natural_disaster} with a > 0.75-similar case labelled `escalate` → `escalate`
+- otherwise → `monitor`
+
+It is robust to missing / `None` `historical_context` and empty drivers, and always returns a value in `ACTIONS`.
+
+**Result (hand-tuned, the default weight mode):** overall daily decision accuracy **0.866** (> 0.75 target) and **above the naive-baseline 0.797** — the baseline maps its threshold flags through the same `predict_action` logic but, lacking agent attribution, can never recommend `reroute` or `escalate`. Scenario B scores **1.00**. The confusion matrix and per-scenario breakdown are printed in full and expose a real calibration gap rather than hiding it: the pipeline **over-reacts** to moderate tension (Scenario A) and **under-reacts** to the brief incident (Scenario C). Optimized mode scores lower (0.49) because its lower risk thresholds over-alert on quiet days — reported honestly alongside hand-tuned.
+
+### Test Coverage (Phase 9a)
+
+`tests/test_evaluation.py` — 10 tests (`scope="module"` fixture that fits the agents once):
+
+| Test | What it verifies |
+|---|---|
+| `test_scenario_b_high_risk` | Scenario B reaches HIGH risk by day 151; all 6 agents fire |
+| `test_scenario_a_medium_risk` | Scenario A reaches ≥ MEDIUM; exactly 5 of 6 fire (not natural_disaster) |
+| `test_normal_period_low` | Days 100-130 raise no HIGH alert; mean risk below MEDIUM |
+| `test_6agent_beats_1agent` | 6-agent F1 ≥ 1-agent F1 (diversity adds value) |
+| `test_optimized_beats_handtuned` | Optimized objective + lead time improve (raw F1 is a deliberate trade-off) |
+| `test_decision_labels_complete` | `decision_labels.json` has all 10 cases, every value in `ACTIONS` |
+| `test_predict_action_valid_output` | `predict_action()` never crashes on missing/None input; always returns a valid action |
+| `test_decision_effectiveness_scenario_b` | Scenario B peak (day 155) predicts `reroute` or `escalate` |
+| `test_decision_effectiveness_beats_baseline` | Overall decision accuracy ≥ naive-baseline accuracy |
+| `test_decision_effectiveness_threshold` | Overall decision accuracy > 0.75 |
+
+> **Note on `test_optimized_beats_handtuned`.** Optimization is multi-objective (0.5·F1 + 0.3·lead − 0.2·FPR); on this dataset it trades ≈ 0.02 raw F1 for +1.7 days of early-warning lead time. The test therefore asserts the blended objective and lead time improve — the honest, reproduced result — rather than raw F1 in isolation.
+
+---
+
 ## Project Structure
 
 ```
@@ -1558,8 +1629,10 @@ supply-chain-dss/
 │   ├── raw/                    # raw CSV ingestion data (populate per connector)
 │   │   ├── shipping_hormuz.csv # synthetic Hormuz dataset (Phase 1 artefact)
 │   │   └── market_data.csv     # synthetic Brent / trade volume / freight data (Phase 1 artefact)
-│   ├── processed/              # cleaned, feature-ready DataFrames + SHAP comparison PNGs (Phase 4 depth)
+│   ├── processed/              # cleaned DataFrames, SHAP PNGs (Phase 4 depth), evaluation_results.json + thesis_comparison_table.json (Phase 9a, gitignored)
 │   └── knowledge_base/         # historical disruption cases as JSON
+│       ├── disruption_cases.json   # the 10 historical RAG cases
+│       └── decision_labels.json    # Phase 9a — auditable ground-truth action labels for the 10 cases
 ├── src/
 │   ├── ingestion/
 │   │   ├── base_connector.py   # ABC for all data source connectors
@@ -1575,6 +1648,8 @@ supply-chain-dss/
 │   │   └── shap_explainer.py   # SurrogateShapExplainer + compare_explanations / compute_faithfulness / generate_comparison_plot (Phase 4 depth)
 │   ├── rag/
 │   │   └── context_retriever.py # ChromaDB similarity search; query_gated() (Phase 7), evaluate_retrieval_quality() (Phase 4 depth)
+│   ├── evaluation/              # Phase 9a — thesis evidence bundle
+│   │   └── decision_effectiveness.py # ACTIONS, predict_action(), evaluate_decision_effectiveness() — SRQ5
 │   ├── extractors/              # Phase 7 — live API extraction layer for RAG knowledge base
 │   │   ├── base_extractor.py        # ABC: rate limiting, ${VAR} env-var resolution, doc normalization
 │   │   ├── newsapi_extractor.py     # current news (news_sentiment), ~30-day lookback cap
@@ -1602,9 +1677,11 @@ supply-chain-dss/
 │   ├── test_extractors.py      # Phase 7 — 26 tests, all extractors + KnowledgeBaseBuilder + query_gated(), HTTP fully mocked
 │   ├── test_api_6agent.py      # Phase 8 — 12 tests for all 10 API endpoints with mocked orchestrator
 │   ├── test_phase4_depth.py    # Phase 4 depth — 4 tests: SHAP comparison, faithfulness > 0.8, RAG quality > 0.7, plots
+│   ├── test_evaluation.py      # Phase 9a — 10 tests: scenario risk levels, agent diversity, decision effectiveness (SRQ5)
 │   └── test_fred_api.py        # standalone (non-pytest) FRED connectivity diagnostic, run by hand
 ├── logs/                       # pipeline execution logs (gitignored)
-├── notebooks/                  # exploration and evaluation notebooks
+├── notebooks/
+│   └── evaluation.py           # Phase 9a — executable 8-metric thesis evaluation suite
 ├── .env                        # API keys/credentials (gitignored) — see Phase 7 Configuration Additions
 ├── requirements.txt
 ├── main.py                     # entrypoint
@@ -1669,6 +1746,8 @@ python scripts/populate_knowledge_base.py --extractors serpapi   # one-time hist
 
 Extracts → deduplicates by document id → backs up to `data/knowledge_base/live_extracted_backup.json` (gitignored) → upserts into the `live_extracted_context` ChromaDB collection. Safe to re-run; missing API keys degrade individual extractors to zero documents rather than failing the run.
 
+A full live run populated **531 documents** across all five extractors (newsapi 265, serpapi 169, fred 16, acled 80, ambee 1) over the four chokepoints, with `documents_stored == documents_deduplicated` and no errors. That run also surfaced and fixed a cross-region de-duplication bug in `acled_extractor.py`: countries shared between chokepoints (Saudi Arabia in `hormuz` + `red_sea`, Egypt in `red_sea` + `suez`) previously produced identical `acled_{country}_{year}` document ids, so the second region's rows were silently dropped by the deduplicator — the id is now region-scoped (`acled_{region}_{country}_{year}`).
+
 ### API server
 
 ```bash
@@ -1683,7 +1762,7 @@ API docs available at `http://localhost:8000/docs`.
 pytest tests/ -v
 ```
 
-The full suite is **219 tests / 219 passing** across 11 collected test files (`test_fred_api.py` is a standalone diagnostic, not collected by pytest). Run the agent evaluations with output:
+The full suite is **229 tests / 229 passing** across 12 collected test files (`test_fred_api.py` is a standalone diagnostic, not collected by pytest). Run the agent evaluations with output:
 
 ```bash
 pytest tests/test_agents.py::test_shipping_agent_evaluation -v -s
