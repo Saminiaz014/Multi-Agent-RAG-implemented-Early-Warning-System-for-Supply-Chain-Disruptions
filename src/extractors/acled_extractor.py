@@ -130,7 +130,7 @@ class ACLEDExtractor(BaseExtractor):
                 )
 
                 documents.append(self._normalize_document(
-                    doc_id=f"{country}_{year}",
+                    doc_id=f"{region}_{country}_{year}",
                     text=text,
                     event_date=f"{year}-01-01",
                     region=region,
