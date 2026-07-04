@@ -38,12 +38,21 @@ if str(_NOTEBOOKS) not in sys.path:
 
 import evaluation as ev  # noqa: E402  (notebooks/evaluation.py)
 
+from src.evaluation.decision_effectiveness import (  # noqa: E402
+    ACTIONS,
+    generate_decision_labels,
+    load_decision_labels,
+    predict_action,
+)
 from src.optimization.data_split import DataSplitManager  # noqa: E402
 from src.optimization.pipeline_evaluator import PipelineEvaluator  # noqa: E402
 from src.optimization.weight_config import (  # noqa: E402
     load_optimized_weights,
     resolve_active_weights,
 )
+
+_KB_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "disruption_cases.json"
+_LABELS_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "decision_labels.json"
 
 # Scenario windows (positional day indices into the 365-day synthetic frame).
 _SCEN_A = range(60, 75)      # Moderate Tension
@@ -99,6 +108,17 @@ def env() -> dict:
             if float(agent_scores[name].iloc[list(window)].max()) >= _FIRE
         }
 
+    # --- Decision effectiveness (hand-tuned, the default weight mode) ---
+    import json
+
+    cases = json.loads(_KB_PATH.read_text(encoding="utf-8"))
+    labels = load_decision_labels(_LABELS_PATH) or generate_decision_labels(cases)
+    case_records = ev._build_case_records(cases, labels)
+    baseline_records = ev._build_baseline_day_records(evaluator, ht_params)
+    day_records = ev._build_day_records(evaluator, ht_params, "train", "test")
+    from src.evaluation.decision_effectiveness import evaluate_decision_effectiveness
+    decision = evaluate_decision_effectiveness(day_records, case_records, baseline_records)
+
     return {
         "evaluator": evaluator,
         "ht_params": ht_params,
@@ -107,6 +127,8 @@ def env() -> dict:
         "level": level,
         "thr": thr,
         "fired_agents": fired_agents,
+        "day_records": day_records,
+        "decision": decision,
     }
 
 
@@ -215,4 +237,103 @@ def test_optimized_beats_handtuned(env):
     assert opt_m.f1 >= ht_m.f1 - 0.05, (
         f"Optimized F1 ({opt_m.f1:.3f}) fell more than 0.05 below hand-tuned "
         f"({ht_m.f1:.3f}) — larger than the expected trade-off."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6 — Decision labels are complete and valid
+# ---------------------------------------------------------------------------
+
+
+def test_decision_labels_complete():
+    import json
+
+    cases = json.loads(_KB_PATH.read_text(encoding="utf-8"))
+    case_ids = {str(c["id"]) for c in cases}
+    assert len(case_ids) == 10, f"Expected 10 historical cases, got {len(case_ids)}"
+
+    labels = load_decision_labels(_LABELS_PATH)
+    assert set(labels.keys()) == case_ids, (
+        f"decision_labels.json is missing entries for: {case_ids - set(labels.keys())}"
+    )
+    for cid, action in labels.items():
+        assert action in ACTIONS, f"Case {cid} has invalid action '{action}'"
+
+
+# ---------------------------------------------------------------------------
+# 7 — predict_action always returns a valid action and never crashes
+# ---------------------------------------------------------------------------
+
+
+def test_predict_action_valid_output():
+    # Missing / None / malformed inputs must not crash and must stay in ACTIONS.
+    cases = [
+        ("low", None, None, False),
+        ("medium", [], None, False),
+        ("high", None, None, False),
+        ("high", [{"agent": "routing"}], None, False),
+        ("high", [{"agent": "geopolitical"}], {"similarity": 0.9, "action": "escalate"}, False),
+        ("high", [{"agent": "geopolitical"}], {"similarity": 0.1}, False),
+        ("high", [{"agent": "shipping"}], None, True),
+        ("high", [{}], None, False),               # driver with no agent key
+        ("HIGH", [{"agent": "MARKET"}], {}, False),  # odd casing, empty context
+        (None, None, None, False),                 # everything missing
+        ("unknown_level", [{"agent": "x"}], None, False),
+    ]
+    for risk_level, drivers, context, sustained in cases:
+        action = predict_action(risk_level, drivers, context, sustained=sustained)
+        assert action in ACTIONS, (
+            f"predict_action({risk_level!r}, {drivers!r}, {context!r}, {sustained}) "
+            f"returned invalid action {action!r}"
+        )
+
+    # Spot-check the documented rules.
+    assert predict_action("low", None, None) == "no_action"
+    assert predict_action("medium", None, None) == "monitor"
+    assert predict_action("high", [{"agent": "routing"}], None) == "reroute"
+    assert predict_action("high", [{"agent": "shipping"}], None, sustained=True) == "escalate"
+
+
+# ---------------------------------------------------------------------------
+# 8 — Scenario B peak yields an actionable decision (reroute or escalate)
+# ---------------------------------------------------------------------------
+
+
+def test_decision_effectiveness_scenario_b(env):
+    record = env["day_records"][155]  # peak of the Major Blockage
+    action = predict_action(
+        record["risk_level"], record["top_drivers"],
+        record["historical_context"], sustained=record["sustained"],
+    )
+    assert action in ("reroute", "escalate"), (
+        f"Scenario B peak (day 155) predicted {action!r}; expected an actionable "
+        "response (reroute/escalate), not no_action/monitor."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 9 — Full pipeline decisions beat the naive-baseline decisions
+# ---------------------------------------------------------------------------
+
+
+def test_decision_effectiveness_beats_baseline(env):
+    d = env["decision"]
+    assert d["overall_accuracy"] >= d["baseline_accuracy"], (
+        f"Pipeline decision accuracy ({d['overall_accuracy']:.3f}) should be >= "
+        f"naive-baseline accuracy ({d['baseline_accuracy']:.3f}); agent attribution "
+        "is expected to make the risk score more actionable."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 10 — Overall decision accuracy clears the 0.75 target (SRQ5)
+# ---------------------------------------------------------------------------
+
+
+def test_decision_effectiveness_threshold(env):
+    d = env["decision"]
+    assert d["overall_accuracy"] > 0.75, (
+        f"Overall decision accuracy {d['overall_accuracy']:.3f} did not exceed 0.75.\n"
+        f"per_scenario={d['per_scenario_accuracy']}, per_case={d['per_case_accuracy']}, "
+        f"baseline={d['baseline_accuracy']}"
     )

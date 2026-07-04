@@ -39,6 +39,14 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from src.evaluation.decision_effectiveness import (  # noqa: E402
+    ACTIONS,
+    case_decision_inputs,
+    evaluate_decision_effectiveness,
+    generate_decision_labels,
+    load_decision_labels,
+    scenario_correct_action,
+)
 from src.explainability.shap_explainer import compute_faithfulness  # noqa: E402
 from src.optimization.data_split import DataSplitManager  # noqa: E402
 from src.optimization.pipeline_evaluator import PipelineEvaluator  # noqa: E402
@@ -58,6 +66,7 @@ logger.setLevel(logging.INFO)
 _CONFIG_PATH = _PROJECT_ROOT / "config" / "settings.yaml"
 _OPT_RESULTS_PATH = _PROJECT_ROOT / "data" / "processed" / "optimization_results.json"
 _KB_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "disruption_cases.json"
+_DECISION_LABELS_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "decision_labels.json"
 _EVAL_RESULTS_PATH = _PROJECT_ROOT / "data" / "processed" / "evaluation_results.json"
 _THESIS_TABLE_PATH = _PROJECT_ROOT / "data" / "processed" / "thesis_comparison_table.json"
 
@@ -681,6 +690,157 @@ def metric_7_generalization(evaluator: PipelineEvaluator, opt_params: dict) -> d
 
 
 # ===========================================================================
+# METRIC 8 — Decision effectiveness (key thesis finding — SRQ5)
+# ===========================================================================
+
+
+def _day_top_agent(agent_scores: dict[str, float], inter_weights: dict[str, float]) -> str:
+    """Dominant contributing agent for a day (max inter-weight x score)."""
+    best_agent, best_contrib = "", -1.0
+    for name, score in agent_scores.items():
+        contrib = float(inter_weights.get(name, 0.0)) * float(score)
+        if contrib > best_contrib:
+            best_agent, best_contrib = name, contrib
+    return best_agent
+
+
+def _build_day_records(
+    evaluator: PipelineEvaluator, params: dict, fit_split: str, eval_split: str
+) -> list[dict]:
+    """One decision record per day: risk level, top driver, sustained, correct."""
+    series = _score_series(evaluator, params, fit_split, eval_split)
+    if not series:
+        return []
+    scores_df = pd.DataFrame(series).sort_index().reset_index(drop=True)
+    risk = _aligned_risk(evaluator, series, params).reset_index(drop=True)
+    thr = params["thresholds"]
+    inter = params["inter_weights"]
+
+    records: list[dict] = []
+    high_run = 0
+    for day in range(len(risk)):
+        score = float(risk[day])
+        if score >= thr["risk_high"]:
+            level = "high"
+            high_run += 1
+        elif score >= thr["risk_medium"]:
+            level = "medium"
+            high_run = 0
+        else:
+            level = "low"
+            high_run = 0
+
+        sustained = level == "high" and high_run > 5
+        top_agent = _day_top_agent(
+            {n: scores_df[n].iloc[day] for n in scores_df.columns}, inter
+        )
+        correct, scenario = scenario_correct_action(day, high_run_length=high_run)
+        records.append({
+            "scenario": scenario,
+            "risk_level": level,
+            "top_drivers": [{"agent": top_agent}],
+            "sustained": sustained,
+            "historical_context": None,
+            "correct_action": correct,
+        })
+    return records
+
+
+def _build_baseline_day_records(
+    evaluator: PipelineEvaluator, params: dict
+) -> list[dict]:
+    """Naive 2-sigma baseline as decision records (no agent attribution).
+
+    Flagged days map to a HIGH alert with no driver and no sustained-crisis
+    reasoning, so :func:`predict_action` can only ever reach ``monitor`` — this
+    isolates the decision value of agent attribution and temporal risk modelling
+    that the full pipeline adds.
+    """
+    y_true = evaluator.data_manager.get_ground_truth("test")
+    test_frames = evaluator.data_manager.get_splits()["test"]
+    flags = _naive_baseline_pred(test_frames, y_true)
+
+    records: list[dict] = []
+    for day in range(len(flags)):
+        correct, scenario = scenario_correct_action(day, high_run_length=0)
+        records.append({
+            "scenario": scenario,
+            "risk_level": "high" if flags[day] else "low",
+            "top_drivers": [],
+            "sustained": False,
+            "historical_context": None,
+            "correct_action": correct,
+        })
+    return records
+
+
+def _build_case_records(cases: list[dict], labels: dict[str, str]) -> list[dict]:
+    """One decision record per historical case (fed to predict_action)."""
+    records: list[dict] = []
+    for case in cases:
+        cid = str(case["id"])
+        inputs = case_decision_inputs(case)
+        records.append({
+            "case_id": cid,
+            "risk_level": inputs["risk_level"],
+            "top_drivers": inputs["top_drivers"],
+            "sustained": inputs["sustained"],
+            "historical_context": None,
+            "correct_action": labels.get(cid, "no_action"),
+        })
+    return records
+
+
+def metric_8_decision(evaluator: PipelineEvaluator, modes: dict[str, dict]) -> dict:
+    """Decision effectiveness: does risk + explanation lead to the right action?"""
+    _rule("METRIC 8 — Decision effectiveness (SRQ5): evidence -> correct action")
+
+    cases = json.loads(_KB_PATH.read_text(encoding="utf-8"))
+    labels = load_decision_labels(_DECISION_LABELS_PATH)
+    if not labels:
+        labels = generate_decision_labels(cases)
+        _DECISION_LABELS_PATH.write_text(json.dumps(labels, indent=2), encoding="utf-8")
+    case_records = _build_case_records(cases, labels)
+    baseline_records = _build_baseline_day_records(evaluator, modes["hand_tuned"])
+
+    result: dict[str, dict] = {}
+    for mode, params in modes.items():
+        day_records = _build_day_records(evaluator, params, "train", "test")
+        result[mode] = evaluate_decision_effectiveness(
+            day_records, case_records, baseline_records
+        )
+
+    ht, opt = result["hand_tuned"], result["optimized"]
+    _safe_print("\nDecision accuracy (predicted action vs correct action):")
+    _table(
+        ["Measure", "Hand-Tuned", "Optimized", "Target"],
+        [
+            ["Overall (daily)", f"{ht['overall_accuracy']:.3f}", f"{opt['overall_accuracy']:.3f}", "> 0.75"],
+            ["Per-case (10)", f"{ht['per_case_accuracy']:.3f}", f"{opt['per_case_accuracy']:.3f}", "-"],
+            ["Scenario A", f"{ht['per_scenario_accuracy']['A']:.3f}", f"{opt['per_scenario_accuracy']['A']:.3f}", "-"],
+            ["Scenario B", f"{ht['per_scenario_accuracy']['B']:.3f}", f"{opt['per_scenario_accuracy']['B']:.3f}", "-"],
+            ["Scenario C", f"{ht['per_scenario_accuracy']['C']:.3f}", f"{opt['per_scenario_accuracy']['C']:.3f}", "-"],
+            ["Naive baseline", f"{ht['baseline_accuracy']:.3f}", f"{opt['baseline_accuracy']:.3f}", "beat"],
+        ],
+        [16, 12, 12, 8],
+    )
+    _safe_print(
+        f"\n  Hand-tuned overall {ht['overall_accuracy']:.3f} vs naive baseline "
+        f"{ht['baseline_accuracy']:.3f} — agent attribution makes the risk score actionable."
+    )
+
+    # Confusion matrix (hand-tuned daily stream).
+    _safe_print("\nConfusion matrix (hand-tuned daily stream; rows=correct, cols=predicted):")
+    cm = ht["confusion_matrix"]
+    _table(
+        ["correct \\ pred"] + ACTIONS,
+        [[a] + [str(cm[a][b]) for b in ACTIONS] for a in ACTIONS],
+        [14] + [9] * len(ACTIONS),
+    )
+    return result
+
+
+# ===========================================================================
 # Orchestration
 # ===========================================================================
 
@@ -725,6 +885,7 @@ def main() -> int:
     results["metric_5_optimization_impact"] = metric_5_optimization_impact(hand_layout)
     results["metric_6_rag_relevance"] = metric_6_rag(config)
     results["metric_7_generalization"] = metric_7_generalization(evaluator, modes["optimized"])
+    results["metric_8_decision_effectiveness"] = metric_8_decision(evaluator, modes)
 
     # --- Persist raw + thesis-formatted results ---
     _EVAL_RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -767,6 +928,14 @@ def _build_thesis_table(results: dict) -> dict:
             "validation_f1": m7["validation"]["f1"],
             "test_f1": m7["test"]["f1"],
             "overfit_flag": m7["overfit_flag"],
+        },
+        "decision_effectiveness": {
+            mode: {
+                "overall_accuracy": results["metric_8_decision_effectiveness"][mode]["overall_accuracy"],
+                "per_case_accuracy": results["metric_8_decision_effectiveness"][mode]["per_case_accuracy"],
+                "baseline_accuracy": results["metric_8_decision_effectiveness"][mode]["baseline_accuracy"],
+            }
+            for mode in results["metric_8_decision_effectiveness"]
         },
     }
 
