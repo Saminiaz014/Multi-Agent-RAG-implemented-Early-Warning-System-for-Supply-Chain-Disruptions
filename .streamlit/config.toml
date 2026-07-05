@@ -1,0 +1,12 @@
+# Streamlit theme for the DSS dashboard — muted analytical dark; the amber
+# primary is reserved for interactive accents, risk colors stay in the app CSS.
+[theme]
+base = "dark"
+primaryColor = "#d9a514"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#141a24"
+textColor = "#dfe6ee"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
