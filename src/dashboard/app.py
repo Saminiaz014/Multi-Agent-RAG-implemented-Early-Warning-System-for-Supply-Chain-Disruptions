@@ -30,18 +30,18 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-# Re-exports — keep the Phase 9b test surface (and any external callers) stable.
+# Re-exports — keep the dashboard test surface (and any external callers) stable.
 from src.dashboard.core import (  # noqa: E402,F401
     ACTIONS,
     AGENT_COLORS,
     ALL_AGENTS,
     AVAILABLE_REGIONS,
-    GLOBE_FALLBACK_MESSAGE,
+    MAP_FALLBACK_MESSAGE,
     RANGE_PRESETS,
     RISK_COLORS,
     SCENARIOS,
     STATUS_COLORS,
-    build_globe_html,
+    build_map_html,
     classify_level,
     decide_action,
     fig_to_jpeg,
@@ -51,7 +51,7 @@ from src.dashboard.core import (  # noqa: E402,F401
     get_vessels,
     predict_action,
     preset_to_range,
-    resolve_cesium_token,
+    resolve_map_key,
     select_route,
     status_word,
 )

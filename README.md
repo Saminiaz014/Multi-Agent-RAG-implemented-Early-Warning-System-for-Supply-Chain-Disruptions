@@ -75,7 +75,7 @@ The Strait of Hormuz is one of the world's most critical maritime chokepoints, c
 ┌─────────────────────────────────────────────────────────┐
 │            Streamlit Dashboard  (Phase 9b)              │
 │  Page 1 · Decision View — status words, action badge,   │
-│           CesiumJS 3-D map, LLM risk narrative          │
+│           MapLibre 3-D map, LLM risk narrative          │
 │  Page 2 · Analysis View — all 8 evaluation metrics,     │
 │           range explorer, per-chart JPEG export         │
 └─────────────────────────────────────────────────────────┘
@@ -1630,7 +1630,7 @@ It is robust to missing / `None` `historical_context` and empty drivers, and alw
 
 ## Phase 9b — Streamlit Dashboard (Two-Page Redesign)
 
-> **Summary.** The final deliverable: a Streamlit dashboard split into **two pages for two audiences**. The **Decision View** is a single-viewport, plain-language operational page for a supply-chain manager — status words, a recommended action, a CesiumJS 3-D chokepoint map, and a natural-language risk explanation, with **no raw scores anywhere** (machine-verified by test). The **Analysis View** is a scrollable research page for the thesis author — all 8 Phase 9a metrics, raw signals, per-day SHAP values, and per-chart JPEG export for direct thesis use. The first dashboard version (a single tabbed page exposing raw technical scores) was restructured into this split after direct feedback. **243 tests passing** (14 in `tests/test_dashboard.py`).
+> **Summary.** The final deliverable: a Streamlit dashboard split into **two pages for two audiences**. The **Decision View** is a single-viewport, plain-language operational page for a supply-chain manager — status words, a recommended action, a MapLibre GL JS pitched 3-D chokepoint map, and a natural-language risk explanation, with **no raw scores anywhere** (machine-verified by test). The **Analysis View** is a scrollable research page for the thesis author — all 8 Phase 9a metrics, raw signals, per-day SHAP values, and per-chart JPEG export for direct thesis use. The first dashboard version (a single tabbed page exposing raw technical scores) was restructured into this split after direct feedback; a follow-up revision replaced the original CesiumJS globe with the keyless MapLibre map. **243 tests passing** (14 in `tests/test_dashboard.py`).
 
 Run it:
 
@@ -1645,7 +1645,7 @@ True Streamlit multipage via `st.navigation` over thin `pages/` shims; all logic
 | File | Role |
 |---|---|
 | `src/dashboard/app.py` | Entry point / router (`st.navigation`); re-exports the helper surface |
-| `src/dashboard/core.py` | Shared cached data layer, status-word mapping, routes/vessels/news, globe builder, narrative + JPEG helpers |
+| `src/dashboard/core.py` | Shared cached data layer, status-word mapping, routes/vessels/news, MapLibre map builder, narrative + JPEG helpers |
 | `src/dashboard/decision_view.py` | Page 1 render logic |
 | `src/dashboard/analysis_view.py` | Page 2 render logic |
 | `src/dashboard/pages/1_Decision_View.py`, `2_Analysis_View.py` | Thin page shims |
@@ -1657,7 +1657,7 @@ The data layer scores the same **seed-44 held-out test split** every Phase 9a nu
 
 - **Region selector** — only "Strait of Hormuz" is offered for the thesis, but every underlying fetcher (`get_routes` / `get_news` / monitoring points) accepts an arbitrary region key, so post-thesis chokepoints (red_sea / malacca / suez, already in `settings.yaml`) plug in by extending one dict.
 - **Risk trend** (top-left) — on-panel 30/90/180/365-day window control; the numeric y-axis is hidden and replaced with **Critical / High / Low status bands**; hover shows the status word, not the score. A diamond marker flags the most significant peak in the window; clicking it (or the Explain button) opens an inline **natural-language explanation** generated from the live SHAP drivers — via the Anthropic API when `ANTHROPIC_API_KEY` is set, otherwise a compositional fallback (one generic algorithm, not per-feature templates; no LLM client existed in the codebase to reuse). A "View full breakdown →" link deep-links the Analysis page to that day via shared session state.
-- **Interactive map** (centre) — the CesiumJS globe (World Terrain + Bing Aerial, `CESIUM_ION_TOKEN` from `.env`, graceful placeholder fallback) with **status-colored route polylines** through the strait, the selected route highlighted, and vessel markers with detail popups. Vessel records are clearly-documented representative synthetic data (per-vessel AIS is not tracked; vessel classes are the shipping connector's real CSV types). Clicking a route on the map selects it in the app via a `?route=` query-param round-trip — plain `components.html` has no direct return channel to Streamlit.
+- **Interactive map** (centre) — a **MapLibre GL JS** pitched 3-D regional map (55° tilt, not a globe) that needs **no API key at all**: OpenFreeMap vector tiles for the base style, AWS Open Data terrarium DEM for `setTerrain()` 3-D relief, and conditional `fill-extrusion` 3-D buildings where the tile source carries height data. `MAPTILER_API_KEY` in `.env` is an *optional* upgrade (MapTiler dark style + terrain-RGB DEM). **Status-colored route lines** through the strait, the selected route highlighted, chokepoint markers, and vessel markers with detail popups. Vessel records are clearly-documented representative synthetic data (per-vessel AIS is not tracked; vessel classes are the shipping connector's real CSV types). Clicking a route on the map selects it in the app via a `?route=` query-param round-trip — plain `components.html` has no direct return channel to Streamlit.
 - **Route status** (top-right) — one row per monitored route with a word-only status pill (⚠ Critical / ▲ High / ✔ Low) and a Select button. The control strip, the status list, and the map all funnel through one `select_route()` state authority.
 - **Decision support + news** (bottom-right) — the `predict_action()` recommendation as a colored badge with a one-line rationale and **the exact rule that fired**, captioned "Rule-based recommendation, not an automated decision". The news feed reads the system's own Phase 7 extraction backup (real NewsAPI/SerpAPI articles, region-tagged — no live API quota burned per rerun) with a "This route / All regions" toggle.
 - **Routes are presentational scopes over real signals**: each route's trend is the pipeline's own renormalised weighted aggregation restricted to the agents most relevant to that corridor (the same masking mechanism as the diversity ablation) — no per-route analytics are invented.
@@ -1680,7 +1680,7 @@ Nine sections: (1) detection performance, (2) explainability faithfulness + SHAP
 | `test_analysis_view_all_metrics_present` | Page 2 renders all 9 sections from `evaluation_results.json` with zero exceptions |
 | `test_jpeg_export_helper` | `fig_to_jpeg()` produces a valid JPEG (magic bytes) with title + caption flattened in |
 | `test_region_selector_hormuz_only` | Hormuz is the only offered region, but every fetcher accepts arbitrary region keys without raising |
-| *(+ 8 Phase 9b originals)* | Imports, monitoring-point validity, Cesium token fallback, `predict_action` reachability, range-preset mapping |
+| *(+ 8 Phase 9b originals)* | Imports, monitoring-point validity, keyless map render (`test_map_renders_without_key` — OpenFreeMap/terrain/extrusion/pitch present, no key material leaked), `predict_action` reachability, range-preset mapping |
 
 ---
 
@@ -1785,10 +1785,10 @@ ACLED_USERNAME=
 ACLED_PASSWORD=
 AMBEE_API_KEY=
 SERPAPI_API_KEY=
-CESIUM_ION_TOKEN=          # Phase 9b — 3-D globe (free at https://ion.cesium.com/tokens)
+MAPTILER_API_KEY=          # Phase 9b, optional — upgrades the dashboard map style/terrain (keyless OpenFreeMap + AWS DEM otherwise)
 ANTHROPIC_API_KEY=         # Phase 9b, optional — LLM risk explanations
 ```
-Every key is optional — each extractor and `DisasterConnector.fetch_api()` log a warning and degrade gracefully (empty results / fallback to synthetic) when its key is missing, so a partial `.env` never breaks the pipeline. Without `CESIUM_ION_TOKEN` the dashboard map shows a placeholder instead of the globe; without `ANTHROPIC_API_KEY` risk explanations use the deterministic compositional fallback.
+Every key is optional — each extractor and `DisasterConnector.fetch_api()` log a warning and degrade gracefully (empty results / fallback to synthetic) when its key is missing, so a partial `.env` never breaks the pipeline. The dashboard map is fully keyless by default (MapLibre GL JS + OpenFreeMap + AWS Open Data terrain); without `ANTHROPIC_API_KEY` risk explanations use the deterministic compositional fallback.
 
 ---
 

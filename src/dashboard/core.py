@@ -67,9 +67,9 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "ACTIONS", "predict_action", "ALL_AGENTS", "AGENT_COLORS", "RISK_COLORS",
     "STATUS_COLORS", "STATUS_ICONS", "SCENARIOS", "RANGE_PRESETS",
-    "GLOBE_FALLBACK_MESSAGE", "AVAILABLE_REGIONS",
-    "preset_to_range", "get_monitoring_points", "resolve_cesium_token",
-    "build_globe_html", "classify_level", "status_word", "decide_action",
+    "MAP_FALLBACK_MESSAGE", "AVAILABLE_REGIONS",
+    "preset_to_range", "get_monitoring_points", "resolve_map_key",
+    "build_map_html", "classify_level", "status_word", "decide_action",
     "load_app_config", "resolve_mode_params", "compute_timeseries",
     "composite_series", "get_shap_assets", "get_retriever", "load_cases_by_id",
     "load_eval_results", "sustained_high_flags", "analysis_bundle",
@@ -116,12 +116,6 @@ SCENARIOS = {
 
 _TOTAL_DAYS = 365
 RANGE_PRESETS = ["Last 30 days", "Last 90 days", "Last 6 months", "Last year", "Custom range"]
-
-_CESIUM_VERSION = "1.130"
-GLOBE_FALLBACK_MESSAGE = (
-    "Set CESIUM_ION_TOKEN in .env to enable the 3D globe. "
-    "Get a free token at https://ion.cesium.com/tokens."
-)
 
 #: Region control: only Hormuz is populated for the thesis, but every fetch
 #: function below accepts an arbitrary region key so post-thesis chokepoints
@@ -203,11 +197,6 @@ def get_monitoring_points(config: dict) -> dict[str, dict]:
             p = points[0]
             out[region] = {"name": str(p["name"]), "lat": float(p["lat"]), "lng": float(p["lng"])}
     return out
-
-
-def resolve_cesium_token() -> str:
-    """Read the Cesium ion token from the environment (via .env). Never logged."""
-    return os.environ.get("CESIUM_ION_TOKEN", "").strip()
 
 
 def classify_level(score: float, high_thr: float, med_thr: float) -> str:
@@ -613,15 +602,36 @@ def export_button(fig, key: str, title: str, caption: str) -> None:
 
 
 # ===========================================================================
-# CesiumJS globe (routes + vessels + click-to-select sync)
+# MapLibre GL JS 3-D map (routes + vessels + click-to-select sync)
+#
+# Replaces the CesiumJS globe per the redesign feedback: a pitched (tilted)
+# 3-D regional map rather than a full globe. MapLibre GL JS is open-source
+# and, with the tile sources chosen here, requires **no API key at all**:
+#
+#   * base style  — OpenFreeMap "liberty" (free vector tiles, keyless)
+#   * 3-D terrain — AWS Open Data terrarium DEM tiles (keyless), via
+#                   map.setTerrain()
+#   * 3-D buildings — fill-extrusion over the style's own vector building
+#                   layer where height data exists (guarded; the strait view
+#                   is mostly water, so buildings appear only when zoomed in)
+#
+# MAPTILER_API_KEY in .env is an *optional* upgrade (MapTiler dark style +
+# terrain-RGB DEM); because the default path is keyless, the missing-key
+# placeholder the Cesium version needed is no longer necessary — the map
+# always renders.
 # ===========================================================================
 
-_GLOBE_TEMPLATE = Template("""<!DOCTYPE html>
+MAP_FALLBACK_MESSAGE = (
+    "Map unavailable — MapLibre GL JS failed to load from the CDN. "
+    "Check the network connection."
+)
+
+_MAP_TEMPLATE = Template("""<!DOCTYPE html>
 <html><head>
-<script src="https://cesium.com/downloads/cesiumjs/releases/$VERSION/Build/Cesium/Cesium.js"></script>
-<link href="https://cesium.com/downloads/cesiumjs/releases/$VERSION/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet">
 <style>
-  html, body, #cesiumContainer { width:100%; height:100%; margin:0; padding:0; overflow:hidden; background:#0b0e14; }
+  html, body, #map { width:100%; height:100%; margin:0; padding:0; overflow:hidden; background:#0b0e14; }
   .flybar { position:absolute; top:10px; left:10px; z-index:10; display:flex; gap:6px; }
   .flybar button {
     background:#141a24; color:#c8d1dc; border:1px solid #2a3442; border-radius:4px;
@@ -629,111 +639,160 @@ _GLOBE_TEMPLATE = Template("""<!DOCTYPE html>
   }
   .flybar button:hover { background:#1d2634; border-color:#3d4b5e; }
   .flybar button.primary { border-color:#d9a514; color:#e8d9a0; }
+  .status-chip {
+    position:absolute; top:10px; right:10px; z-index:10; padding:5px 14px; border-radius:14px;
+    font:700 12px 'Segoe UI', sans-serif; letter-spacing:.8px; color:#0b0e14;
+  }
+  .maplibregl-popup-content { background:#141a24; color:#c8d1dc; border:1px solid #2a3442;
+    font: 12px 'Segoe UI', sans-serif; }
+  .maplibregl-popup-tip { border-top-color:#141a24 !important; }
 </style></head>
 <body>
-<div id="cesiumContainer"></div>
+<div id="map"></div>
 <div class="flybar">$BUTTONS</div>
+<div class="status-chip" id="chip"></div>
 <script>
-Cesium.Ion.defaultAccessToken = "$TOKEN";
 const DATA = $DATA;
+document.getElementById("chip").textContent = DATA.focus.name + " · " + DATA.status_word;
+document.getElementById("chip").style.background = DATA.status_color;
 
-const viewer = new Cesium.Viewer("cesiumContainer", {
-  terrain: Cesium.Terrain.fromWorldTerrain(),
-  baseLayer: Cesium.ImageryLayer.fromProviderAsync(Cesium.IonImageryProvider.fromAssetId(2)),
-  animation: false, timeline: false, geocoder: false, homeButton: false,
-  sceneModePicker: false, navigationHelpButton: false, baseLayerPicker: false,
-  fullscreenButton: true, infoBox: true, selectionIndicator: true,
+if (typeof maplibregl === "undefined") {
+  document.getElementById("map").innerHTML =
+    "<div style='height:100%;display:flex;align-items:center;justify-content:center;" +
+    "color:#8d99a8;font:14px Segoe UI,sans-serif'>$FALLBACK</div>";
+} else {
+
+const map = new maplibregl.Map({
+  container: "map",
+  style: DATA.style_url,
+  center: [DATA.camera.lng, DATA.camera.lat],
+  zoom: DATA.camera.zoom,
+  pitch: DATA.camera.pitch,      // tilted 3-D regional view, not a globe
+  bearing: DATA.camera.bearing,
+  attributionControl: {compact: true},
 });
-viewer.scene.globe.enableLighting = false;
+map.addControl(new maplibregl.NavigationControl({visualizePitch: true}), "bottom-right");
 
-// Chokepoint marker — colored by plain-language status, not raw score.
-const focus = DATA.focus;
-viewer.entities.add({
-  name: focus.name,
-  position: Cesium.Cartesian3.fromDegrees(focus.lng, focus.lat),
-  point: { pixelSize: 15, color: Cesium.Color.fromCssColorString(DATA.status_color),
-           outlineColor: Cesium.Color.WHITE, outlineWidth: 2,
-           disableDepthTestDistance: Number.POSITIVE_INFINITY },
-  label: { text: focus.name + "  ·  " + DATA.status_word,
-           font: "13px 'Segoe UI', sans-serif",
-           fillColor: Cesium.Color.fromCssColorString("#e8edf2"),
-           pixelOffset: new Cesium.Cartesian2(0, -24),
-           disableDepthTestDistance: Number.POSITIVE_INFINITY },
-  description: DATA.popup_html,
-});
-
-for (const p of DATA.secondary) {
-  viewer.entities.add({
-    name: p.name,
-    position: Cesium.Cartesian3.fromDegrees(p.lng, p.lat),
-    point: { pixelSize: 8, color: Cesium.Color.fromCssColorString("#5a6b80").withAlpha(0.9),
-             outlineColor: Cesium.Color.fromCssColorString("#2a3442"), outlineWidth: 1,
-             disableDepthTestDistance: Number.POSITIVE_INFINITY },
-    description: "<div style='font-family:sans-serif'>" + p.name +
-                 "<br><small>Monitored chokepoint — not the current analytical focus.</small></div>",
-  });
-}
-
-// Monitored routes — polylines colored by status word; the selected route is
-// bright and wide, the rest dim. Clicking a route selects it in the app.
-for (const r of DATA.routes) {
-  const selected = (r.key === DATA.selected_route);
-  viewer.entities.add({
-    name: r.name,
-    polyline: {
-      positions: Cesium.Cartesian3.fromDegreesArray(r.flat_coords),
-      width: selected ? 7 : 3,
-      material: Cesium.Color.fromCssColorString(r.color).withAlpha(selected ? 0.95 : 0.45),
-      clampToGround: false,
-    },
-    properties: { routeKey: r.key },
-    description: "<div style='font-family:sans-serif'><b>" + r.name + "</b>" +
-                 "<br>Status: <b>" + r.status + "</b>" +
-                 "<br><small>Click selects this route in the dashboard.</small></div>",
-  });
-}
-
-// Synthetic representative vessels along the selected route (UI only).
-for (const v of DATA.vessels) {
-  viewer.entities.add({
-    name: v.id,
-    position: Cesium.Cartesian3.fromDegrees(v.lng, v.lat),
-    point: { pixelSize: 7, color: Cesium.Color.fromCssColorString("#e8edf2"),
-             outlineColor: Cesium.Color.fromCssColorString("#0b0e14"), outlineWidth: 1.5,
-             disableDepthTestDistance: Number.POSITIVE_INFINITY },
-    description: "<div style='font-family:sans-serif'><b>" + v.id + "</b> · " + v.type +
-                 "<br>Destination: " + v.destination + "<br>Speed: " + v.speed_kn + " kn" +
-                 "<br><small>Representative synthetic record — per-vessel AIS not tracked.</small></div>",
-  });
-}
-
-// Map -> app route sync. Plain components.html has no return channel to
-// Streamlit, so selecting a route entity updates the parent page URL with
-// ?route=<key>, which triggers a Streamlit rerun that reads the query param.
-// (Trade-off: a full page reload; caches make it fast.)
-viewer.selectedEntityChanged.addEventListener(function (e) {
+map.on("load", function () {
+  // ---- 3-D terrain (keyless AWS terrarium DEM unless MapTiler key given) --
   try {
-    if (e && e.properties && e.properties.routeKey) {
-      const k = e.properties.routeKey.getValue();
-      const url = new URL(window.parent.location.href);
-      if (url.searchParams.get("route") !== k) {
-        url.searchParams.set("route", k);
-        window.parent.location.href = url.toString();
-      }
+    map.addSource("dem", DATA.terrain_source);
+    map.setTerrain({source: "dem", exaggeration: 1.4});
+  } catch (e) { console.warn("terrain unavailable:", e); }
+
+  // ---- 3-D buildings where the vector source carries height data ---------
+  try {
+    const sources = map.getStyle().sources;
+    const vec = Object.keys(sources).find(function (s) { return sources[s].type === "vector"; });
+    if (vec) {
+      map.addLayer({
+        id: "3d-buildings", source: vec, "source-layer": "building",
+        type: "fill-extrusion", minzoom: 13,
+        paint: {
+          "fill-extrusion-color": "#aab4bf",
+          "fill-extrusion-height": ["coalesce", ["get", "render_height"], 8],
+          "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+          "fill-extrusion-opacity": 0.75,
+        },
+      });
     }
-  } catch (err) { /* cross-origin guard — sync unavailable, popup still shows */ }
+  } catch (e) { console.warn("3d buildings unavailable:", e); }
+
+  // ---- monitored routes: line layers colored by status word --------------
+  for (const r of DATA.routes) {
+    const selected = (r.key === DATA.selected_route);
+    map.addSource("route-" + r.key, {type: "geojson", data: {
+      type: "Feature", properties: {key: r.key, name: r.name, status: r.status},
+      geometry: {type: "LineString", coordinates: r.coords},
+    }});
+    map.addLayer({
+      id: "route-" + r.key, source: "route-" + r.key, type: "line",
+      layout: {"line-cap": "round", "line-join": "round"},
+      paint: {"line-color": r.color, "line-width": selected ? 7 : 3.5,
+              "line-opacity": selected ? 0.95 : 0.45},
+    });
+    map.on("click", "route-" + r.key, function (e) {
+      new maplibregl.Popup().setLngLat(e.lngLat).setHTML(
+        "<b>" + r.name + "</b><br>Status: <b>" + r.status + "</b>" +
+        "<br><small>Selecting this route in the dashboard…</small>").addTo(map);
+      // Map -> app sync: components.html has no return channel to Streamlit,
+      // so update the parent URL's ?route= param to trigger a rerun.
+      try {
+        const url = new URL(window.parent.location.href);
+        if (url.searchParams.get("route") !== r.key) {
+          url.searchParams.set("route", r.key);
+          window.parent.location.href = url.toString();
+        }
+      } catch (err) { /* cross-origin guard */ }
+    });
+    map.on("mouseenter", "route-" + r.key, function () { map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseleave", "route-" + r.key, function () { map.getCanvas().style.cursor = ""; });
+  }
+
+  // ---- synthetic representative vessels on the selected route (UI only) --
+  map.addSource("vessels", {type: "geojson", data: {
+    type: "FeatureCollection",
+    features: DATA.vessels.map(function (v) { return {
+      type: "Feature",
+      properties: v,
+      geometry: {type: "Point", coordinates: [v.lng, v.lat]},
+    }; }),
+  }});
+  map.addLayer({
+    id: "vessels", source: "vessels", type: "circle",
+    paint: {"circle-radius": 6, "circle-color": "#e8edf2",
+            "circle-stroke-color": "#0b0e14", "circle-stroke-width": 1.5},
+  });
+  map.on("click", "vessels", function (e) {
+    const p = e.features[0].properties;
+    new maplibregl.Popup().setLngLat(e.lngLat).setHTML(
+      "<b>" + p.id + "</b> · " + p.type +
+      "<br>Destination: " + p.destination + "<br>Speed: " + p.speed_kn + " kn" +
+      "<br><small>Representative synthetic record — per-vessel AIS not tracked.</small>"
+    ).addTo(map);
+  });
+  map.on("mouseenter", "vessels", function () { map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", "vessels", function () { map.getCanvas().style.cursor = ""; });
 });
 
-function flyTo(lng, lat, height) {
-  viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lng, lat, height), duration: 1.6 });
+// ---- chokepoint markers (status-colored focus, dim secondaries) ----------
+function dot(color, size) {
+  const el = document.createElement("div");
+  el.style.cssText = "width:" + size + "px;height:" + size + "px;border-radius:50%;" +
+    "background:" + color + ";border:2px solid #e8edf2;box-shadow:0 0 6px rgba(0,0,0,.6)";
+  return el;
 }
-flyTo(DATA.camera.lng, DATA.camera.lat, DATA.camera.height);
+new maplibregl.Marker({element: dot(DATA.status_color, 16)})
+  .setLngLat([DATA.focus.lng, DATA.focus.lat])
+  .setPopup(new maplibregl.Popup().setHTML(DATA.popup_html))
+  .addTo(map);
+for (const p of DATA.secondary) {
+  new maplibregl.Marker({element: dot("#5a6b80", 10)})
+    .setLngLat([p.lng, p.lat])
+    .setPopup(new maplibregl.Popup().setHTML(
+      "<b>" + p.name + "</b><br><small>Monitored chokepoint — not the current focus.</small>"))
+    .addTo(map);
+}
+
+function flyTo(lng, lat) {
+  map.flyTo({center: [lng, lat], zoom: DATA.camera.zoom, pitch: DATA.camera.pitch, duration: 1600});
+}
+window.flyTo = flyTo;
+}
 </script>
 </body></html>""")
 
 
-def build_globe_html(
-    token: str,
+def resolve_map_key() -> str:
+    """Optional MapTiler key from the environment (via .env). Never logged.
+
+    Unlike the old Cesium token this is **not required** — the default
+    OpenFreeMap + AWS-terrarium path is fully keyless.
+    """
+    return os.environ.get("MAPTILER_API_KEY", "").strip()
+
+
+def build_map_html(
     focus: dict,
     secondary: list[dict],
     risk_level: str,
@@ -744,25 +803,37 @@ def build_globe_html(
     selected_route: str = "",
     route_status: dict[str, str] | None = None,
     status: str | None = None,
+    maptiler_key: str | None = None,
 ) -> str:
-    """Build the CesiumJS iframe HTML (fallback placeholder without a token).
+    """Build the MapLibre GL JS iframe HTML for the Decision view.
 
-    Backwards compatible with the Phase 9b signature; the redesign adds
-    ``routes`` / ``vessels`` / ``selected_route`` / ``route_status`` and the
-    plain-language ``status`` word. The token is injected into the rendered
-    HTML only — never logged or printed.
+    Renders a pitched 3-D regional map (55° tilt) centred on the focus
+    chokepoint with status-colored route lines, vessel markers, terrain and
+    conditional 3-D buildings. Works with zero API keys; a MapTiler key (when
+    provided) is injected into the rendered HTML only — never logged.
     """
-    if not token:
-        return (
-            "<div style=\"height:100%;display:flex;align-items:center;justify-content:center;"
-            "background:#10151d;color:#8d99a8;font:14px 'Segoe UI',sans-serif;border:1px dashed #2a3442;"
-            f"border-radius:6px;padding:24px;text-align:center;\">{GLOBE_FALLBACK_MESSAGE}</div>"
-        )
+    key = resolve_map_key() if maptiler_key is None else maptiler_key.strip()
+    if key:
+        style_url = f"https://api.maptiler.com/maps/dataviz-dark/style.json?key={key}"
+        terrain_source = {
+            "type": "raster-dem",
+            "url": f"https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key={key}",
+        }
+    else:
+        # Keyless defaults: OpenFreeMap vector style + AWS Open Data DEM.
+        style_url = "https://tiles.openfreemap.org/styles/liberty"
+        terrain_source = {
+            "type": "raster-dem",
+            "tiles": ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
+            "encoding": "terrarium",
+            "tileSize": 256,
+            "maxzoom": 13,
+        }
 
     word = status or {"low": "Low", "medium": "High", "high": "Critical"}.get(risk_level, "Low")
     route_status = route_status or {}
     popup_html = (
-        "<div style='font-family:sans-serif;line-height:1.6'>"
+        "<div style='line-height:1.6'>"
         f"<b>Status:</b> {word}<br>"
         f"<b>Main driver:</b> {top_driver}<br>"
         f"<b>Last updated:</b> {updated}</div>"
@@ -775,9 +846,11 @@ def build_globe_html(
             "name": r["name"],
             "status": w,
             "color": STATUS_COLORS.get(w, STATUS_COLORS["Low"]),
-            "flat_coords": [c for pt in r["coords"] for c in pt],
+            "coords": [[lng, lat] for lng, lat in r["coords"]],
         })
     data = {
+        "style_url": style_url,
+        "terrain_source": terrain_source,
         "focus": focus,
         "secondary": secondary,
         "status_word": word,
@@ -786,16 +859,18 @@ def build_globe_html(
         "routes": routes_payload,
         "vessels": vessels or [],
         "selected_route": selected_route,
-        "camera": {"lng": focus["lng"], "lat": focus["lat"], "height": 320000.0},
+        # Pitched regional camera on the strait — not a full-globe view.
+        "camera": {"lng": focus["lng"], "lat": focus["lat"] - 0.25,
+                   "zoom": 7.6, "pitch": 55, "bearing": -12},
     }
     buttons = "".join(
         f"<button class=\"{'primary' if p['name'] == focus['name'] else ''}\" "
-        f"onclick=\"flyTo({p['lng']},{p['lat']},320000)\">{p['label']}</button>"
+        f"onclick=\"flyTo({p['lng']},{p['lat']})\">{p['label']}</button>"
         for p in [{**focus, "label": "Hormuz"}]
         + [{**s, "label": s.get("region", s["name"]).replace("_", " ").title()} for s in secondary]
     )
-    return _GLOBE_TEMPLATE.substitute(
-        VERSION=_CESIUM_VERSION, TOKEN=token, DATA=json.dumps(data), BUTTONS=buttons,
+    return _MAP_TEMPLATE.substitute(
+        DATA=json.dumps(data), BUTTONS=buttons, FALLBACK=MAP_FALLBACK_MESSAGE,
     )
 
 

@@ -10,7 +10,7 @@ trend window (that peak is what a manager needs to act on); the trend chart,
 map, route status list and decision panel all evaluate that same day, and
 route selection is shared across the control strip, the status list, and the
 map (map clicks sync back via the ``?route=`` query param — see
-``core.build_globe_html``).
+``core.build_map_html``).
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from src.dashboard.core import (  # noqa: E402
     DASH_CSS,
     STATUS_COLORS,
     STATUS_ICONS,
-    build_globe_html,
+    build_map_html,
     classify_level,
     compute_timeseries,
     decide_action,
@@ -45,7 +45,6 @@ from src.dashboard.core import (  # noqa: E402
     get_shap_assets,
     get_vessels,
     load_app_config,
-    resolve_cesium_token,
     resolve_mode_params,
     route_risk_series,
     select_route,
@@ -164,8 +163,7 @@ def render() -> None:
         focus = points.get(region, {"name": region_label, "lat": 26.56, "lng": 56.25})
         secondary = [{**points[r], "region": r}
                      for r in points if r != region]
-        html = build_globe_html(
-            token=resolve_cesium_token(),
+        html = build_map_html(
             focus=focus,
             secondary=secondary,
             risk_level=classify_level(float(series.iloc[day - 1]),

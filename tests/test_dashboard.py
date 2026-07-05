@@ -55,7 +55,7 @@ def test_dashboard_imports():
     import src.dashboard.app as app  # noqa: F401
 
     assert callable(app.main)
-    assert callable(app.build_globe_html)
+    assert callable(app.build_map_html)
     assert callable(app.preset_to_range)
     # Redesign modules import cleanly too.
     from src.dashboard import analysis_view, core, decision_view  # noqa: F401
@@ -80,28 +80,39 @@ def test_geospatial_data_available():
         assert -180.0 <= p["lng"] <= 180.0, f"{region}: invalid lng {p['lng']}"
 
 
-def test_cesium_token_fallback(monkeypatch):
-    monkeypatch.delenv("CESIUM_ION_TOKEN", raising=False)
-    from src.dashboard.app import (
-        GLOBE_FALLBACK_MESSAGE,
-        build_globe_html,
-        resolve_cesium_token,
-    )
+def test_map_renders_without_key(monkeypatch):
+    """The MapLibre map needs no API key: with MAPTILER_API_KEY unset, the
+    keyless OpenFreeMap + AWS-terrarium path renders the full map (no
+    placeholder), and no key material appears in the HTML."""
+    monkeypatch.delenv("MAPTILER_API_KEY", raising=False)
+    from src.dashboard.app import build_map_html, resolve_map_key
 
-    token = resolve_cesium_token()
-    assert token == ""
+    assert resolve_map_key() == ""
 
-    html = build_globe_html(
-        token=token,
+    html = build_map_html(
         focus={"name": "Strait of Hormuz", "lat": 26.56, "lng": 56.25},
         secondary=[],
         risk_level="high",
         top_driver="vessel count",
         updated="2026-07-05",
     )
-    assert "CESIUM_ION_TOKEN" in html
-    assert GLOBE_FALLBACK_MESSAGE in html
-    assert "Cesium.Ion.defaultAccessToken" not in html
+    assert "maplibre-gl" in html, "MapLibre GL JS must load from the CDN"
+    assert "openfreemap.org" in html, "Keyless OpenFreeMap style expected without a key"
+    assert "terrarium" in html, "Keyless AWS DEM terrain expected without a key"
+    assert "setTerrain" in html, "3-D terrain must be enabled"
+    assert "fill-extrusion" in html, "3-D building layer must be defined"
+    assert '"pitch": 55' in html, "Camera must be pitched (tilted 3-D view)"
+    assert "maptiler.com" not in html, "No keyed provider without a key"
+    assert "key=" not in html, "No key material should appear in keyless HTML"
+
+    # When a key IS supplied, the MapTiler upgrade path is used — and the
+    # key is injected into the rendered HTML only (by design, client-visible).
+    html_keyed = build_map_html(
+        focus={"name": "Strait of Hormuz", "lat": 26.56, "lng": 56.25},
+        secondary=[], risk_level="low", top_driver="x", updated="2026-07-05",
+        maptiler_key="test-key-123",
+    )
+    assert "maptiler.com" in html_keyed and "test-key-123" in html_keyed
 
 
 def test_predict_action_importable():
