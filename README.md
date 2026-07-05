@@ -69,6 +69,15 @@ The Strait of Hormuz is one of the world's most critical maritime chokepoints, c
 │  GET  /optimization/results                             │
 │  POST /predict · /explain · /populate                   │
 │  POST /agents/toggle · /weights/switch                  │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│            Streamlit Dashboard  (Phase 9b)              │
+│  Page 1 · Decision View — status words, action badge,   │
+│           CesiumJS 3-D map, LLM risk narrative          │
+│  Page 2 · Analysis View — all 8 evaluation metrics,     │
+│           range explorer, per-chart JPEG export         │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -1619,6 +1628,62 @@ It is robust to missing / `None` `historical_context` and empty drivers, and alw
 
 ---
 
+## Phase 9b — Streamlit Dashboard (Two-Page Redesign)
+
+> **Summary.** The final deliverable: a Streamlit dashboard split into **two pages for two audiences**. The **Decision View** is a single-viewport, plain-language operational page for a supply-chain manager — status words, a recommended action, a CesiumJS 3-D chokepoint map, and a natural-language risk explanation, with **no raw scores anywhere** (machine-verified by test). The **Analysis View** is a scrollable research page for the thesis author — all 8 Phase 9a metrics, raw signals, per-day SHAP values, and per-chart JPEG export for direct thesis use. The first dashboard version (a single tabbed page exposing raw technical scores) was restructured into this split after direct feedback. **243 tests passing** (14 in `tests/test_dashboard.py`).
+
+Run it:
+
+```bash
+streamlit run src/dashboard/app.py
+```
+
+### Architecture
+
+True Streamlit multipage via `st.navigation` over thin `pages/` shims; all logic lives in importable modules so pytest exercises it without a Streamlit runtime:
+
+| File | Role |
+|---|---|
+| `src/dashboard/app.py` | Entry point / router (`st.navigation`); re-exports the helper surface |
+| `src/dashboard/core.py` | Shared cached data layer, status-word mapping, routes/vessels/news, globe builder, narrative + JPEG helpers |
+| `src/dashboard/decision_view.py` | Page 1 render logic |
+| `src/dashboard/analysis_view.py` | Page 2 render logic |
+| `src/dashboard/pages/1_Decision_View.py`, `2_Analysis_View.py` | Thin page shims |
+| `.streamlit/config.toml` | Muted-dark analytical theme (risk colors reserved for risk) |
+
+The data layer scores the same **seed-44 held-out test split** every Phase 9a number is reported on (fit on train, score on test via `PipelineEvaluator`), so the dashboard and thesis tables agree by construction. Everything is cached with `st.cache_data` / `st.cache_resource` and shared across both pages.
+
+### Page 1 — Decision View (manager audience, no scrolling, no raw scores)
+
+- **Region selector** — only "Strait of Hormuz" is offered for the thesis, but every underlying fetcher (`get_routes` / `get_news` / monitoring points) accepts an arbitrary region key, so post-thesis chokepoints (red_sea / malacca / suez, already in `settings.yaml`) plug in by extending one dict.
+- **Risk trend** (top-left) — on-panel 30/90/180/365-day window control; the numeric y-axis is hidden and replaced with **Critical / High / Low status bands**; hover shows the status word, not the score. A diamond marker flags the most significant peak in the window; clicking it (or the Explain button) opens an inline **natural-language explanation** generated from the live SHAP drivers — via the Anthropic API when `ANTHROPIC_API_KEY` is set, otherwise a compositional fallback (one generic algorithm, not per-feature templates; no LLM client existed in the codebase to reuse). A "View full breakdown →" link deep-links the Analysis page to that day via shared session state.
+- **Interactive map** (centre) — the CesiumJS globe (World Terrain + Bing Aerial, `CESIUM_ION_TOKEN` from `.env`, graceful placeholder fallback) with **status-colored route polylines** through the strait, the selected route highlighted, and vessel markers with detail popups. Vessel records are clearly-documented representative synthetic data (per-vessel AIS is not tracked; vessel classes are the shipping connector's real CSV types). Clicking a route on the map selects it in the app via a `?route=` query-param round-trip — plain `components.html` has no direct return channel to Streamlit.
+- **Route status** (top-right) — one row per monitored route with a word-only status pill (⚠ Critical / ▲ High / ✔ Low) and a Select button. The control strip, the status list, and the map all funnel through one `select_route()` state authority.
+- **Decision support + news** (bottom-right) — the `predict_action()` recommendation as a colored badge with a one-line rationale and **the exact rule that fired**, captioned "Rule-based recommendation, not an automated decision". The news feed reads the system's own Phase 7 extraction backup (real NewsAPI/SerpAPI articles, region-tagged — no live API quota burned per rerun) with a "This route / All regions" toggle.
+- **Routes are presentational scopes over real signals**: each route's trend is the pipeline's own renormalised weighted aggregation restricted to the agents most relevant to that corridor (the same masking mechanism as the diversity ablation) — no per-route analytics are invented.
+
+### Page 2 — Analysis View (thesis author, scrollable)
+
+Nine sections: (1) detection performance, (2) explainability faithfulness + SHAP comparison figures + an interactive per-day SHAP waterfall, (3) agent diversity, (4) baseline comparison, (5) optimization impact + top-5 shifted parameters, (6) RAG relevance, (7) generalization check **including the four held-out real-data disruption checks** from `tests/test_scenarios.py` (2026 Hormuz shutdown, 2019 tanker attacks, 2023 normal period, COVID), (8) decision effectiveness with the full confusion matrix, and (9) the interactive time-range explorer (presets, recompute button, summary CSV export).
+
+**Every chart has an "Export as JPEG" button** — the chart, its title, and its caption are flattened into one print-ready image (white background, 2× scale, via `kaleido`) for direct inclusion in the thesis document.
+
+### Test Coverage (Phase 9b)
+
+`tests/test_dashboard.py` — 14 tests (8 original smoke tests + 6 redesign tests):
+
+| Test | What it verifies |
+|---|---|
+| `test_decision_view_no_raw_scores` | Page 1's rendered text contains status words but **no raw metric decimals or technical vocabulary** (F1, z-score, congestion index, …) |
+| `test_route_selection_sync` | Control-strip radio and status-list buttons both drive the shared `selected_route` session state |
+| `test_decision_badge_valid_action` | The badge logic always yields a defined action; tolerates missing/None historical context |
+| `test_analysis_view_all_metrics_present` | Page 2 renders all 9 sections from `evaluation_results.json` with zero exceptions |
+| `test_jpeg_export_helper` | `fig_to_jpeg()` produces a valid JPEG (magic bytes) with title + caption flattened in |
+| `test_region_selector_hormuz_only` | Hormuz is the only offered region, but every fetcher accepts arbitrary region keys without raising |
+| *(+ 8 Phase 9b originals)* | Imports, monitoring-point validity, Cesium token fallback, `predict_action` reachability, range-preset mapping |
+
+---
+
 ## Project Structure
 
 ```
@@ -1662,6 +1727,12 @@ supply-chain-dss/
 │   │   └── knowledge_base_builder.py # orchestrates all extractors -> dedupe -> ChromaDB upsert
 │   ├── api/
 │   │   └── endpoints.py        # FastAPI — 10 endpoints: /health /predict /explain /agents /agents/toggle /weights /weights/switch /optimization/results /populate /status (Phase 8)
+│   ├── dashboard/               # Phase 9b — two-page Streamlit dashboard
+│   │   ├── app.py                   # entry point / st.navigation router
+│   │   ├── core.py                  # shared cached data layer, globe builder, narrative + JPEG helpers
+│   │   ├── decision_view.py         # Page 1 — manager view (no scrolling, no raw scores)
+│   │   ├── analysis_view.py         # Page 2 — thesis evaluation view (all 8 metrics, JPEG export)
+│   │   └── pages/                   # thin multipage shims (1_Decision_View.py, 2_Analysis_View.py)
 │   └── orchestrator.py         # main pipeline runner; RAG block now calls query_gated() (Phase 7)
 ├── scripts/
 │   └── populate_knowledge_base.py  # CLI: python scripts/populate_knowledge_base.py [--extractors a,b,c]
@@ -1678,10 +1749,13 @@ supply-chain-dss/
 │   ├── test_api_6agent.py      # Phase 8 — 12 tests for all 10 API endpoints with mocked orchestrator
 │   ├── test_phase4_depth.py    # Phase 4 depth — 4 tests: SHAP comparison, faithfulness > 0.8, RAG quality > 0.7, plots
 │   ├── test_evaluation.py      # Phase 9a — 10 tests: scenario risk levels, agent diversity, decision effectiveness (SRQ5)
+│   ├── test_dashboard.py       # Phase 9b — 14 tests: no-raw-scores scan, route sync, JPEG export, region parameterization
 │   └── test_fred_api.py        # standalone (non-pytest) FRED connectivity diagnostic, run by hand
 ├── logs/                       # pipeline execution logs (gitignored)
 ├── notebooks/
 │   └── evaluation.py           # Phase 9a — executable 8-metric thesis evaluation suite
+├── .streamlit/
+│   └── config.toml             # Phase 9b — dark analytical dashboard theme
 ├── .env                        # API keys/credentials (gitignored) — see Phase 7 Configuration Additions
 ├── requirements.txt
 ├── main.py                     # entrypoint
@@ -1700,6 +1774,8 @@ Dependencies: `pandas`, `numpy`, `scikit-learn`, `shap`, `chromadb`, `fastapi`, 
 
 **Phase 7 additions:** `acled` (OAuth-authenticated ACLED client), `requests` (HTTP transport for every extractor + `DisasterConnector.fetch_api()`), `python-dotenv` (loads `.env` for API-key resolution), `websockets` (only needed if `aisstream.enabled: true`).
 
+**Phase 9b additions:** `streamlit` (dashboard). Optional: `anthropic` — only needed if you set `ANTHROPIC_API_KEY` to enable LLM-generated risk explanations on the Decision view (a compositional fallback is used otherwise).
+
 Copy your own keys into `.env` at the project root (gitignored — never commit real values):
 ```
 FRED_API_KEY=
@@ -1709,8 +1785,10 @@ ACLED_USERNAME=
 ACLED_PASSWORD=
 AMBEE_API_KEY=
 SERPAPI_API_KEY=
+CESIUM_ION_TOKEN=          # Phase 9b — 3-D globe (free at https://ion.cesium.com/tokens)
+ANTHROPIC_API_KEY=         # Phase 9b, optional — LLM risk explanations
 ```
-Every key is optional — each extractor and `DisasterConnector.fetch_api()` log a warning and degrade gracefully (empty results / fallback to synthetic) when its key is missing, so a partial `.env` never breaks the pipeline.
+Every key is optional — each extractor and `DisasterConnector.fetch_api()` log a warning and degrade gracefully (empty results / fallback to synthetic) when its key is missing, so a partial `.env` never breaks the pipeline. Without `CESIUM_ION_TOKEN` the dashboard map shows a placeholder instead of the globe; without `ANTHROPIC_API_KEY` risk explanations use the deterministic compositional fallback.
 
 ---
 
@@ -1756,13 +1834,21 @@ uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8000 --reload
 
 API docs available at `http://localhost:8000/docs`.
 
+### Dashboard (Phase 9b)
+
+```bash
+streamlit run src/dashboard/app.py
+```
+
+Opens at `http://localhost:8501`. The first load takes ~1 minute (split generation, agent fitting, SHAP surrogate training, RAG index) — everything is cached afterwards. The **Decision View** is the default page; switch to the **Analysis View** from the sidebar for the full thesis evidence and per-chart JPEG export.
+
 ### Tests
 
 ```bash
 pytest tests/ -v
 ```
 
-The full suite is **229 tests / 229 passing** across 12 collected test files (`test_fred_api.py` is a standalone diagnostic, not collected by pytest). Run the agent evaluations with output:
+The full suite is **243 tests / 243 passing** across 13 collected test files (`test_fred_api.py` is a standalone diagnostic, not collected by pytest). Run the agent evaluations with output:
 
 ```bash
 pytest tests/test_agents.py::test_shipping_agent_evaluation -v -s
