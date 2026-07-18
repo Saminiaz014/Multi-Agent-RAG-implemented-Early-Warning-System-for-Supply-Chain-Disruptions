@@ -81,6 +81,8 @@ The Strait of Hormuz is one of the world's most critical maritime chokepoints, c
 └─────────────────────────────────────────────────────────┘
 ```
 
+Since Phase 10 the whole chain runs unattended: a **local Apache Airflow** DAG (Docker Compose, `airflow/`) executes pipeline → RAG populate → evaluation daily at 08:00 with hard-stop failure semantics, and the dashboard surfaces the refresh through a "Data refreshed: …" badge.
+
 ---
 
 ## Data Sources
@@ -1684,6 +1686,51 @@ Nine sections: (1) detection performance, (2) explainability faithfulness + SHAP
 
 ---
 
+## Phase 10 — Local Airflow Daily Orchestration
+
+> **Summary.** The pipeline now runs itself: a **local Apache Airflow** instance (Docker Compose, `apache/airflow:2.10.5`, LocalExecutor) executes the whole chain — six-agent pipeline → RAG populate → evaluation suite → freshness marker — **every day at 08:00 local time**, fully unattended, with **hard-stop failure semantics** (no retries; any failing task fails the run and nothing downstream executes). The local Streamlit dashboard picks the refresh up through a 24 h cache TTL and shows a **"Data refreshed: …" badge**. Everything stays on one machine: no cloud, no git pushes — Airflow's containers write into a bind-mounted project root, so the artifacts land on the same host disk the dashboard reads. Verified end-to-end: a manual DAG run completed all four tasks (ingest 24 s, RAG populate ~9 min, evaluation ~66 s, marker < 1 s) and wrote `data/processed/last_updated.txt` on the host; a forced failure in task 1 left all three downstream tasks `upstream_failed` and the run `failed`. **247 tests passing** (15 in `tests/test_dashboard.py`).
+
+### Why Docker Compose
+
+Airflow does not run natively on Windows, so the scheduler/webserver run in containers (`airflow/docker-compose.yaml`) while the dashboard keeps running on the host. That split makes the **project-root bind mount the linchpin of the design**: the repo is mounted read-write at `/opt/airflow/supply-chain-dss` inside the containers, so `data/processed/*.json`, the freshness marker, and the ChromaDB store (`data/knowledge_base/.chromadb`) regenerate in the container but persist to the host disk. Airflow's own state stays off OneDrive in named Docker volumes (postgres DB, task logs). On Linux/macOS the same DAG works with a plain venv + `airflow standalone` — no volume bridge needed since everything shares one filesystem.
+
+Two image-build notes: the `airflow/Dockerfile` pip-installs the project's `requirements.txt` so the tasks can import the pipeline, and it **preinstalls CPU-only torch first** — otherwise `sentence-transformers` drags the ~2.5 GB CUDA wheel stack into a container that will never see a GPU.
+
+### The DAG — `airflow/dags/supply_chain_daily.py`
+
+Four `BashOperator` tasks over the existing entrypoints (pipeline source untouched), chained linearly with `retries=0` and default `all_success` trigger rules:
+
+| # | Task | Command | Notes |
+|---|---|---|---|
+| 1 | `ingest_and_detect` | `python main.py` | `main.py` is deliberately defensive — it catches pipeline exceptions, prints `PIPELINE FAILED: …` and still exits 0. The task greps its output and **promotes that note to a non-zero exit**, so the hard-stop holds without modifying pipeline source. |
+| 2 | `rag_populate` | `python scripts/populate_knowledge_base.py --extractors fred,ambee` | **Quota-safe daily subset** — `DAILY_EXTRACTORS` at the top of the DAG file is the single edit point. NewsAPI / SerpAPI / ACLED free tiers would be exhausted by a daily pull; they remain manual-backfill-only. |
+| 3 | `evaluate` | `python notebooks/evaluation.py` | Rewrites `evaluation_results.json` + `thesis_comparison_table.json`. |
+| 4 | `publish_marker` | `date -Iseconds > data/processed/last_updated.txt` | The freshness marker — written **only** when everything upstream succeeded, so the dashboard can never advertise a partial refresh. |
+
+The schedule (`0 8 * * *`) and the marker's timestamp run in `AIRFLOW_TZ` (set in `airflow/.env`, no secrets there — real API keys ride into the container inside the mounted project root's gitignored `.env`). Failures log locally via an `on_failure_callback`; monitoring is the Airflow UI at **http://localhost:8080** (login `airflow`/`airflow`) — that UI is run monitoring, *not* the dashboard, which stays at `http://localhost:8501`.
+
+### Dashboard freshness (additive)
+
+- The artifact-backed loaders in `src/dashboard/core.py` (`load_app_config`, `load_cases_by_id`, `load_eval_results`, `get_news`, and the `get_retriever` ChromaDB handle) now cache with `ttl=86400`, so a long-running dashboard picks up the daily refresh without a manual reload.
+- `core.read_last_updated()` parses the marker into a badge-ready string; the Decision view header shows **"Data refreshed: 18 Jul 2026, 02:08"** inside the existing header row — no new scroll region, single-viewport guarantee intact.
+- Honesty constraint: the wording is *refreshed*, not *updated* — most of the pipeline is deterministic on synthetic/static-CSV inputs, so a daily rerun proves recency, not changed numbers. The genuinely changing part is the live-API layer (FRED/Ambee extraction into the RAG store).
+- The timestamp format is deliberately decimal-free, so the Phase 9b no-raw-scores scan (`\d+\.\d{2,}`) can never mistake it for a score — the existing matcher needed **no** loosening or tightening. New test: `test_read_last_updated` (formatting, whitespace tolerance, absent/unparseable markers → `None`, badge never score-shaped).
+
+### Runbook
+
+```bash
+cd airflow
+docker compose up -d --build        # first build is slow (pipeline deps); later starts are seconds
+# UI: http://localhost:8080 → unpause supply_chain_daily (or:)
+docker compose exec airflow-scheduler airflow dags unpause supply_chain_daily
+docker compose exec airflow-scheduler airflow dags trigger supply_chain_daily   # manual run
+docker compose down                 # stop the stack (state survives in named volumes)
+```
+
+> **Note for later (out of scope here):** making the *cloud* `streamlit.app` dashboard refresh daily is a different design — the DAG's last task would commit refreshed artifacts (`live_extracted_backup.json`, not the ChromaDB binary) and push so Streamlit Cloud redeploys. The local-only scope above is deliberate.
+
+---
+
 ## Project Structure
 
 ```
@@ -1736,6 +1783,12 @@ supply-chain-dss/
 │   └── orchestrator.py         # main pipeline runner; RAG block now calls query_gated() (Phase 7)
 ├── scripts/
 │   └── populate_knowledge_base.py  # CLI: python scripts/populate_knowledge_base.py [--extractors a,b,c]
+├── airflow/                    # Phase 10 — local daily orchestration (Docker Compose)
+│   ├── Dockerfile                  # apache/airflow:2.10.5 + pipeline deps (CPU-only torch)
+│   ├── docker-compose.yaml         # LocalExecutor stack; project root bind-mounted rw into the containers
+│   ├── .env                        # AIRFLOW_UID / AIRFLOW_TZ / UI login — deliberately secret-free
+│   └── dags/
+│       └── supply_chain_daily.py   # 08:00 daily: ingest → rag_populate(fred,ambee) → evaluate → publish marker; retries=0 hard-stop
 ├── tests/
 │   ├── test_agents.py
 │   ├── test_ingestion.py       # shipping + market connector schema, ranges, separation, cross-source correlation
@@ -1749,7 +1802,7 @@ supply-chain-dss/
 │   ├── test_api_6agent.py      # Phase 8 — 12 tests for all 10 API endpoints with mocked orchestrator
 │   ├── test_phase4_depth.py    # Phase 4 depth — 4 tests: SHAP comparison, faithfulness > 0.8, RAG quality > 0.7, plots
 │   ├── test_evaluation.py      # Phase 9a — 10 tests: scenario risk levels, agent diversity, decision effectiveness (SRQ5)
-│   ├── test_dashboard.py       # Phase 9b — 14 tests: no-raw-scores scan, route sync, JPEG export, region parameterization
+│   ├── test_dashboard.py       # Phase 9b/10 — 15 tests: no-raw-scores scan, route sync, JPEG export, region parameterization, freshness marker
 │   └── test_fred_api.py        # standalone (non-pytest) FRED connectivity diagnostic, run by hand
 ├── logs/                       # pipeline execution logs (gitignored)
 ├── notebooks/
@@ -1775,6 +1828,8 @@ Dependencies: `pandas`, `numpy`, `scikit-learn`, `shap`, `chromadb`, `fastapi`, 
 **Phase 7 additions:** `acled` (OAuth-authenticated ACLED client), `requests` (HTTP transport for every extractor + `DisasterConnector.fetch_api()`), `python-dotenv` (loads `.env` for API-key resolution), `websockets` (only needed if `aisstream.enabled: true`).
 
 **Phase 9b additions:** `streamlit` (dashboard). Optional: `anthropic` — only needed if you set `ANTHROPIC_API_KEY` to enable LLM-generated risk explanations on the Decision view (a compositional fallback is used otherwise).
+
+**Phase 10 additions:** none on the host — Airflow and the pipeline deps it needs live entirely inside the Docker image (`airflow/Dockerfile`). The only host prerequisite is **Docker Desktop** (WSL2 backend on Windows).
 
 Copy your own keys into `.env` at the project root (gitignored — never commit real values):
 ```
@@ -1842,13 +1897,22 @@ streamlit run src/dashboard/app.py
 
 Opens at `http://localhost:8501`. The first load takes ~1 minute (split generation, agent fitting, SHAP surrogate training, RAG index) — everything is cached afterwards. The **Decision View** is the default page; switch to the **Analysis View** from the sidebar for the full thesis evidence and per-chart JPEG export.
 
+### Daily orchestration (Phase 10)
+
+```bash
+cd airflow
+docker compose up -d --build
+```
+
+Airflow UI at `http://localhost:8080` (login `airflow`/`airflow`) — unpause `supply_chain_daily` once and it runs the full chain daily at 08:00 local time (`AIRFLOW_TZ` in `airflow/.env`); trigger manual runs from the UI or with `docker compose exec airflow-scheduler airflow dags trigger supply_chain_daily`. The dashboard reflects a completed run via its "Data refreshed: …" badge within its 24 h cache TTL (or immediately on a fresh `streamlit run`). See the Phase 10 section for the hard-stop semantics and the container→host volume bridge.
+
 ### Tests
 
 ```bash
 pytest tests/ -v
 ```
 
-The full suite is **243 tests / 243 passing** across 13 collected test files (`test_fred_api.py` is a standalone diagnostic, not collected by pytest). Run the agent evaluations with output:
+The full suite is **247 tests / 247 passing** across 13 collected test files (`test_fred_api.py` is a standalone diagnostic, not collected by pytest). Run the agent evaluations with output:
 
 ```bash
 pytest tests/test_agents.py::test_shipping_agent_evaluation -v -s
