@@ -153,8 +153,60 @@ def test_analysis_range_mapping(preset, expected_len):
 # ===========================================================================
 
 
+class _StubRetriever:
+    """Deterministic ContextRetriever stand-in (no ChromaDB) whose payloads
+    deliberately contain decimals and a similarity score — the breakdown
+    builder must scrub them all before anything reaches Page 1."""
+
+    def query_gated(self, current_signals, composite_risk_score,
+                    top_k=None, min_similarity=None):
+        if composite_risk_score < 0.65:
+            return None
+        return {
+            "triggered": True,
+            "matches": [{
+                "source": "static",
+                "text": ("In June 2019, two oil tankers were attacked near the strait; "
+                         "transit dropped 22.5% and congestion peaked at 0.72. "
+                         "War-risk insurance premiums spiked."),
+                "similarity": 0.8123,
+                "metadata": {"event": "Hormuz Tanker Attacks", "date": "2019-06"},
+            }],
+        }
+
+    def query(self, current_signals, top_k=None):
+        return [{
+            "id": "hormuz_2019",
+            "similarity": 0.7101,
+            "metadata": {"event": "Hormuz Tanker Attacks", "date": "2019-06"},
+            "text": "In June 2019, two oil tankers were attacked near the strait.",
+        }]
+
+
+def _stub_shap_row() -> dict:
+    """A SurrogateShapExplainer.explain()-shaped row with raw feature names."""
+    return {"top_drivers": [
+        {"feature": "congestion_index", "agent": "shipping", "shap_value": 0.213},
+        {"feature": "brent_crude_usd", "agent": "market", "shap_value": 0.101},
+        {"feature": "military_activity_index", "agent": "geopolitical", "shap_value": 0.055},
+    ]}
+
+
+def _breakdown_text(bd) -> str:
+    """Every manager-visible string a PeakBreakdown carries, joined."""
+    parts = [bd.date_label, bd.level_word, bd.precedent_title,
+             bd.precedent_summary, bd.narrative]
+    parts += [d["label"] for d in bd.drivers] + [d["level"] for d in bd.drivers]
+    return "\n".join(parts)
+
+
 def test_decision_view_no_raw_scores():
-    """Page 1 renders with status words + action badge only — no raw numbers."""
+    """Page 1 renders with status words + action badge only — no raw numbers.
+
+    Covers both the rendered page and the peak drill-down panel content
+    (built by the pure helper the st.dialog renders)."""
+    import pandas as pd
+
     from streamlit.testing.v1 import AppTest
 
     at = AppTest.from_file(_DECISION_PAGE, default_timeout=900)
@@ -171,6 +223,23 @@ def test_decision_view_no_raw_scores():
     assert not leaks, f"Raw numeric scores leaked into the Decision view: {leaks[:10]}"
     for term in _FORBIDDEN_TERMS:
         assert term not in low, f"Technical term {term!r} leaked into the Decision view"
+
+    # The peak drill-down obeys the same rules: no decimals, no raw feature
+    # names, no agent-score vocabulary, no similarity leak.
+    from src.dashboard.core import Peak, build_peak_breakdown
+    from src.explainability.shap_explainer import ALL_FEATURE_NAMES
+
+    peak = Peak(index=155, date=pd.Timestamp("2025-06-05"), value=0.83)
+    bd = build_peak_breakdown(peak, _stub_shap_row(), _StubRetriever(),
+                              signals={"shipping": 0.9, "market": 0.7})
+    panel = _breakdown_text(bd)
+    panel_low = panel.lower()
+    leaks = _RAW_SCORE_RE.findall(panel)
+    assert not leaks, f"Raw numeric scores leaked into the peak drill-down: {leaks[:10]}"
+    for term in _FORBIDDEN_TERMS + ("similarity", "shap"):
+        assert term not in panel_low, f"Term {term!r} leaked into the peak drill-down"
+    for feat in ALL_FEATURE_NAMES:
+        assert feat not in panel, f"Raw feature name {feat!r} leaked into the drill-down"
 
 
 def test_route_selection_sync():
@@ -271,3 +340,119 @@ def test_region_selector_hormuz_only():
     for region in ("red_sea", "malacca", "suez", "atlantis", "", None):
         assert isinstance(get_routes(region), list)
         assert isinstance(get_news(region), list)
+
+
+def test_read_last_updated(tmp_path):
+    """The freshness-marker reader formats ISO-8601 into a decimal-free badge
+    string, and degrades to None (badge omitted) when the marker is absent or
+    unparseable."""
+    from src.dashboard.core import read_last_updated
+
+    marker = tmp_path / "last_updated.txt"
+    marker.write_text("2026-07-17T08:00:12+02:00", encoding="utf-8")
+    formatted = read_last_updated(marker)
+    assert formatted == "17 Jul 2026, 08:00"
+    # The badge must never look like a risk score.
+    assert not _RAW_SCORE_RE.findall(f"Data refreshed: {formatted}")
+
+    # Trailing whitespace/newline from `date -Iseconds > file` is tolerated.
+    marker.write_text("2026-01-03T09:30:00+01:00\n", encoding="utf-8")
+    assert read_last_updated(marker) == "03 Jan 2026, 09:30"
+
+    assert read_last_updated(tmp_path / "missing.txt") is None
+    junk = tmp_path / "junk.txt"
+    junk.write_text("not-a-timestamp", encoding="utf-8")
+    assert read_last_updated(junk) is None
+
+
+# ===========================================================================
+# Trend-graph redesign tests (datetime axis, peak markers, drill-down)
+# ===========================================================================
+
+
+def test_detect_high_peaks():
+    """Only prominent HIGH-zone local maxima earn markers — sub-threshold
+    bumps and low-prominence wiggles on an already-high shoulder do not."""
+    import numpy as np
+    import pandas as pd
+
+    from src.dashboard.core import detect_high_peaks
+
+    scores = np.full(60, 0.2)
+    scores[8:13] = [0.4, 0.7, 0.85, 0.7, 0.4]          # prominent HIGH peak @ 10
+    scores[24:27] = [0.35, 0.5, 0.35]                  # below threshold — ignored
+    # Prominent HIGH peak @ 40, with a 0.73 wiggle @ 43 on its 0.7 shoulder
+    # (prominence 0.03 < 0.05) that must be filtered out.
+    scores[38:49] = [0.5, 0.75, 0.9, 0.78, 0.7, 0.73, 0.7, 0.5, 0.35, 0.2, 0.2]
+    dates = pd.date_range("2025-01-01", periods=60, freq="D")
+
+    peaks = detect_high_peaks(scores, dates, high_threshold=0.6, min_prominence=0.05)
+
+    assert [p.index for p in peaks] == [10, 40]
+    assert [p.date for p in peaks] == [dates[10], dates[40]]
+    # Loosening the prominence floor admits the shoulder wiggle — the
+    # parameter is honoured.
+    loose = detect_high_peaks(scores, dates, high_threshold=0.6, min_prominence=0.01)
+    assert 43 in [p.index for p in loose]
+
+
+def test_peak_breakdown_plain_language():
+    """The drill-down uses friendly labels + qualitative words, composes a
+    narrative with a historical precedent, and contains no float-like text."""
+    import re
+
+    import pandas as pd
+
+    from src.dashboard.core import FEATURE_DISPLAY_NAMES, Peak, build_peak_breakdown
+
+    peak = Peak(index=155, date=pd.Timestamp("2025-06-05"), value=0.83)
+    bd = build_peak_breakdown(peak, _stub_shap_row(), _StubRetriever(),
+                              signals={"shipping": 0.9, "market": 0.7})
+
+    assert bd.drivers, "breakdown must surface drivers"
+    for d in bd.drivers:
+        assert d["label"] in FEATURE_DISPLAY_NAMES.values(), f"unfriendly label {d['label']!r}"
+        assert d["level"] in ("moderate", "elevated", "strongly elevated")
+    # Top driver is the strongest by construction.
+    assert bd.drivers[0] == {"label": "vessel congestion", "level": "strongly elevated"}
+
+    assert bd.narrative, "a narrative paragraph is required"
+    assert "June 5" in bd.narrative
+    assert bd.precedent_title == "Hormuz Tanker Attacks"
+    assert bd.precedent_title in bd.narrative
+
+    text = _breakdown_text(bd)
+    floats = re.findall(r"\d+\.\d+", text)
+    assert not floats, f"float-looking substrings leaked: {floats}"
+
+    # Below the RAG gate the ungated top-1 fallback still supplies a precedent.
+    low_peak = Peak(index=100, date=pd.Timestamp("2025-04-11"), value=0.62)
+    bd_low = build_peak_breakdown(low_peak, _stub_shap_row(), _StubRetriever(),
+                                  signals={"shipping": 0.7})
+    assert bd_low.precedent_title == "Hormuz Tanker Attacks"
+    assert not re.findall(r"\d+\.\d+", _breakdown_text(bd_low))
+
+
+def test_datetime_axis_mapping():
+    """Day index 0 maps to the synthetic year start, the last index to the
+    last calendar date, and month-start tick positions are produced."""
+    import numpy as np
+    import pandas as pd
+
+    from src.dashboard.core import month_start_ticks, to_datetime_series
+
+    ds = to_datetime_series(pd.Series(np.linspace(0.0, 1.0, 365)))
+    assert ds.index[0] == pd.Timestamp("2025-01-01")
+    assert ds.index[-1] == pd.Timestamp("2025-12-31")
+    assert float(ds.iloc[-1]) == 1.0
+
+    ticks = month_start_ticks(ds.index)
+    assert len(ticks) == 12
+    assert all(t.day == 1 for t in ticks)
+    assert ticks[0] == pd.Timestamp("2025-01-01")
+    assert ticks[-1] == pd.Timestamp("2025-12-01")
+
+    # Configurable start date, and pass-through for existing datetime indexes.
+    ds2 = to_datetime_series(pd.Series([1.0, 2.0]), start_date="2024-06-30")
+    assert list(ds2.index) == [pd.Timestamp("2024-06-30"), pd.Timestamp("2024-07-01")]
+    assert to_datetime_series(ds).index.equals(ds.index)

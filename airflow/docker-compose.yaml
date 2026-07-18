@@ -1,0 +1,104 @@
+# Local Airflow for the supply-chain DSS — Option A (everything on this machine).
+#
+# Airflow does not run natively on Windows, so the scheduler/webserver run in
+# containers; the Streamlit dashboard keeps running on the HOST. The linchpin
+# is the project-root bind mount below: the pipeline writes data/processed/
+# and data/knowledge_base/.chromadb INSIDE the container, and the host
+# dashboard reads the very same files.
+#
+#   cd airflow
+#   docker compose up -d --build     # first run builds the image (slow: torch/chromadb)
+#   → Airflow UI: http://localhost:8080  (login airflow/airflow — see .env)
+#
+# API keys: the project's existing .env at the repo root rides along inside
+# the project mount; python-dotenv picks it up when tasks cd into the project.
+# Nothing secret lives in this file or in airflow/.env.
+
+x-airflow-common: &airflow-common
+  build:
+    context: ..                      # project root, so Dockerfile can COPY requirements.txt
+    dockerfile: airflow/Dockerfile
+  image: supply-chain-dss-airflow:2.10.5
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # "0 8 * * *" in the DAG means 08:00 in THIS timezone (override in .env).
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: ${AIRFLOW_TZ:-Europe/Berlin}
+    AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: ${AIRFLOW_TZ:-Europe/Berlin}
+    TZ: ${AIRFLOW_TZ:-Europe/Berlin}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs           # named volume: keep log churn off OneDrive
+    # ── THE OPTION-A BRIDGE ────────────────────────────────────────────────
+    # Project root, read-write. data/processed/*.json, last_updated.txt and
+    # the ChromaDB store (data/knowledge_base/.chromadb) regenerate in the
+    # container but persist on the host disk the Streamlit dashboard reads.
+    - ..:/opt/airflow/supply-chain-dss
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on: &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username "$${_AIRFLOW_WWW_USER_USERNAME:-airflow}" \
+          --password "$${_AIRFLOW_WWW_USER_PASSWORD:-airflow}" \
+          --firstname Admin --lastname User --role Admin \
+          --email admin@example.local || true
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-db-volume:
+  airflow-logs:

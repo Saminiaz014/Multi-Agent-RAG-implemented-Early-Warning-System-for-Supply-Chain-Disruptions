@@ -34,8 +34,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from pathlib import Path
 from string import Template
 
@@ -76,6 +78,11 @@ __all__ = [
     "get_routes", "route_risk_series", "get_vessels", "get_news",
     "generate_risk_narrative", "fig_to_jpeg", "export_button", "select_route",
     "route_status_word", "DASH_CSS",
+    "SYNTHETIC_YEAR_START", "TREND_MIN_PROMINENCE", "TREND_TOP_DRIVERS",
+    "FEATURE_DISPLAY_NAMES", "Peak", "PeakBreakdown",
+    "to_datetime_series", "month_start_ticks", "quick_jump_range",
+    "detect_high_peaks", "qualitative_level", "compose_narrative",
+    "build_peak_breakdown",
 ]
 
 # ---------------------------------------------------------------------------
@@ -87,6 +94,12 @@ _KB_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "disruption_cases.json"
 _LABELS_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "decision_labels.json"
 _EVAL_RESULTS_PATH = _PROJECT_ROOT / "data" / "processed" / "evaluation_results.json"
 _NEWS_BACKUP_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "live_extracted_backup.json"
+_LAST_UPDATED_PATH = _PROJECT_ROOT / "data" / "processed" / "last_updated.txt"
+
+#: Cache TTL for artifact-backed loaders. The local Airflow DAG regenerates
+#: data/processed/ and the ChromaDB store daily at 08:00; a 24 h TTL lets a
+#: long-running dashboard pick the refresh up without a manual reload.
+_ARTIFACT_TTL_SECONDS = 86_400
 
 ALL_AGENTS: list[str] = [
     "shipping", "market", "geopolitical",
@@ -255,7 +268,7 @@ def decide_action(
 # ===========================================================================
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=_ARTIFACT_TTL_SECONDS, show_spinner=False)
 def load_app_config() -> dict:
     return yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8"))
 
@@ -358,7 +371,7 @@ def get_shap_assets():
     return features_df, risk_scores, explainer
 
 
-@st.cache_resource(show_spinner="Loading the RAG knowledge base …")
+@st.cache_resource(ttl=_ARTIFACT_TTL_SECONDS, show_spinner="Loading the RAG knowledge base …")
 def get_retriever():
     from src.rag.context_retriever import ContextRetriever
 
@@ -370,17 +383,34 @@ def get_retriever():
     return retriever
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=_ARTIFACT_TTL_SECONDS, show_spinner=False)
 def load_cases_by_id() -> dict[str, dict]:
     cases = json.loads(_KB_PATH.read_text(encoding="utf-8"))
     return {str(c["id"]): c for c in cases}
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=_ARTIFACT_TTL_SECONDS, show_spinner=False)
 def load_eval_results() -> dict:
     if _EVAL_RESULTS_PATH.exists():
         return json.loads(_EVAL_RESULTS_PATH.read_text(encoding="utf-8"))
     return {}
+
+
+def read_last_updated(path: Path | None = None) -> str | None:
+    """Freshness marker written by the daily Airflow run's publish step.
+
+    The marker holds one ISO-8601 timestamp and records when the pipeline
+    artifacts were last *refreshed* (a rerun does not imply the numbers
+    changed). Returns a badge-ready string like ``"17 Jul 2026, 08:00"`` —
+    deliberately decimal-free so it can never read as a risk score — or
+    ``None`` when the marker is absent or unparseable.
+    """
+    marker = _LAST_UPDATED_PATH if path is None else path
+    try:
+        raw = marker.read_text(encoding="utf-8").strip()
+        return datetime.fromisoformat(raw).strftime("%d %b %Y, %H:%M")
+    except (OSError, ValueError):
+        return None
 
 
 def sustained_high_flags(risk: pd.Series, high_thr: float, min_run: int = 5) -> np.ndarray:
@@ -446,7 +476,7 @@ def get_vessels(route: dict, day: int) -> list[dict]:
     return vessels
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=_ARTIFACT_TTL_SECONDS, show_spinner=False)
 def get_news(region: str, all_regions: bool = False, limit: int = 6) -> list[dict]:
     """Recent headlines from the live-extracted knowledge base backup.
 
@@ -489,6 +519,333 @@ def select_route(route_key: str) -> None:
     list, and the map click (via ?route= query param) all funnel through here
     so every panel stays in sync via ``st.session_state``."""
     st.session_state["selected_route"] = route_key
+
+
+# ===========================================================================
+# Decision-view trend helpers (pure — no Streamlit runtime)
+# ===========================================================================
+
+#: First calendar day of the monitored synthetic year. Every synthetic
+#: connector generates ``pd.date_range("2025-01-01", periods=365)`` (see
+#: ``src/ingestion/*_connector.py``), so this is the documented fallback when
+#: a series carries no timestamps of its own.
+SYNTHETIC_YEAR_START = "2025-01-01"
+
+#: Minimum prominence for a HIGH-zone local maximum to earn a clickable
+#: marker (filters noisy daily bumps). Module constant — settings.yaml has no
+#: dashboard block, so no config plumbing is invented for this.
+TREND_MIN_PROMINENCE = 0.05
+
+#: Number of SHAP drivers surfaced in a peak drill-down.
+TREND_TOP_DRIVERS = 3
+
+#: Manager-friendly labels for every raw SHAP feature name
+#: (``src.explainability.shap_explainer.ALL_FEATURE_NAMES``). Raw feature
+#: names never appear on the Decision view.
+FEATURE_DISPLAY_NAMES: dict[str, str] = {
+    "vessel_count": "vessel traffic",
+    "avg_delay_hours": "transit delays",
+    "congestion_index": "vessel congestion",
+    "brent_crude_usd": "oil price pressure",
+    "trade_volume_index": "trade volume shifts",
+    "freight_rate_index": "freight cost pressure",
+    "sanctions_severity": "sanctions pressure",
+    "military_activity_index": "military activity",
+    "diplomatic_incident_score": "diplomatic tension",
+    "regime_stability_index": "regional instability",
+    "earthquake_severity": "earthquake activity",
+    "tsunami_risk": "tsunami warnings",
+    "cyclone_severity": "cyclone activity",
+    "severe_weather_index": "severe weather",
+    "rerouting_percentage": "vessels rerouting",
+    "avg_route_deviation_km": "route deviations",
+    "transit_volume_ratio": "transit volume changes",
+    "sentiment_score": "negative news coverage",
+    "source_consensus": "media agreement on the story",
+    "article_volume": "news coverage volume",
+}
+
+#: Decimal numbers (optionally a trailing %) — scrubbed from precedent prose
+#: so historical case text never re-introduces raw scores onto Page 1.
+_DECIMAL_RE = re.compile(r"\d+\.\d+\s*%?")
+
+
+@dataclass(frozen=True)
+class Peak:
+    """A clickable HIGH-zone local maximum on the risk trend.
+
+    Attributes:
+        index: 0-based row into the cached full series — the key used to
+            fetch that day's SHAP row and agent signals.
+        date: Calendar date of the peak.
+        value: Composite risk at the peak. Internal (marker y-position and
+            RAG gating only) — never rendered on the Decision view.
+    """
+
+    index: int
+    date: pd.Timestamp
+    value: float
+
+
+@dataclass(frozen=True)
+class PeakBreakdown:
+    """Plain-language drill-down for one peak — display strings only.
+
+    Every field is a manager-facing string; no floats, raw feature names or
+    similarity scores may appear here (enforced by the dashboard tests).
+    """
+
+    date_label: str
+    level_word: str
+    drivers: list[dict[str, str]] = field(default_factory=list)
+    precedent_title: str = ""
+    precedent_summary: str = ""
+    narrative: str = ""
+
+
+def to_datetime_series(series: pd.Series, start_date: str | None = None) -> pd.Series:
+    """Re-index a day-indexed risk series onto real calendar dates.
+
+    Uses the series' own ``DatetimeIndex`` when it already has one; otherwise
+    maps position 0 → ``start_date`` (default :data:`SYNTHETIC_YEAR_START`,
+    matching the synthetic connectors' generated year) at daily frequency.
+
+    Args:
+        series: Risk series indexed by position or by datetime.
+        start_date: ISO date for position 0 when the series has no
+            timestamps. Defaults to :data:`SYNTHETIC_YEAR_START`.
+
+    Returns:
+        The same values on a ``DatetimeIndex`` — this is what enables the
+        month-boundary datetime x-axis.
+    """
+    if isinstance(series.index, pd.DatetimeIndex):
+        return series
+    start = pd.Timestamp(start_date or SYNTHETIC_YEAR_START)
+    idx = pd.date_range(start, periods=len(series), freq="D")
+    return pd.Series(series.to_numpy(), index=idx)
+
+
+def month_start_ticks(index: pd.DatetimeIndex) -> list[pd.Timestamp]:
+    """Month-boundary tick positions present in a datetime index."""
+    return [t for t in index if t.day == 1]
+
+
+def quick_jump_range(preset: str, index: pd.DatetimeIndex) -> tuple[date, date]:
+    """Map a quick-jump preset to an inclusive date window over ``index``.
+
+    Presets: ``"Last week"`` / ``"Last month"`` / ``"Last year"`` are trailing
+    windows from the last date; ``"YTD"`` runs from January 1 of the last
+    date's year. Results are clipped to the series' own bounds.
+
+    Args:
+        preset: One of the four quick-jump labels.
+        index: The series' datetime index.
+
+    Returns:
+        ``(start, end)`` as ``datetime.date`` (slider-friendly).
+    """
+    first, last = index[0], index[-1]
+    if preset == "Last week":
+        start = last - pd.Timedelta(days=6)
+    elif preset == "Last month":
+        start = last - pd.DateOffset(months=1) + pd.Timedelta(days=1)
+    elif preset == "Last year":
+        start = last - pd.DateOffset(years=1) + pd.Timedelta(days=1)
+    elif preset == "YTD":
+        start = pd.Timestamp(year=last.year, month=1, day=1)
+    else:
+        start = first
+    return max(pd.Timestamp(start), first).date(), last.date()
+
+
+def detect_high_peaks(
+    scores,
+    dates,
+    high_threshold: float,
+    min_prominence: float = TREND_MIN_PROMINENCE,
+) -> list[Peak]:
+    """Find HIGH-zone local maxima worth a clickable marker.
+
+    Uses :func:`scipy.signal.find_peaks` with ``height=high_threshold`` so
+    only peaks inside the HIGH band qualify, plus a prominence filter so
+    noisy daily bumps riding an already-high plateau are ignored.
+
+    Args:
+        scores: Composite risk values (array-like, one per day).
+        dates: Matching calendar dates (array-like of timestamps).
+        high_threshold: The engine's ``risk_high`` threshold.
+        min_prominence: Minimum peak prominence to keep.
+
+    Returns:
+        Detected peaks in chronological order.
+    """
+    from scipy.signal import find_peaks
+
+    arr = np.asarray(scores, dtype=float)
+    idx, _ = find_peaks(arr, height=float(high_threshold), prominence=float(min_prominence))
+    return [Peak(index=int(i), date=pd.Timestamp(dates[int(i)]), value=float(arr[int(i)]))
+            for i in idx]
+
+
+def qualitative_level(value: float) -> str:
+    """Bucket a normalized driver contribution into words — never numbers.
+
+    Args:
+        value: Contribution normalized to ``[0, 1]`` (e.g. |SHAP| divided by
+            the day's largest |SHAP|).
+
+    Returns:
+        ``"moderate"`` / ``"elevated"`` / ``"strongly elevated"``.
+    """
+    v = abs(float(value))
+    if v >= 0.66:
+        return "strongly elevated"
+    if v >= 0.33:
+        return "elevated"
+    return "moderate"
+
+
+def _strip_decimals(text: str) -> str:
+    """Remove decimal numbers from precedent prose (years/integers stay)."""
+    cleaned = _DECIMAL_RE.sub("", str(text))
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return re.sub(r"\s+([,.;:])", r"\1", cleaned).strip()
+
+
+def compose_narrative(context: dict, use_llm: bool = False) -> str:
+    """Compose the plain-language "why this peak is high" paragraph.
+
+    Args:
+        context: Display strings assembled by :func:`build_peak_breakdown` —
+            ``date_label``, ``level_word``, ``drivers`` (list of
+            ``{"label", "level"}``), ``precedent_title``,
+            ``precedent_summary``.
+        use_llm: LLM-synthesis seam. Today this always falls through to the
+            template path; when an ANTHROPIC_API_KEY-gated synthesis layer is
+            added it slots into the marked branch below.
+
+    Returns:
+        A short narrative paragraph containing no numbers.
+    """
+    if use_llm:
+        # FUTURE LLM seam: when ANTHROPIC_API_KEY is configured, synthesise
+        # the paragraph from `context` via the Anthropic API here (mirroring
+        # generate_risk_narrative's guarded pattern). Deliberately not
+        # implemented yet — template composition below is the current path.
+        pass
+
+    drivers = context.get("drivers", [])
+    phrases = [f"{d['label']} ({d['level']})" for d in drivers[:2]]
+    driver_clause = " and ".join(phrases) if phrases else "no single driver stood out"
+    text = (
+        f"On {context['date_label']}, risk on this route was "
+        f"{context['level_word'].lower()}. The main drivers were {driver_clause}."
+    )
+    if context.get("precedent_title"):
+        summary = context.get("precedent_summary", "")
+        text += f" This resembles the {context['precedent_title']}"
+        text += f", when {summary[0].lower() + summary[1:]}" if summary else ""
+        if not text.endswith("."):
+            text += "."
+    return text
+
+
+def build_peak_breakdown(
+    peak: Peak,
+    shap_row: dict,
+    rag_retriever,
+    *,
+    signals: dict[str, float] | None = None,
+    thresholds: dict | None = None,
+    use_llm: bool = False,
+    top_n: int = TREND_TOP_DRIVERS,
+) -> PeakBreakdown:
+    """Assemble the plain-language drill-down for one HIGH peak.
+
+    Translates the day's top SHAP drivers into friendly labels with
+    qualitative levels, retrieves one historical precedent from the RAG
+    store, and composes a narrative via :func:`compose_narrative`. The
+    result carries display strings only — no floats, raw feature names, or
+    similarity scores.
+
+    Args:
+        peak: The clicked peak (its ``index`` selects the day, its ``value``
+            drives the RAG gate).
+        shap_row: ``SurrogateShapExplainer.explain()`` output for that day
+            (``top_drivers`` is consumed).
+        rag_retriever: A ``ContextRetriever`` (or stub) exposing
+            ``query_gated`` and ``query``.
+        signals: Agent-name → anomaly-score mapping for that day, used as the
+            RAG query profile.
+        thresholds: Engine thresholds for the status word (defaults applied
+            by :func:`status_word` when omitted).
+        use_llm: Forwarded to :func:`compose_narrative` (template-only today).
+        top_n: How many drivers to surface.
+
+    Returns:
+        A :class:`PeakBreakdown` of display strings.
+    """
+    date_label = f"{peak.date.strftime('%B')} {peak.date.day}"
+    level_word = status_word(float(peak.value), thresholds or {})
+
+    top = list(shap_row.get("top_drivers", []))[:top_n]
+    max_abs = max((abs(float(d.get("shap_value", 0.0))) for d in top), default=0.0) or 1.0
+    drivers = [
+        {
+            "label": FEATURE_DISPLAY_NAMES.get(
+                str(d.get("feature", "")), str(d.get("feature", "")).replace("_", " ")
+            ),
+            "level": qualitative_level(abs(float(d.get("shap_value", 0.0))) / max_abs),
+        }
+        for d in top
+    ]
+
+    # One historical precedent. Peaks are detected at risk_high (0.6) but the
+    # gate opens at rag.composite_threshold (0.65), so peaks in between fall
+    # back to the ungated top-1 query rather than showing no precedent.
+    precedent_title = precedent_summary = ""
+    try:
+        match: dict | None = None
+        gated = rag_retriever.query_gated(signals or {}, composite_risk_score=float(peak.value),
+                                          top_k=1)
+        if gated and gated.get("matches"):
+            match = gated["matches"][0]
+        elif signals:
+            ungated = rag_retriever.query(signals, top_k=1)
+            match = ungated[0] if ungated else None
+        if match:
+            meta = match.get("metadata", {}) or {}
+            precedent_title = str(meta.get("event") or meta.get("title") or "").strip()
+            raw_text = str(match.get("text") or match.get("document") or "")
+            first_sentence = raw_text.split(". ")[0].strip()
+            precedent_summary = _strip_decimals(first_sentence)
+            # Live-collection docs use their headline as both title and text —
+            # drop the summary rather than repeat the title back to back.
+            if precedent_title and precedent_summary.lower().startswith(
+                    precedent_title.lower()[:40]):
+                precedent_summary = ""
+    except Exception as exc:  # pragma: no cover - retrieval is best-effort
+        logger.warning("peak precedent retrieval failed: %s", exc)
+
+    narrative = compose_narrative(
+        {
+            "date_label": date_label,
+            "level_word": level_word,
+            "drivers": drivers,
+            "precedent_title": precedent_title,
+            "precedent_summary": precedent_summary,
+        },
+        use_llm=use_llm,
+    )
+    return PeakBreakdown(
+        date_label=date_label,
+        level_word=level_word,
+        drivers=drivers,
+        precedent_title=precedent_title,
+        precedent_summary=precedent_summary,
+        narrative=narrative,
+    )
 
 
 # ===========================================================================
