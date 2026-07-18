@@ -318,6 +318,71 @@ class ContextRetriever:
             "live_context": self._live_collection.count(),
         }
 
+    def seed_live_collection_from_backup(
+        self,
+        backup_path: str = "data/knowledge_base/live_extracted_backup.json",
+    ) -> int:
+        """Seed ``live_extracted_context`` from the committed extractor snapshot.
+
+        A fresh deploy (e.g. Streamlit Cloud) starts with an empty ChromaDB
+        store because the binary store is gitignored; the committed JSON
+        snapshot written by
+        :class:`~src.extractors.knowledge_base_builder.KnowledgeBaseBuilder`
+        is the portable seed. Documents are upserted with their stable
+        extractor ids via the builder's own batched helper, so re-seeding is
+        idempotent.
+
+        Args:
+            backup_path: Path to the snapshot JSON array of
+                ``{"id", "text", "metadata"}`` documents.
+
+        Returns:
+            Number of documents seeded — 0 when the live collection already
+            holds documents (warm-store fast path), when the snapshot is
+            absent, or on any failure (the collection is left empty and the
+            dashboard feed degrades to its existing fallback).
+        """
+        try:
+            if self._live_collection.count() > 0:
+                logger.debug(
+                    "[seed_live_collection_from_backup] live collection already "
+                    "populated (%d docs) — skipping.",
+                    self._live_collection.count(),
+                )
+                return 0
+            path = Path(backup_path)
+            if not path.exists():
+                logger.info(
+                    "[seed_live_collection_from_backup] no snapshot at %s — "
+                    "live collection stays empty.",
+                    path,
+                )
+                return 0
+            documents = json.loads(path.read_text(encoding="utf-8"))
+            # Reuse the builder's batched upsert — same ids/text/metadata
+            # mapping the live extraction pipeline uses.
+            from src.extractors.knowledge_base_builder import KnowledgeBaseBuilder
+
+            seeded = KnowledgeBaseBuilder._upsert_to_chromadb(
+                self._live_collection, documents
+            )
+            logger.info(
+                "[seed_live_collection_from_backup] seeded %d/%d document(s) "
+                "into '%s' from %s.",
+                seeded,
+                len(documents),
+                self._live_collection_name,
+                path,
+            )
+            return seeded
+        except Exception as exc:
+            logger.warning(
+                "[seed_live_collection_from_backup] failed — live collection "
+                "left empty, feed falls back: %s",
+                exc,
+            )
+            return 0
+
     def query_gated(
         self,
         current_signals: dict[str, float],

@@ -213,3 +213,90 @@ def test_format_context(retriever: ContextRetriever) -> None:
         f"Expected at least one event/domain keyword in formatted context. "
         f"Got:\n{text}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Live-collection seeding from the committed snapshot (cloud cold start)
+# ---------------------------------------------------------------------------
+
+
+def _live_snapshot_doc(i: int) -> dict:
+    """A live_extracted_backup.json-shaped document ({id, text, metadata})."""
+    return {
+        "id": f"newsapi_hormuz_2026-01-0{i + 1}_{i}",
+        "text": (
+            f"Tanker congestion report {i}: elevated transit delays and vessel "
+            f"queuing near the Strait of Hormuz."
+        ),
+        "metadata": {
+            "source_api": "newsapi",
+            "event_date": f"2026-01-0{i + 1}",
+            "region": "hormuz",
+            "primary_agents": '["news_sentiment"]',
+            "event_type": "news",
+            "title": f"Hormuz congestion headline {i}",
+            "source_name": "Test Wire",
+            "url": f"https://example.test/article/{i}",
+        },
+    }
+
+
+@pytest.fixture()
+def live_retriever(tmp_path: Path) -> ContextRetriever:
+    """A ContextRetriever on a fresh temp store with an empty live collection."""
+    cfg = {
+        "collection_name": "test_seed_static",
+        "top_k": 3,
+        "collections": {"live_context": "test_seed_live"},
+    }
+    return ContextRetriever(cfg, persist_directory=str(tmp_path / "chromadb"))
+
+
+def test_seed_live_collection_from_backup(
+    live_retriever: ContextRetriever, tmp_path: Path
+) -> None:
+    """Seeding an empty live collection upserts every snapshot document and
+    the seeded documents are reachable through the normal gated query path."""
+    backup = tmp_path / "live_extracted_backup.json"
+    backup.write_text(json.dumps([_live_snapshot_doc(i) for i in range(5)]), encoding="utf-8")
+
+    assert live_retriever._live_collection.count() == 0
+    seeded = live_retriever.seed_live_collection_from_backup(str(backup))
+    assert seeded == 5
+    assert live_retriever._live_collection.count() == 5
+
+    # Static collection is deliberately left empty, so every gated match must
+    # come from the seeded live collection.
+    out = live_retriever.query_gated(
+        {"news_sentiment": 0.9, "shipping": 0.8},
+        composite_risk_score=0.9,
+        min_similarity=0.0,
+    )
+    assert out is not None and out["triggered"]
+    assert out["matches"], "Seeded documents should be retrievable."
+    assert all(m["source"] == "live" for m in out["matches"])
+    assert any("Hormuz" in m["text"] for m in out["matches"])
+
+
+def test_seed_is_idempotent(live_retriever: ContextRetriever, tmp_path: Path) -> None:
+    """A second seed call hits the count fast-path — no duplicates, no rework."""
+    backup = tmp_path / "live_extracted_backup.json"
+    backup.write_text(json.dumps([_live_snapshot_doc(i) for i in range(4)]), encoding="utf-8")
+
+    assert live_retriever.seed_live_collection_from_backup(str(backup)) == 4
+    assert live_retriever.seed_live_collection_from_backup(str(backup)) == 0
+    assert live_retriever._live_collection.count() == 4
+
+
+def test_seed_missing_or_malformed_backup_degrades(
+    live_retriever: ContextRetriever, tmp_path: Path
+) -> None:
+    """Missing or garbage snapshots never raise — the collection stays empty
+    and the dashboard feed keeps its existing fallback message."""
+    assert live_retriever.seed_live_collection_from_backup(str(tmp_path / "absent.json")) == 0
+    assert live_retriever._live_collection.count() == 0
+
+    garbage = tmp_path / "garbage.json"
+    garbage.write_text("this is not json {", encoding="utf-8")
+    assert live_retriever.seed_live_collection_from_backup(str(garbage)) == 0
+    assert live_retriever._live_collection.count() == 0

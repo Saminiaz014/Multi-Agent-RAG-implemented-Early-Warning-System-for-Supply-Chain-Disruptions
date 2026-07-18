@@ -108,6 +108,29 @@ class KnowledgeBaseBuilder:
         return unique
 
     @staticmethod
+    def _merge_with_existing_backup(backup_path: Path, new_documents: list[dict]) -> list[dict]:
+        """Merge this run's documents over the existing snapshot by id.
+
+        A subset run (e.g. the daily Airflow ``--extractors fred,ambee``
+        pull) must not clobber documents only a full extraction produces —
+        the snapshot doubles as the committed seed for fresh deploys and the
+        dashboard news feed. This run's documents win on id collision; an
+        unreadable existing snapshot degrades to this run's documents only.
+        """
+        by_id: dict[str, dict] = {}
+        try:
+            if backup_path.exists():
+                existing = json.loads(backup_path.read_text(encoding="utf-8"))
+                by_id = {d["id"]: d for d in existing if isinstance(d, dict) and "id" in d}
+        except Exception as exc:
+            logger.warning(
+                "Existing backup unreadable (%s) — writing this run's documents only", exc
+            )
+        for doc in new_documents:
+            by_id[doc["id"]] = doc
+        return list(by_id.values())
+
+    @staticmethod
     def _upsert_to_chromadb(collection, documents: list[dict], batch_size: int = 50) -> int:
         total = 0
         for i in range(0, len(documents), batch_size):
@@ -145,8 +168,16 @@ class KnowledgeBaseBuilder:
 
         backup_path = Path("data/knowledge_base/live_extracted_backup.json")
         backup_path.parent.mkdir(parents=True, exist_ok=True)
-        backup_path.write_text(json.dumps(unique_documents, indent=2, default=str), encoding="utf-8")
-        logger.info("Saved backup to %s", backup_path)
+        merged_documents = self._merge_with_existing_backup(backup_path, unique_documents)
+        backup_path.write_text(
+            json.dumps(merged_documents, indent=2, default=str), encoding="utf-8"
+        )
+        logger.info(
+            "Saved backup to %s (%d docs total: %d from this run)",
+            backup_path,
+            len(merged_documents),
+            len(unique_documents),
+        )
 
         try:
             collection = self._get_chromadb_collection()

@@ -29,10 +29,11 @@ logs/
 data/raw/
 data/processed/
 
-# ChromaDB persistence
+# ChromaDB persistence (binary store stays ignored; the JSON snapshot
+# live_extracted_backup.json IS committed — it is the portable seed that
+# rebuilds the live collection on fresh deploys)
 data/knowledge_base/.chromadb/
 data/knowledge_base/.chromadb_test_*/
-data/knowledge_base/live_extracted_backup.json
 
 # Jupyter
 .ipynb_checkpoints/

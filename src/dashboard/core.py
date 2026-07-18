@@ -380,6 +380,9 @@ def get_retriever():
     rag_cfg.setdefault("collection_name", "disruption_cases")
     retriever = ContextRetriever(rag_cfg)
     retriever.build_index(str(_KB_PATH))
+    # Fresh deploys have no ChromaDB store (gitignored) — self-seed the live
+    # collection from the committed snapshot; no-op when the store is warm.
+    retriever.seed_live_collection_from_backup(str(_NEWS_BACKUP_PATH))
     return retriever
 
 
