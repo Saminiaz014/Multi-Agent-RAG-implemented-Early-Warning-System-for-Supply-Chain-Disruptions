@@ -1325,7 +1325,7 @@ Each extractor subclasses `BaseExtractor` (rate limiting, `${VAR}`-style env-var
 | `ACLEDExtractor` | `geopolitical` | ACLED via the `acled` PyPI client | Rewritten for ACLED's 2024+ OAuth scheme (24h access + 14-day refresh token, handled internally by `AcledClient`) — the legacy email+key query-param auth no longer works |
 | `AISStreamMonitor` | `shipping`, `routing` (live only) | aisstream.io WebSocket | `extract_historical()` always returns `[]` — no historical API exists; real-time vessel tracking only, disabled by default (`aisstream.enabled: false`) |
 
-**`KnowledgeBaseBuilder`** (`knowledge_base_builder.py`) orchestrates every extractor enabled in `extraction.enabled_extractors`: extract per chokepoint → deduplicate by document `id` → write a JSON backup (`data/knowledge_base/live_extracted_backup.json`, gitignored) → upsert into the `live_extracted_context` ChromaDB collection. Run it directly via `scripts/populate_knowledge_base.py [--extractors a,b,c]`.
+**`KnowledgeBaseBuilder`** (`knowledge_base_builder.py`) orchestrates every extractor enabled in `extraction.enabled_extractors`: extract per chokepoint → deduplicate by document `id` → write a JSON backup (`data/knowledge_base/live_extracted_backup.json` — committed as the portable RAG seed, see [Phase 10.1](#phase-101--cloud-news-feed-seed-portable-rag-backup)) → upsert into the `live_extracted_context` ChromaDB collection. Run it directly via `scripts/populate_knowledge_base.py [--extractors a,b,c]`.
 
 ### `ContextRetriever.query_gated()` — dual-collection, threshold-gated lookup
 
@@ -1727,7 +1727,19 @@ docker compose exec airflow-scheduler airflow dags trigger supply_chain_daily   
 docker compose down                 # stop the stack (state survives in named volumes)
 ```
 
-> **Note for later (out of scope here):** making the *cloud* `streamlit.app` dashboard refresh daily is a different design — the DAG's last task would commit refreshed artifacts (`live_extracted_backup.json`, not the ChromaDB binary) and push so Streamlit Cloud redeploys. The local-only scope above is deliberate.
+> **Note:** daily refresh of the local dashboard (above) stays git-free by design — Airflow writes straight to the bind-mounted host disk. The *cloud* `streamlit.app` deploy is a separate, git-based path: it boots cold with no Airflow and no local disk state, so it needs its RAG seed committed instead. See Phase 10.1 below.
+
+---
+
+## Phase 10.1 — Cloud News Feed Seed (Portable RAG Backup)
+
+> **Summary.** A fresh Streamlit Cloud deploy had an empty Regional-news panel: `live_extracted_context`'s only sources — the ChromaDB store and `live_extracted_backup.json` — were both gitignored, so cloud cold starts had access to nothing but the 10-case `disruption_cases` collection. The 553-document snapshot (newsapi 279 / serpapi 167 / acled 91 / fred 16) is now committed as a portable seed; the ChromaDB binary itself stays ignored and ephemeral. Credential-scanned clean before committing (no key-shaped patterns, no `.env` values, no keyed URLs). **250/250 tests passing** (3 new in `tests/test_rag_6domain.py`).
+
+- **`.gitignore`** dropped the exact-file ignore for `live_extracted_backup.json` (no parent-directory blanket ignore exists, so no negation pattern was needed); `.chromadb/` remains ignored.
+- **`.python-version`** pins `3.12` — Streamlit Cloud was resolving `3.14`, which breaks `chromadb`'s Rust bindings and the `llvmlite` build; every dependency has `cp312` wheels. `chromadb==1.5.8` pinned to the locally validated version.
+- **`ContextRetriever.seed_live_collection_from_backup()`**: on an empty `live_extracted_context`, upserts the snapshot via the builder's own batched helper (stable extractor ids → idempotent); a `count > 0` fast-path preserves already-warm stores, and any failure logs a warning and leaves the collection empty (the feed keeps its no-results fallback). Hooked into the dashboard's cached `get_retriever()` boot init, running once per cold start after the static `build_index()`.
+- **`KnowledgeBaseBuilder.build()`** now merges the backup by id instead of overwriting it — the daily Airflow `fred,ambee` subset run would otherwise clobber the 553-doc snapshot down to ~17 docs and re-empty the news feed on the next cold start.
+- Verified on a fresh store: 553/553 docs seeded, gated queries return live matches, news panel renders 5 headlines with no fallback message.
 
 ---
 
@@ -1912,7 +1924,7 @@ Airflow UI at `http://localhost:8080` (login `airflow`/`airflow`) — unpause `s
 pytest tests/ -v
 ```
 
-The full suite is **247 tests / 247 passing** across 13 collected test files (`test_fred_api.py` is a standalone diagnostic, not collected by pytest). Run the agent evaluations with output:
+The full suite is **250 tests / 250 passing** across 13 collected test files (`test_fred_api.py` is a standalone diagnostic, not collected by pytest). Run the agent evaluations with output:
 
 ```bash
 pytest tests/test_agents.py::test_shipping_agent_evaluation -v -s
