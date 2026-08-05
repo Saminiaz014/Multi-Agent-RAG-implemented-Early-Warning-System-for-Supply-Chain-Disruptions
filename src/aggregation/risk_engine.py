@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from src.agents.base_agent import DetectionResult
+from src.aggregation.silent_agent_tracker import SilentAgentDetector, WeightRenormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -483,3 +484,82 @@ class RiskEngine:
                 df[col] = 0.0
         df[list(agent_names)] = df[list(agent_names)].fillna(0.0)
         return df.sort_values("timestamp").reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# Silent-agent-aware aggregation (module-level, keyed-dict variant)
+# ---------------------------------------------------------------------------
+def aggregate_detections(
+    detections: dict[str, DetectionResult],
+    weights: dict[str, float],
+    region: str = "hormuz",
+    handle_silent_agents: bool = True,
+    silent_agent_detector: SilentAgentDetector | None = None,
+) -> tuple[float, dict[str, float], set[str]]:
+    """Aggregate multi-agent detections, downweighting silent agents.
+
+    A companion to :meth:`RiskEngine.compute_risk` for callers that already
+    have a ``{agent_name: DetectionResult}`` mapping and want silent-agent
+    renormalization (see :mod:`src.aggregation.silent_agent_tracker`)
+    without instantiating a full :class:`RiskEngine`. Agents absent from
+    ``weights`` are disabled and skipped without renormalization; agents
+    present in ``weights`` but empirically silent are downweighted to 0
+    and the remaining weights rescaled to sum to 1.0.
+
+    Args:
+        detections: ``{agent_name: DetectionResult}``.
+        weights: ``{agent_name: weight}``, assumed to sum to ~1.0.
+        region: Region name, used only for log messages.
+        handle_silent_agents: If True, detect and renormalize away silent
+            agents. If False, weights are used as-is (backward-compatible
+            default behavior).
+        silent_agent_detector: Optional detector instance (for custom
+            thresholds); a default-threshold detector is created if omitted.
+
+    Returns:
+        ``(composite_score, renormalized_weights, silent_agents)`` — the
+        weighted mean of each active agent's latest-day score in [0, 1],
+        the weights actually used, and the set of agents marked silent
+        (empty if ``handle_silent_agents=False``).
+    """
+    if not detections:
+        return 0.0, weights, set()
+
+    disabled_agents = set(detections.keys()) - set(weights.keys())
+    if disabled_agents:
+        logger.debug("[%s] Disabled agents (no configured weight): %s", region, disabled_agents)
+
+    if silent_agent_detector is None:
+        silent_agent_detector = SilentAgentDetector()
+
+    silent_agents: set[str] = set()
+    renormalized_weights = dict(weights)
+    if handle_silent_agents:
+        active_detections = {
+            name: d for name, d in detections.items() if name in weights
+        }
+        silent_agents = silent_agent_detector.identify_silent_agents(active_detections)
+        if silent_agents:
+            logger.debug("[%s] Silent agents: %s", region, silent_agents)
+            renormalized_weights = WeightRenormalizer.renormalize(weights, silent_agents)
+            logger.debug("[%s] Renormalized weights: %s", region, renormalized_weights)
+
+    composite_score = 0.0
+    weight_sum = 0.0
+    for agent_name, detection in detections.items():
+        weight = renormalized_weights.get(agent_name, 0.0)
+        if weight == 0.0:
+            continue  # disabled or silenced
+
+        latest_score = (
+            float(detection.anomaly_scores[-1])
+            if detection.anomaly_scores is not None and len(detection.anomaly_scores) > 0
+            else 0.0
+        )
+        composite_score += latest_score * weight
+        weight_sum += weight
+
+    if weight_sum > 0:
+        composite_score /= weight_sum
+
+    return composite_score, renormalized_weights, silent_agents
