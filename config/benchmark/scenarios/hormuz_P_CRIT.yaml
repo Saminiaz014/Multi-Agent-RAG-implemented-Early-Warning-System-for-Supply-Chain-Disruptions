@@ -1,0 +1,24 @@
+# P-CRIT: a major, sustained Hormuz disruption. All five relevant domains
+# move; disaster stays silent (this is a geopolitical/blockage event, not a
+# natural-disaster one) — see test_silent_agent_handling.
+scenario_id: hormuz_P_CRIT
+region: hormuz
+class: P-CRIT
+seed: 42
+days: 365
+event:
+  onset_day: 240
+  ramp_days: 12
+  duration_days: 60
+  peak_band: critical
+signals:
+  shipping: {baseline: {mean: 70, std: 5}, effect: {type: multiplicative_ramp, target: 0.40, lead_days: 0}}
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 2.5, lead_days: -5}}
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: {type: additive_ramp, target: 0.80, lead_days: 7}}
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: {type: additive_ramp, target: 0.60, lead_days: 5}}
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.75, lead_days: 10}}
+  disaster: {baseline: {mean: 0.02, std: 0.01}, effect: null}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

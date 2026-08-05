@@ -1,0 +1,25 @@
+# N-DECOY: a news rumor spikes on its own with no corroborating move in
+# shipping/market/geopolitical/routing/disaster. Ground truth stays
+# negative — this scenario exists to catch detectors that over-trigger on
+# a single noisy domain.
+scenario_id: hormuz_N_DECOY
+region: hormuz
+class: N-DECOY
+seed: 42
+days: 365
+event:
+  onset_day: 200
+  ramp_days: 3
+  duration_days: 15
+  peak_band: none
+signals:
+  shipping: {baseline: {mean: 70, std: 5}, effect: null}
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: null}
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: null}
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: null}
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.55, lead_days: 0}}
+  disaster: {baseline: {mean: 0.02, std: 0.01}, effect: null}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

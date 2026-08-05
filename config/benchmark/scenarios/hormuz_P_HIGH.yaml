@@ -1,0 +1,24 @@
+# P-HIGH: a shorter, less severe disruption than P-CRIT — tests that
+# detectors scale their response to event magnitude rather than firing
+# identically on every positive.
+scenario_id: hormuz_P_HIGH
+region: hormuz
+class: P-HIGH
+seed: 42
+days: 365
+event:
+  onset_day: 120
+  ramp_days: 7
+  duration_days: 25
+  peak_band: high
+signals:
+  shipping: {baseline: {mean: 70, std: 5}, effect: {type: multiplicative_ramp, target: 0.65, lead_days: 0}}
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 1.4, lead_days: -3}}
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: {type: additive_ramp, target: 0.45, lead_days: 4}}
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: {type: additive_ramp, target: 0.30, lead_days: 3}}
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.40, lead_days: 5}}
+  disaster: {baseline: {mean: 0.02, std: 0.01}, effect: null}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

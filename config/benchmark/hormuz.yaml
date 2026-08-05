@@ -1,0 +1,14 @@
+# Region spec for the Strait of Hormuz — ChokeBench-16 R1 reference region.
+#
+# Consumed by src/benchmark/regions.py:load_region(). All region-specific
+# numeric parameters live here; regions.py and scenario_generator.py stay
+# region-agnostic and only read what this file provides.
+hormuz:
+  center:
+    lat: 26.5
+    lng: 56.5
+  baseline_transits_per_day: [60, 80]
+  active_domains: [shipping, market, geopolitical, routing, news, disaster]
+  disaster_relevance: low
+  reroutable: false
+  loss_scaling: superlinear
