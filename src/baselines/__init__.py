@@ -14,6 +14,7 @@ from src.baselines.tier1_statistical import (
     SARIMABaseline,
     ZScoreBaseline,
 )
+from src.baselines.tier2_classical import IsolationForestBaseline, MatrixProfileBaseline
 
 __all__ = [
     "BaselineRunner",
@@ -26,4 +27,6 @@ __all__ = [
     "PersistenceBaseline",
     "SARIMABaseline",
     "ZScoreBaseline",
+    "IsolationForestBaseline",
+    "MatrixProfileBaseline",
 ]
