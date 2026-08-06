@@ -1,4 +1,4 @@
-"""Region registry for ChokeBench-16.
+"""Region registry for EVAL01.
 
 A :class:`Region` captures everything about a chokepoint that is *not*
 scenario-specific: where it is, how busy it normally is, which detection
@@ -19,7 +19,7 @@ import yaml
 
 _CONFIG_DIR = Path(__file__).resolve().parents[2] / "config" / "benchmark"
 
-# The six detection domains ChokeBench-16 scenarios can drive, one per
+# The six detection domains EVAL01 scenarios can drive, one per
 # agent in src/agents (shipping_agent, market_agent, geopolitical_agent,
 # routing_agent, news_agent, disaster_agent).
 KNOWN_DOMAINS: tuple[str, ...] = (
@@ -34,7 +34,7 @@ KNOWN_DOMAINS: tuple[str, ...] = (
 
 @dataclass
 class Region:
-    """A ChokeBench-16 region spec, loaded from ``config/benchmark/{name}.yaml``.
+    """A EVAL01 region spec, loaded from ``config/benchmark/{name}.yaml``.
 
     Attributes:
         name: Region key (matches the YAML filename and top-level key).

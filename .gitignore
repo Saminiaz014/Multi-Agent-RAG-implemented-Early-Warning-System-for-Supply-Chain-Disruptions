@@ -28,6 +28,16 @@ logs/
 # Data (raw inputs — not versioned)
 data/raw/
 data/processed/
+data/benchmark/
+
+# EVAL01 benchmark results (generated, reproducible via scripts/run_*.py —
+# not versioned; results/baselines/tier0/*.json is a pre-existing
+# exception already committed from an earlier run and stays tracked)
+results/baselines/tier1/
+results/baselines/tier2/
+results/baselines/ablations/
+results/*.csv
+results/benchmark_summary.md
 
 # ChromaDB persistence (binary store stays ignored; the JSON snapshot
 # live_extracted_backup.json IS committed — it is the portable seed that

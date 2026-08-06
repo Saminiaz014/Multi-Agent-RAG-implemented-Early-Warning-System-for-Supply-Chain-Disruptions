@@ -1,4 +1,4 @@
-# Region spec for the Strait of Hormuz — ChokeBench-16 R1 reference region.
+# Region spec for the Strait of Hormuz — EVAL01 R1 reference region.
 #
 # Consumed by src/benchmark/regions.py:load_region(). All region-specific
 # numeric parameters live here; regions.py and scenario_generator.py stay

@@ -1,4 +1,4 @@
-"""ChokeBench-16 baseline detectors and evaluation."""
+"""EVAL01 baseline detectors and evaluation."""
 
 from src.baselines.baseline_base import BaselineRunner
 from src.baselines.baseline_evaluator import BaselineEvaluator

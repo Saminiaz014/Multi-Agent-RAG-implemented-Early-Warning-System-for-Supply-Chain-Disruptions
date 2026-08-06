@@ -1,4 +1,4 @@
-"""Generate the Hormuz 4x5 (4 scenarios x 5 seeds) ChokeBench-16 benchmark grid.
+"""Generate the Hormuz 4x5 (4 scenarios x 5 seeds) EVAL01 benchmark grid.
 
 Run from project root::
 

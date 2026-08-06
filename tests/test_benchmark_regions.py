@@ -1,4 +1,4 @@
-"""Tests for the ChokeBench-16 region registry and scenario spec loader."""
+"""Tests for the EVAL01 region registry and scenario spec loader."""
 
 from __future__ import annotations
 

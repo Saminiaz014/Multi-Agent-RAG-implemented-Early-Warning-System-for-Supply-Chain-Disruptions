@@ -1,4 +1,4 @@
-"""ChokeBench-16 — region registry and scenario spec loader."""
+"""EVAL01 — region registry and scenario spec loader."""
 
 from src.benchmark.regions import REGION_REGISTRY, Region, load_region
 from src.benchmark.scenario_generator import (

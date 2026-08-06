@@ -1743,17 +1743,100 @@ docker compose down                 # stop the stack (state survives in named vo
 
 ---
 
+## Phase 11 — EVAL01 Benchmark Suite (R1–R8)
+
+> **Summary.** An offline, reproducible benchmark harness (**EVAL01**) for evaluating disruption-detection quality and aggregation strategy independently of the live production pipeline above. Built across eight sub-phases (R1–R8): a region/scenario spec system generating 20 labelled synthetic Hormuz scenarios (4 classes × 5 seeds), three tiers of baseline detectors (10 baselines total — 3 trivial controls, 5 statistical/SPC methods, 2 classical unsupervised models), an 8-config ablation study (A0–A7) isolating the value of domain weighting and multi-domain consensus, and a results-aggregation pipeline that reports only what was actually measured. **291/291 tests passing** across the full repository (60 new tests added in this phase).
+
+EVAL01 answers a question the production pipeline alone can't: *is the multi-agent architecture's complexity justified, compared to what a supply-chain manager could get from a single control chart or an off-the-shelf Isolation Forest?* It lives alongside the production system (`src/agents/`, `src/aggregation/risk_engine.py`) without modifying it — new modules under `src/benchmark/`, `src/baselines/`, `config/benchmark/`, `scripts/`, and `results/`.
+
+### R1 — Region Registry + Scenario Spec Loader
+
+`src/benchmark/regions.py` (`Region` dataclass, `load_region()`, `REGION_REGISTRY`) and `src/benchmark/scenario_generator.py` (`ScenarioSpec`, `load_scenario()`, `materialize_scenario()`) turn a YAML region spec + YAML scenario spec into a 365-day synthetic multi-domain signal DataFrame — AR(1)-correlated noise, seasonality, ramp/plateau/decay event windows per domain (with independent `lead_days` offsets), and configurable missing-data dropout. `config/benchmark/hormuz.yaml` defines the Hormuz region (6 active domains, non-reroutable, superlinear loss scaling); `config/benchmark/scenarios/hormuz_{P_CRIT,P_HIGH,N_QUIET,N_DECOY}.yaml` define the four scenario classes — critical and high-severity real disruptions, a quiet negative control, and a single-domain "decoy" negative control designed to bait false alarms.
+
+### R2 — Silent-Agent Handling in the Risk Engine
+
+`src/aggregation/silent_agent_tracker.py` (`SilentAgentDetector`, `WeightRenormalizer`) and a new `aggregate_detections()` function in `src/aggregation/risk_engine.py` let the aggregation layer distinguish a **disabled** agent (no configured weight) from an **enabled-but-silent** one (configured, but its own `anomaly_scores` never move — e.g. the geopolitical domain in a region with no geopolitical exposure). A silent agent's weight is redistributed across the remaining active agents rather than dragging the composite score toward zero. `DetectionResult` itself is untouched — silence is inferred purely from each agent's own score array, keyed by name.
+
+### R3 — Scenario Batch Generator
+
+`src/benchmark/scenario_batch_generator.py` (`ScenarioBatchGenerator`) is a thin wrapper around R1's `materialize_scenario()` — it never reimplements signal generation. For each of the 4 scenario classes × 5 seeds it materializes the scenario, adds integer-coded `y_band_int` (0–3) / `y_action_int` (0–3) columns derived from R1's string `y_band` + `region.reroutable`, and writes one parquet file. `scripts/generate_hormuz_benchmark.py` produces the 20 files under `data/benchmark/scenarios_generated/` (gitignored — regenerate locally with `python scripts/generate_hormuz_benchmark.py`).
+
+### R4 — Tier 0 Controls
+
+`src/baselines/baseline_base.py` (`BaselineRunner` ABC) and `src/baselines/baseline_evaluator.py` (`BaselineEvaluator`) establish the shared baseline interface and metric suite (**D3–D10**: AUC-PR, AUC-ROC, F1 at a pre-declared threshold, best-achievable F1, precision, recall, FPR, macro-F1 — all via scikit-learn). D1/D2 (VUS-PR/ROC) and D11–D15 (event-based / range-based / affiliation / point-adjusted F1 variants) are explicitly declared `NaN` rather than approximated: D1/D2 need `tslearn` (not a project dependency) and D11–D15 need segment-level evaluation logic not yet implemented. `src/baselines/tier0_controls.py` implements the three trivial controls that give the results table a floor and ceiling: `random`, `always_alarm`, `never_alarm`. Every baseline follows the same pre-declared-threshold protocol (fit on validation days 201–280, score on test days 281–364) run via `scripts/run_tier0_baselines.py`.
+
+### R5 — Tier 1 Statistical / SPC Baselines
+
+`src/baselines/tier1_statistical.py` — the methods a supply-chain manager already has: **Z-score**, **EWMA** control chart (λ grid-searched on validation), **CUSUM** change detector (threshold grid-searched on validation), **SARIMA** residual thresholding (`statsmodels`), and a naive **persistence** baseline. All operate on the single `shipping` signal, forward/back-filling the ~2% of days R1 marks as missing sensor dropout (a raw `NaN` otherwise poisons `numpy`'s non-NaN-aware `mean()`/`std()` for every downstream day, not just the missing one). Confirmed finding: CUSUM is genuinely competitive on the sustained `hormuz_P_CRIT` disruption — once triggered by the large shock, its cumulative statistic stays pinned at alarm (recall = 1.0 on the test split) rather than decaying back down, which is a real property of change detection, not a bug.
+
+### R6 — Tier 2 Classical Unsupervised Baselines
+
+`src/baselines/tier2_classical.py` — the two-baseline answer to "why not just one model instead of six agents?" **Isolation Forest** trains on all 6 concatenated domain signals (fit on the training split, scored on the full series, score normalized against the training score range rather than assumed bounds). **Matrix Profile** uses `stumpy.mstump` — the genuine multi-dimensional matrix profile, not six univariate profiles concatenated — so a subsequence is only flagged when its shape is novel across all 6 signals jointly. Confirmed finding: IForest gets strong separation on `hormuz_P_CRIT` (AUC-ROC = 0.985, F1 = 0.81), beating the multi-agent system on raw detection metrics as predicted — but its raw score nearly doubles during `hormuz_N_DECOY`'s single-domain news-rumor window (0.60 vs. 0.32 baseline) despite no real disruption, the false-alarm vulnerability multi-domain consensus is meant to guard against.
+
+### R7 — Tier 5 Ablations (A0–A7)
+
+`src/baselines/ablations.py`, `agreement_bonus.py`, `domain_scorers.py`, and `ablation_runner.py` isolate the value of the aggregation **strategy** — weighting and consensus logic — independent of agent quality. Ablations run against lightweight rolling-z-score **domain scorers** (`src/baselines/domain_scorers.py`), not the production `ShippingAgent`/`MarketAgent`/etc.: the production agents need a rich multi-column schema per domain (e.g. `ShippingAgent` wants `vessel_count`, `avg_delay_hours`, `congestion_index`) that R1/R3's synthetic generator doesn't produce — only a single float per domain. Fabricating that mapping would mean inventing data; see `docs/ABLATION_RATIONALE.md` for the full rationale.
+
+| Config | Domains | Weights | Bonus | Purpose |
+|---|---|---|---|---|
+| A0 | 1 (shipping) | — | — | Floor: single domain |
+| A1 | 2 | hand-picked | — | Shipping + market pair |
+| A2 | 4 | hand-picked | — | Mid-rung |
+| A3 | 6 | equal | — | Value of weighting |
+| A4 | 6 | hand-tuned | — | Value of expert tuning |
+| A5 | 6 | **Optuna-tuned** (50 trials/scenario, on validation) | — | Value of automated tuning |
+| A6 | 6 | A5's weights | ✓ agreement bonus | Multi-domain consensus |
+| A7 | 6 | A5's weights | ✓ agreement bonus, RAG skipped | Bonus alone (RAG is post-detection, doesn't touch the score) |
+
+The agreement bonus (`AgreementBonusCalculator`) scales the composite ×1.15 when ≥3 domains score ≥0.65 that day, ×1.25 for ≥5. A5's weights are a real per-scenario Optuna search maximizing best-F1 on validation (VUS-PR isn't available — same D1 gap as R4), not a hardcoded placeholder.
+
+**Honest result, not smoothed over:** the predicted `A0 < A1 < ... < A6` progression didn't hold, and A5 vs. A6 showed *no* difference on N-DECOY. Both are explained, not hidden: several domains' R1-generated ramps are `lead_days`-shifted, so by the time the val/test boundary (day 281) arrives their rolling mean is still dragged up by a recent peak — the true-positive tail days get a spuriously *negative* z-score, making every multi-domain config score worse than shipping alone on `hormuz_P_CRIT`. And N-DECOY's test window has zero positive days, so both the threshold search and the Optuna weight search degenerate to the same equal-weights fallback for A5 and A6 alike — the bonus condition was never evaluated for either, not disproven.
+
+### R8 — Metrics Aggregation & Honest Results Summary
+
+`scripts/aggregate_all_results.py` and `scripts/generate_results_summary.py` roll all 232 Tier 0–2 + ablation result records into `results/results_by_baseline.csv`, `results/results_by_scenario.csv`, `results/ablation_findings.csv`, and `results/benchmark_summary.md`. Every number in the generated summary is read live from the CSVs — there is no pre-declared-target table, capability-coverage checkmark grid, or "full system" score, because none of that exists anywhere in this repository to report honestly. The summary explicitly lists every metric family that was **not** measured (D1/D2 VUS, D11–D15 segment-based variants, lead-time, decision accuracy, calibration) with why not and what implementing it would need.
+
+### Key Findings
+
+1. **Classical change detection is genuinely competitive** on a single sustained disruption (CUSUM on `hormuz_P_CRIT`) — the multi-agent architecture's advantage is multi-domain fusion and explanation, not raw detection speed on one clean signal.
+2. **A single multivariate model (Isolation Forest) beats the aggregation baselines on raw F1/AUC** for a real event, but is measurably more prone to firing on single-domain noise (N-DECOY) — the trade-off the agreement-bonus mechanism exists to address.
+3. **Rolling-window normalization has a blind spot right at a val/test boundary that follows a large recent peak** — every domain scorer used the same z-score formula as the Tier 1 SPC baselines, and the artifact is a property of that formula meeting R1's `lead_days`-shifted ramps, not an aggregation bug.
+4. **Evaluating a consensus mechanism on a scenario with zero positive days in its evaluation window can't show whether it helps** — a benchmark-design lesson for extending EVAL01 to more scenario classes.
+
+### Honest Limitations
+
+This benchmark evaluates detection and aggregation strategy only. It does **not** test: production-agent performance (ablations use domain-scorer proxies); full-system integration (SHAP explanation and RAG retrieval are post-detection and untouched here); real-world validation (all 20 scenarios are synthetic); or operational concerns (alert fatigue, deployment latency, cost-weighted decisions). See `results/benchmark_summary.md` (regenerate via `scripts/generate_results_summary.py`) and `docs/ABLATION_RATIONALE.md` for the full discussion.
+
+### Files Added (R1–R8)
+
+| Area | Files |
+|---|---|
+| Region/scenario system | `src/benchmark/{regions,scenario_generator,scenario_batch_generator}.py`, `config/benchmark/hormuz.yaml`, `config/benchmark/scenarios/*.yaml` |
+| Aggregation (silent agents) | `src/aggregation/silent_agent_tracker.py` |
+| Baseline framework | `src/baselines/{baseline_base,baseline_evaluator}.py` |
+| Tier 0/1/2 baselines | `src/baselines/{tier0_controls,tier1_statistical,tier2_classical}.py` |
+| Ablations | `src/baselines/{ablations,agreement_bonus,domain_scorers,ablation_runner}.py` |
+| CLI runners | `scripts/{generate_hormuz_benchmark,run_tier0_baselines,run_tier1_baselines,run_tier2_baselines,run_ablations,aggregate_ablation_results,aggregate_all_results,generate_results_summary}.py` |
+| Docs & results | `docs/ABLATION_RATIONALE.md`, `results/benchmark_summary.md`, `results/*.csv` (gitignored) |
+| Tests | `tests/test_{benchmark_regions,silent_agent_handling,scenario_batch_generator,tier0_baselines,tier1_baselines,tier2_classical,ablations,results_aggregation}.py` |
+
+---
+
 ## Project Structure
 
 ```
 supply-chain-dss/
 ├── config/
-│   └── settings.yaml           # agent toggles, weights, thresholds, RAG, API, logging
+│   ├── settings.yaml           # agent toggles, weights, thresholds, RAG, API, logging
+│   └── benchmark/               # Phase 11 (R1) — EVAL01 region + scenario specs
+│       ├── hormuz.yaml              # Hormuz region spec (active domains, reroutable, loss scaling)
+│       └── scenarios/               # hormuz_{P_CRIT,P_HIGH,N_QUIET,N_DECOY}.yaml
 ├── data/
 │   ├── raw/                    # raw CSV ingestion data (populate per connector)
 │   │   ├── shipping_hormuz.csv # synthetic Hormuz dataset (Phase 1 artefact)
 │   │   └── market_data.csv     # synthetic Brent / trade volume / freight data (Phase 1 artefact)
 │   ├── processed/              # cleaned DataFrames, SHAP PNGs (Phase 4 depth), evaluation_results.json + thesis_comparison_table.json (Phase 9a, gitignored)
+│   ├── benchmark/               # Phase 11 (R3) — 20 generated scenario parquets (gitignored, regenerate via scripts/generate_hormuz_benchmark.py)
 │   └── knowledge_base/         # historical disruption cases as JSON
 │       ├── disruption_cases.json   # the 10 historical RAG cases
 │       └── decision_labels.json    # Phase 9a — auditable ground-truth action labels for the 10 cases
@@ -1767,7 +1850,22 @@ supply-chain-dss/
 │   │   ├── shipping_agent.py   # IsolationForest + Z-score detector for Hormuz vessel data (Phase 2)
 │   │   └── market_agent.py     # Rolling Z-score detector for Brent / trade volume / freight (Phase 2)
 │   ├── aggregation/
-│   │   └── risk_engine.py      # weighted composite risk scoring
+│   │   ├── risk_engine.py      # weighted composite risk scoring + aggregate_detections() (Phase 11/R2)
+│   │   └── silent_agent_tracker.py # Phase 11 (R2) — SilentAgentDetector, WeightRenormalizer
+│   ├── benchmark/                # Phase 11 (R1/R3) — EVAL01 region + scenario system
+│   │   ├── regions.py               # Region dataclass, load_region(), REGION_REGISTRY
+│   │   ├── scenario_generator.py    # ScenarioSpec, load_scenario(), materialize_scenario()
+│   │   └── scenario_batch_generator.py # ScenarioBatchGenerator — wraps materialize_scenario() for the seed grid
+│   ├── baselines/                # Phase 11 (R4-R7) — EVAL01 baseline detectors + ablations
+│   │   ├── baseline_base.py         # BaselineRunner ABC, best_f1_on_threshold_sweep()
+│   │   ├── baseline_evaluator.py    # BaselineEvaluator — D3-D10 (D1/D2/D11-D15 declared NaN)
+│   │   ├── tier0_controls.py        # random, always_alarm, never_alarm
+│   │   ├── tier1_statistical.py     # Z-score, EWMA, CUSUM, SARIMA, persistence
+│   │   ├── tier2_classical.py       # Isolation Forest, Matrix Profile (stumpy.mstump)
+│   │   ├── domain_scorers.py        # rolling z-score proxy per domain (ablations only)
+│   │   ├── ablations.py             # AblationConfig, A0-A7 registry
+│   │   ├── agreement_bonus.py       # AgreementBonusCalculator
+│   │   └── ablation_runner.py       # AblationRunner + tune_weights_optuna()
 │   ├── explainability/
 │   │   └── shap_explainer.py   # SurrogateShapExplainer + compare_explanations / compute_faithfulness / generate_comparison_plot (Phase 4 depth)
 │   ├── rag/
@@ -1794,7 +1892,20 @@ supply-chain-dss/
 │   │   └── pages/                   # thin multipage shims (1_Decision_View.py, 2_Analysis_View.py)
 │   └── orchestrator.py         # main pipeline runner; RAG block now calls query_gated() (Phase 7)
 ├── scripts/
-│   └── populate_knowledge_base.py  # CLI: python scripts/populate_knowledge_base.py [--extractors a,b,c]
+│   ├── populate_knowledge_base.py  # CLI: python scripts/populate_knowledge_base.py [--extractors a,b,c]
+│   ├── generate_hormuz_benchmark.py    # Phase 11 (R3) — writes the 20 scenario parquets
+│   ├── run_tier0_baselines.py          # Phase 11 (R4) — random/always/never-alarm
+│   ├── run_tier1_baselines.py          # Phase 11 (R5) — Z-score/EWMA/CUSUM/SARIMA/persistence
+│   ├── run_tier2_baselines.py          # Phase 11 (R6) — Isolation Forest, Matrix Profile
+│   ├── run_ablations.py                # Phase 11 (R7) — A0-A7, seed=42 only
+│   ├── aggregate_ablation_results.py   # Phase 11 (R7) — ablation summary table
+│   ├── aggregate_all_results.py        # Phase 11 (R8) — Tier 0-2 + ablations -> CSVs
+│   └── generate_results_summary.py     # Phase 11 (R8) — results/benchmark_summary.md
+├── docs/
+│   └── ABLATION_RATIONALE.md    # Phase 11 (R7) — why domain scorers, not production agents
+├── results/                     # Phase 11 (R4-R8) — benchmark outputs (gitignored except tier0)
+│   └── baselines/
+│       └── tier0/                   # committed exception — random/always/never-alarm result JSONs
 ├── airflow/                    # Phase 10 — local daily orchestration (Docker Compose)
 │   ├── Dockerfile                  # apache/airflow:2.10.5 + pipeline deps (CPU-only torch)
 │   ├── docker-compose.yaml         # LocalExecutor stack; project root bind-mounted rw into the containers
@@ -1815,7 +1926,15 @@ supply-chain-dss/
 │   ├── test_phase4_depth.py    # Phase 4 depth — 4 tests: SHAP comparison, faithfulness > 0.8, RAG quality > 0.7, plots
 │   ├── test_evaluation.py      # Phase 9a — 10 tests: scenario risk levels, agent diversity, decision effectiveness (SRQ5)
 │   ├── test_dashboard.py       # Phase 9b/10 — 15 tests: no-raw-scores scan, route sync, JPEG export, region parameterization, freshness marker
-│   └── test_fred_api.py        # standalone (non-pytest) FRED connectivity diagnostic, run by hand
+│   ├── test_fred_api.py        # standalone (non-pytest) FRED connectivity diagnostic, run by hand
+│   ├── test_benchmark_regions.py       # Phase 11 (R1) — region + scenario spec loading, silent-agent signal
+│   ├── test_silent_agent_handling.py   # Phase 11 (R2) — SilentAgentDetector, WeightRenormalizer, aggregate_detections()
+│   ├── test_scenario_batch_generator.py # Phase 11 (R3) — wraps R1, integer labels, unclipped signals
+│   ├── test_tier0_baselines.py         # Phase 11 (R4) — control baselines + BaselineEvaluator
+│   ├── test_tier1_baselines.py         # Phase 11 (R5) — SPC baselines, validation-tuned hyperparameters
+│   ├── test_tier2_classical.py         # Phase 11 (R6) — IForest/Matrix Profile shape, determinism, NaN handling
+│   ├── test_ablations.py               # Phase 11 (R7) — A0-A7 config, agreement bonus, domain scorers
+│   └── test_results_aggregation.py     # Phase 11 (R8) — regex/name-extraction fixes, mean/std aggregation
 ├── logs/                       # pipeline execution logs (gitignored)
 ├── notebooks/
 │   └── evaluation.py           # Phase 9a — executable 8-metric thesis evaluation suite
@@ -1838,6 +1957,8 @@ pip install -r requirements.txt
 Dependencies: `pandas`, `numpy`, `scikit-learn`, `shap`, `chromadb`, `fastapi`, `uvicorn`, `pyyaml`, `plotly`, `optuna`, `kaleido`, `pytest`, `httpx`. (`optuna` + `kaleido` back the weight optimizer and its figure export. `chromadb` bundles its own ONNX embedding model — `sentence-transformers` is no longer required.)
 
 **Phase 7 additions:** `acled` (OAuth-authenticated ACLED client), `requests` (HTTP transport for every extractor + `DisasterConnector.fetch_api()`), `python-dotenv` (loads `.env` for API-key resolution), `websockets` (only needed if `aisstream.enabled: true`).
+
+**Phase 11 (EVAL01) additions:** `statsmodels` (SARIMA baseline, R5), `stumpy` (Matrix Profile baseline, R6), `tabulate` (`DataFrame.to_markdown()` for `results/benchmark_summary.md`, R8). `optuna` (already listed above) is reused for the R7 ablation weight search.
 
 **Phase 9b additions:** `streamlit` (dashboard). Optional: `anthropic` — only needed if you set `ANTHROPIC_API_KEY` to enable LLM-generated risk explanations on the Decision view (a compositional fallback is used otherwise).
 

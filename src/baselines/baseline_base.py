@@ -1,4 +1,4 @@
-"""Abstract base class for ChokeBench-16 baselines."""
+"""Abstract base class for EVAL01 baselines."""
 
 from __future__ import annotations
 

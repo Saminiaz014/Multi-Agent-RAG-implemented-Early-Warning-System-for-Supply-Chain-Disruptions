@@ -1,4 +1,4 @@
-"""Scenario spec loader + materializer for ChokeBench-16.
+"""Scenario spec loader + materializer for EVAL01.
 
 A scenario is a YAML *spec* (onset/ramp/duration + a per-agent baseline and
 optional effect) — never hardcoded Python. :func:`materialize_scenario`
