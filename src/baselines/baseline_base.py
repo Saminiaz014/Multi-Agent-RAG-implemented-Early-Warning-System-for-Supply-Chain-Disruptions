@@ -76,3 +76,29 @@ class BaselineRunner(ABC):
                 best_threshold = float(threshold)
 
         return best_threshold
+
+
+def best_f1_on_threshold_sweep(scores: np.ndarray, y_true: np.ndarray) -> float:
+    """Best achievable F1 across a threshold sweep — an oracle upper bound.
+
+    Shared by any tuning routine that needs to compare *candidates* (a
+    hyperparameter value, a weight vector, ...) by how well they separate
+    a split, independent of which exact threshold gets declared later for
+    test-time scoring. Used by ``tier1_statistical``'s EWMA/CUSUM tuning
+    and ``ablation_runner``'s Optuna weight search.
+
+    Args:
+        scores: Candidate anomaly scores.
+        y_true: Binary labels, same shape as ``scores``.
+
+    Returns:
+        Max F1 found across a 0.01-1.0 threshold grid (see
+        :meth:`BaselineRunner._compute_threshold` for why 0.0 is excluded).
+    """
+    from sklearn.metrics import f1_score
+
+    best = 0.0
+    for tau in np.linspace(0.01, 1.0, 100):
+        y_pred = (scores >= tau).astype(int)
+        best = max(best, f1_score(y_true, y_pred, zero_division=0))
+    return best

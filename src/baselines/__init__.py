@@ -15,6 +15,10 @@ from src.baselines.tier1_statistical import (
     ZScoreBaseline,
 )
 from src.baselines.tier2_classical import IsolationForestBaseline, MatrixProfileBaseline
+from src.baselines.ablations import ABLATIONS, AblationConfig
+from src.baselines.agreement_bonus import AgreementBonusCalculator
+from src.baselines.ablation_runner import AblationRunner
+from src.baselines.domain_scorers import DOMAIN_SCORERS, DomainScorer
 
 __all__ = [
     "BaselineRunner",
@@ -29,4 +33,10 @@ __all__ = [
     "ZScoreBaseline",
     "IsolationForestBaseline",
     "MatrixProfileBaseline",
+    "ABLATIONS",
+    "AblationConfig",
+    "AgreementBonusCalculator",
+    "AblationRunner",
+    "DOMAIN_SCORERS",
+    "DomainScorer",
 ]

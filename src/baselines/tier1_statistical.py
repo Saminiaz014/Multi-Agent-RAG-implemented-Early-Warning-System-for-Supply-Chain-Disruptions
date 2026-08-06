@@ -20,9 +20,8 @@ import logging
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import f1_score
 
-from src.baselines.baseline_base import BaselineRunner
+from src.baselines.baseline_base import BaselineRunner, best_f1_on_threshold_sweep
 
 logger = logging.getLogger(__name__)
 
@@ -42,20 +41,6 @@ def _fill_missing(shipping: np.ndarray) -> np.ndarray:
     they'd carry the last known value forward, which is what this does.
     """
     return pd.Series(shipping).ffill().bfill().to_numpy()
-
-
-def _best_f1_on_val(scores_val: np.ndarray, y_val: np.ndarray) -> float:
-    """Best achievable F1 on a validation slice across a threshold sweep.
-
-    Used to compare hyperparameter candidates by how well they separate
-    the validation split, independent of which exact threshold is later
-    declared for test-time scoring.
-    """
-    best = 0.0
-    for tau in np.linspace(0.01, 1.0, 50):
-        y_pred = (scores_val >= tau).astype(int)
-        best = max(best, f1_score(y_val, y_pred, zero_division=0))
-    return best
 
 
 class ZScoreBaseline(BaselineRunner):
@@ -148,7 +133,7 @@ class EWMABaseline(BaselineRunner):
             best_f1 = -1.0
             for candidate in self._DEFAULT_LAMBDA_GRID:
                 scores_val = self._ewma_scores(shipping, candidate)[_VAL_SLICE]
-                f1 = _best_f1_on_val(scores_val, y_val)
+                f1 = best_f1_on_threshold_sweep(scores_val, y_val)
                 if f1 > best_f1:
                     best_f1 = f1
                     lambda_param = candidate
@@ -223,7 +208,7 @@ class CUSUMBaseline(BaselineRunner):
             best_f1 = -1.0
             for candidate in self._DEFAULT_THRESHOLD_GRID:
                 scores_val = np.clip(cusum_val / (candidate + 1e-6), 0, 1)
-                f1 = _best_f1_on_val(scores_val, y_val)
+                f1 = best_f1_on_threshold_sweep(scores_val, y_val)
                 if f1 > best_f1:
                     best_f1 = f1
                     threshold = candidate
