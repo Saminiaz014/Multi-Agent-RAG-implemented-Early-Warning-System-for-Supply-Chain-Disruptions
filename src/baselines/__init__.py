@@ -7,6 +7,13 @@ from src.baselines.tier0_controls import (
     NeverAlarmBaseline,
     RandomBaseline,
 )
+from src.baselines.tier1_statistical import (
+    CUSUMBaseline,
+    EWMABaseline,
+    PersistenceBaseline,
+    SARIMABaseline,
+    ZScoreBaseline,
+)
 
 __all__ = [
     "BaselineRunner",
@@ -14,4 +21,9 @@ __all__ = [
     "AlwaysAlarmBaseline",
     "NeverAlarmBaseline",
     "RandomBaseline",
+    "CUSUMBaseline",
+    "EWMABaseline",
+    "PersistenceBaseline",
+    "SARIMABaseline",
+    "ZScoreBaseline",
 ]
