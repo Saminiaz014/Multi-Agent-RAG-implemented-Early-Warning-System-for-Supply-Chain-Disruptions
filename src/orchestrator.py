@@ -523,14 +523,21 @@ class Orchestrator:
         """Fetch from a connector, falling back to synthetic on CSV failure."""
         try:
             return connector.fetch()
-        except (FileNotFoundError, ValueError) as exc:
-            logger.warning(
-                "[Orchestrator] %s connector failed in source_mode='%s' "
-                "(%s) — falling back to synthetic.",
-                name,
-                connector.source_mode,
-                exc,
-            )
+        except (FileNotFoundError, ValueError, NotImplementedError) as exc:
+            if isinstance(exc, NotImplementedError):
+                logger.info(
+                    "[Orchestrator] %s api mode not yet implemented; "
+                    "using synthetic fallback.",
+                    name,
+                )
+            else:
+                logger.warning(
+                    "[Orchestrator] %s connector failed in source_mode='%s' "
+                    "(%s) — falling back to synthetic.",
+                    name,
+                    connector.source_mode,
+                    exc,
+                )
             connector.source_mode = "synthetic"
             return connector.fetch()
 
@@ -554,14 +561,21 @@ class Orchestrator:
         connector = self._domain_connectors[name]
         try:
             return connector.fetch()
-        except (FileNotFoundError, ValueError) as exc:
-            logger.warning(
-                "[Orchestrator] %s connector failed in data_mode='%s' (%s) — "
-                "falling back to synthetic.",
-                name,
-                getattr(connector, "data_mode", "?"),
-                exc,
-            )
+        except (FileNotFoundError, ValueError, NotImplementedError) as exc:
+            if isinstance(exc, NotImplementedError):
+                logger.info(
+                    "[Orchestrator] %s api mode not yet implemented; "
+                    "using synthetic fallback.",
+                    name,
+                )
+            else:
+                logger.warning(
+                    "[Orchestrator] %s connector failed in data_mode='%s' (%s) — "
+                    "falling back to synthetic.",
+                    name,
+                    getattr(connector, "data_mode", "?"),
+                    exc,
+                )
             connector.data_mode = "synthetic"
             return connector.fetch()
 
