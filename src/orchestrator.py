@@ -33,6 +33,7 @@ from src.ingestion import (
     RoutingConnector,
     ShippingConnector,
 )
+from src.utils.timeline_validator import TimelineValidator
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,12 @@ class Orchestrator:
         self._shap_explainer: Any | None = None
         self._last_agent_frames: dict[str, pd.DataFrame] = {}
 
+        # Global reproducibility floor — every connector fetch is filtered
+        # through this before reaching detection (see _safe_fetch/fetch_domain).
+        self.min_date: str = str(config.get("global", {}).get("min_date", "2019-01-01"))
+        self.timeline_validator = TimelineValidator(self.min_date)
+        self._timeline_audit: list[dict[str, Any]] = []
+
         logger.info(
             "Orchestrator initialised | shipping_mode='%s' | market_mode='%s' "
             "| domain_connectors=%s",
@@ -171,6 +178,12 @@ class Orchestrator:
             Unified daily-frequency feature frame combining shipping +
             market signals on a single ``timestamp`` index.
         """
+        # Reset once per ingest — the same instance covers both the
+        # shipping/market fetches below and the domain connectors fetched
+        # afterwards via fetch_domain (run_full_pipeline / run_timeseries_analysis
+        # both call ingest() first).
+        self._timeline_audit = []
+
         shipping_df = self._safe_fetch(self._shipping_connector, "shipping")
         market_df = self._safe_fetch(self._market_connector, "market")
 
@@ -370,6 +383,8 @@ class Orchestrator:
             agents_active,
             self._weight_mode,
         )
+        logger.info(self.timeline_validator.audit_log_summary(self._timeline_audit))
+        output["metadata"]["timeline_audit"] = self._timeline_audit
         return output
 
     # ------------------------------------------------------------------
@@ -520,9 +535,14 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     def _safe_fetch(self, connector: Any, name: str) -> pd.DataFrame:
-        """Fetch from a connector, falling back to synthetic on CSV failure."""
+        """Fetch from a connector, falling back to synthetic on CSV failure.
+
+        The result is filtered through :attr:`timeline_validator` before
+        being returned; the per-fetch audit entry is appended to
+        :attr:`_timeline_audit`.
+        """
         try:
-            return connector.fetch()
+            df = connector.fetch()
         except (FileNotFoundError, ValueError, NotImplementedError) as exc:
             if isinstance(exc, NotImplementedError):
                 logger.info(
@@ -539,28 +559,34 @@ class Orchestrator:
                     exc,
                 )
             connector.source_mode = "synthetic"
-            return connector.fetch()
+            df = connector.fetch()
+
+        df, audit = self.timeline_validator.validate_dataframe(df, name)
+        self._timeline_audit.append(audit)
+        return df
 
     def fetch_domain(self, name: str) -> pd.DataFrame:
         """Fetch a single-domain frame, falling back to synthetic on failure.
 
         Mirrors :meth:`_safe_fetch` for the four event/domain connectors,
         which select their mode via ``data_mode`` (rather than ``source_mode``)
-        and each return their own single-domain DataFrame.
+        and each return their own single-domain DataFrame. Also mirrors
+        :meth:`_safe_fetch` in filtering the result through
+        :attr:`timeline_validator` and appending to :attr:`_timeline_audit`.
 
         Args:
             name: Config agent name — one of ``geopolitical``,
                 ``natural_disaster``, ``routing``, ``news_sentiment``.
 
         Returns:
-            The connector's fetched DataFrame.
+            The connector's fetched DataFrame, filtered to ``min_date``.
 
         Raises:
             KeyError: If ``name`` is not an owned (enabled) domain connector.
         """
         connector = self._domain_connectors[name]
         try:
-            return connector.fetch()
+            df = connector.fetch()
         except (FileNotFoundError, ValueError, NotImplementedError) as exc:
             if isinstance(exc, NotImplementedError):
                 logger.info(
@@ -577,7 +603,11 @@ class Orchestrator:
                     exc,
                 )
             connector.data_mode = "synthetic"
-            return connector.fetch()
+            df = connector.fetch()
+
+        df, audit = self.timeline_validator.validate_dataframe(df, name)
+        self._timeline_audit.append(audit)
+        return df
 
     def _warn_if_market_coverage_short(
         self, shipping_df: pd.DataFrame, market_df: pd.DataFrame
