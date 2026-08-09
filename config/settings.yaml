@@ -43,9 +43,9 @@ ingestion:
       - "Roll-on/roll-off"
       - "Tanker"
     api:
-      # Placeholders for the planned aisstream.io WebSocket integration.
+      # aisstream.io WebSocket integration (live vessel positions).
       endpoint: "wss://stream.aisstream.io/v0/stream"
-      key: null
+      key: "${AISSTREAM_API_KEY}"
       bounding_box:
         # Shuaiba port, Kuwait (Persian Gulf).
         lat_min: 28.95

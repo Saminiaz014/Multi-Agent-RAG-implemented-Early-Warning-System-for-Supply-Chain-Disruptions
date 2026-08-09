@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -239,15 +242,113 @@ class TestShippingSyntheticMode:
 
 
 class TestShippingApiMode:
-    def test_api_mode_raises_not_implemented_via_fetch(self) -> None:
-        connector = ShippingConnector(source_mode="api", config={})
-        with pytest.raises(NotImplementedError, match="aisstream"):
-            connector.fetch()
+    """API mode (aisstream.io) — no live key in CI, so these exercise the
+    config-guard and fallback-to-CSV paths without touching the network.
+    """
 
-    def test_api_mode_raises_not_implemented_direct(self) -> None:
-        connector = ShippingConnector(source_mode="api", config={})
-        with pytest.raises(NotImplementedError):
-            connector.fetch_from_api()
+    def test_fetch_ais_stream_returns_none_without_api_key(self) -> None:
+        connector = ShippingConnector(
+            source_mode="api", config={"api": {"key": None}}
+        )
+        assert asyncio.run(connector._fetch_ais_stream()) is None
+
+    def test_fetch_ais_stream_returns_none_without_bounding_box(self) -> None:
+        connector = ShippingConnector(
+            source_mode="api",
+            config={"api": {"key": "test-key", "bounding_box": None}},
+        )
+        assert asyncio.run(connector._fetch_ais_stream()) is None
+
+    def test_fetch_ais_stream_returns_none_without_endpoint(self) -> None:
+        connector = ShippingConnector(
+            source_mode="api",
+            config={
+                "api": {
+                    "key": "test-key",
+                    "endpoint": None,
+                    "bounding_box": {
+                        "lat_min": 28.95,
+                        "lat_max": 29.20,
+                        "lon_min": 48.05,
+                        "lon_max": 48.25,
+                    },
+                }
+            },
+        )
+        assert asyncio.run(connector._fetch_ais_stream()) is None
+
+    @pytest.mark.skipif(
+        not _CSV_PATH.exists(),
+        reason=f"Shuaiba arrivals CSV not present at {_CSV_PATH}",
+    )
+    def test_fetch_from_api_falls_back_to_csv_without_key(self) -> None:
+        connector = ShippingConnector(
+            source_mode="api",
+            config={"csv_path": str(_CSV_PATH), "api": {"key": None}},
+        )
+        result = connector.fetch()
+        assert not result.empty
+        assert "vessel_count" in result.columns
+
+    @pytest.mark.skipif(
+        not _CSV_PATH.exists(),
+        reason=f"Shuaiba arrivals CSV not present at {_CSV_PATH}",
+    )
+    def test_fetch_from_api_falls_back_to_csv_on_connection_error(self) -> None:
+        connector = ShippingConnector(
+            source_mode="api",
+            config={
+                "csv_path": str(_CSV_PATH),
+                "api": {
+                    "key": "test-key",
+                    "endpoint": "wss://stream.aisstream.io/v0/stream",
+                    "bounding_box": {
+                        "lat_min": 28.95,
+                        "lat_max": 29.20,
+                        "lon_min": 48.05,
+                        "lon_max": 48.25,
+                    },
+                },
+            },
+        )
+        with patch.object(
+            connector, "_fetch_ais_stream", side_effect=OSError("connection refused")
+        ):
+            result = connector.fetch()
+        assert not result.empty
+
+    def test_aggregate_ais_to_daily_metrics_schema(self) -> None:
+        connector = ShippingConnector(source_mode="synthetic", config={})
+        positions = [
+            {"mmsi": 1, "sog": 12.0, "timestamp": datetime.now(timezone.utc)},
+            {"mmsi": 2, "sog": 3.0, "timestamp": datetime.now(timezone.utc)},
+            {"mmsi": 2, "sog": 4.0, "timestamp": datetime.now(timezone.utc)},
+        ]
+        result = connector._aggregate_ais_to_daily_metrics(positions)
+
+        assert len(result) == 1
+        assert result.loc[0, "vessel_count"] == 2  # 2 unique MMSIs
+        assert 0.0 <= result.loc[0, "congestion_index"] <= 1.0
+        assert result.loc[0, "avg_delay_hours"] >= 0.0
+
+    def test_aggregate_ais_output_is_tz_naive_for_merge_compat(self) -> None:
+        # Orchestrator.ingest() merges shipping onto market on 'timestamp';
+        # market's CSV-derived column is tz-naive, so a tz-aware column here
+        # would raise ValueError at merge time (caught in prior review).
+        connector = ShippingConnector(source_mode="synthetic", config={})
+        positions = [{"mmsi": 1, "sog": 8.0, "timestamp": datetime.now(timezone.utc)}]
+        result = connector._aggregate_ais_to_daily_metrics(positions)
+        assert not isinstance(result["timestamp"].dtype, pd.DatetimeTZDtype)
+
+    def test_aggregate_ais_output_passes_validate(self) -> None:
+        connector = ShippingConnector(source_mode="synthetic", config={})
+        positions = [
+            {"mmsi": 1, "sog": 12.0, "timestamp": datetime.now(timezone.utc)},
+            {"mmsi": 2, "sog": 6.0, "timestamp": datetime.now(timezone.utc)},
+        ]
+        result = connector._aggregate_ais_to_daily_metrics(positions)
+        validated = connector.validate(result)
+        assert len(validated) == 1
 
 
 # ---------------------------------------------------------------------------

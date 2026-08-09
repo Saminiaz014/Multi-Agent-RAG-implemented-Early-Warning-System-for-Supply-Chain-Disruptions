@@ -18,15 +18,20 @@ agents can consume regardless of which mode produced the data.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import websockets
 from scipy import stats
 
+from src.extractors.base_extractor import resolve_env_value
 from src.ingestion.base_connector import BaseConnector
 
 logger = logging.getLogger(__name__)
@@ -127,6 +132,16 @@ _MIN_RUN_LENGTH: int = 3
 # label robust against rolling-window edge effects.
 _KNOWN_SHUTDOWN_START: pd.Timestamp = pd.Timestamp("2026-04-01")
 _KNOWN_SHUTDOWN_END: pd.Timestamp = pd.Timestamp("2026-05-31")
+
+# ---------------------------------------------------------------------------
+# API-mode (live aisstream.io) constants.
+# ---------------------------------------------------------------------------
+
+_AIS_COLLECTION_SECONDS: float = 30.0
+_AIS_MAX_RECORDS: int = 5000
+# Typical transit speed (knots) at Shuaiba/Hormuz approach; vessels moving
+# slower than this are treated as delayed/congested.
+_AIS_BASELINE_SPEED_KNOTS: float = 10.0
 
 
 class ShippingConnector(BaseConnector):
@@ -387,25 +402,190 @@ class ShippingConnector(BaseConnector):
         return self.generate_synthetic(days=days, seed=seed)
 
     def fetch_from_api(self) -> pd.DataFrame:
-        """Planned live-AIS integration via the aisstream.io WebSocket API.
+        """Live-AIS integration via the aisstream.io WebSocket API.
 
-        Planned implementation:
-            * Connect to the aisstream.io WebSocket using ``self.api_key``.
-            * Subscribe to vessel position messages filtered by
-              ``self.api_bounding_box`` (Shuaiba port bounding box from config).
-            * Aggregate raw AIS positions into daily vessel counts by type
-              (Container / Dry Bulk / General Cargo / Roll-on/roll-off /
-              Tanker) to match the CSV schema emitted by
-              :meth:`load_from_csv`.
+        Connects to aisstream.io, listens for ``PositionReport`` messages
+        within ``self.api_bounding_box`` for ``_AIS_COLLECTION_SECONDS``,
+        and aggregates them into a single current-day row matching the
+        ``timestamp``/``vessel_count``/``avg_delay_hours``/
+        ``congestion_index`` schema :meth:`load_from_csv` emits (minus
+        ``is_disruption`` — AIS carries no ground-truth label, and callers
+        already handle that column being absent).
 
-        Raises:
-            NotImplementedError: Always — API mode is not yet wired up.
+        Unlike :meth:`load_from_csv`, this is a live snapshot, not a
+        historical backfill — a fetch returns at most one row (today).
+
+        Any failure — missing ``AISSTREAM_API_KEY``, no configured
+        bounding box, connection error, or an empty stream — falls back to
+        :meth:`load_from_csv`, the evidence-grade dataset used elsewhere in
+        the thesis, so a live-mode failure never breaks the pipeline.
+
+        Note:
+            Uses ``asyncio.run`` internally. Do not call this (directly or
+            via :meth:`fetch`) from code already running inside an event
+            loop — e.g. the ``async def`` FastAPI handlers in
+            :mod:`src.api.endpoints` call ``Orchestrator.run_full_pipeline``
+            synchronously without offloading to a thread, so a
+            ``source_mode="api"`` shipping connector reached from there
+            would raise ``RuntimeError``. Keep ``source_mode="csv"`` for any
+            code path reachable from the API.
+
+        Returns:
+            Validated single-row (or CSV fallback multi-row) DataFrame.
         """
-        raise NotImplementedError(
-            "API mode not yet implemented. Planned: aisstream.io WebSocket "
-            "for live AIS data. "
-            "Set source_mode='csv' or 'synthetic' in config/settings.yaml."
+        try:
+            df = asyncio.run(self._fetch_ais_stream())
+        except Exception as exc:
+            logger.warning(
+                "[ShippingConnector] AIS stream failed (%s); falling back to CSV.",
+                exc,
+            )
+            return self.load_from_csv()
+
+        if df is None or df.empty:
+            logger.warning(
+                "[ShippingConnector] AIS stream returned no data; falling back to CSV."
+            )
+            return self.load_from_csv()
+
+        logger.info(
+            "[ShippingConnector] AIS fetch successful: %d daily record(s).", len(df)
         )
+        return df
+
+    async def _fetch_ais_stream(
+        self,
+        collection_seconds: float = _AIS_COLLECTION_SECONDS,
+        max_records: int = _AIS_MAX_RECORDS,
+    ) -> pd.DataFrame | None:
+        """Connect to aisstream.io and collect ``PositionReport`` messages.
+
+        Args:
+            collection_seconds: How long to listen before aggregating.
+            max_records: Stop collecting early once this many position
+                reports have arrived.
+
+        Returns:
+            Daily-aggregated DataFrame, or ``None`` when the key/bounding
+            box/endpoint are not configured or no positions were received.
+        """
+        api_key = resolve_env_value(self.api_key)
+        if not api_key:
+            logger.warning(
+                "[ShippingConnector] AISSTREAM_API_KEY not set — cannot use API mode."
+            )
+            return None
+        if not self.api_bounding_box:
+            logger.warning(
+                "[ShippingConnector] No ingestion.shipping.api.bounding_box configured."
+            )
+            return None
+        if not self.api_endpoint:
+            logger.warning(
+                "[ShippingConnector] No ingestion.shipping.api.endpoint configured."
+            )
+            return None
+
+        bbox = self.api_bounding_box
+        subscribe_msg = {
+            "APIKey": api_key,
+            "BoundingBoxes": [
+                [
+                    [bbox["lat_min"], bbox["lon_min"]],
+                    [bbox["lat_max"], bbox["lon_max"]],
+                ]
+            ],
+            "FilterMessageTypes": ["PositionReport"],
+        }
+
+        vessel_positions: list[dict[str, Any]] = []
+
+        async with websockets.connect(self.api_endpoint, ping_interval=None) as ws:
+            await ws.send(json.dumps(subscribe_msg))
+            logger.info(
+                "[ShippingConnector] Subscribed to AIS stream for %s.", self.LOCATION
+            )
+
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + collection_seconds
+            while loop.time() < deadline and len(vessel_positions) < max_records:
+                remaining = deadline - loop.time()
+                try:
+                    msg = await asyncio.wait_for(ws.recv(), timeout=max(remaining, 0.1))
+                except asyncio.TimeoutError:
+                    break
+                try:
+                    data = json.loads(msg)
+                except json.JSONDecodeError:
+                    continue
+                report = (data.get("Message") or {}).get("PositionReport")
+                if report is None:
+                    continue
+                vessel_positions.append(
+                    {
+                        "mmsi": report.get("MMSI"),
+                        "sog": report.get("SpeedOverGround", 0.0),
+                        "timestamp": datetime.now(timezone.utc),
+                    }
+                )
+
+        logger.info(
+            "[ShippingConnector] Collected %d AIS position report(s).",
+            len(vessel_positions),
+        )
+        if not vessel_positions:
+            return None
+        return self._aggregate_ais_to_daily_metrics(vessel_positions)
+
+    def _aggregate_ais_to_daily_metrics(
+        self, vessel_positions: list[dict[str, Any]]
+    ) -> pd.DataFrame:
+        """Convert raw AIS position reports into daily shipping metrics.
+
+        Args:
+            vessel_positions: List of dicts with ``mmsi``, ``sog``
+                (speed-over-ground, knots), and ``timestamp``.
+
+        Returns:
+            DataFrame with columns ``timestamp``, ``vessel_count``,
+            ``avg_delay_hours``, ``congestion_index`` — one row per
+            calendar date present in ``vessel_positions``.
+        """
+        df_pos = pd.DataFrame(vessel_positions)
+        df_pos["timestamp"] = pd.to_datetime(df_pos["timestamp"])
+        df_pos["date"] = df_pos["timestamp"].dt.date
+
+        daily_metrics = []
+        for date, group in df_pos.groupby("date"):
+            unique_vessels = group["mmsi"].nunique()
+            sog_values = group["sog"].fillna(_AIS_BASELINE_SPEED_KNOTS)
+            avg_sog = sog_values.mean()
+
+            congestion_idx = (
+                (sog_values < _AIS_BASELINE_SPEED_KNOTS).sum() / len(group)
+                if len(group) > 0
+                else 0.0
+            )
+            delay_hours = (
+                max(0.0, (1 - avg_sog / _AIS_BASELINE_SPEED_KNOTS) * 24)
+                if avg_sog > 0
+                else 0.0
+            )
+
+            daily_metrics.append(
+                {
+                    # Tz-naive to match the CSV/synthetic modes' 'timestamp'
+                    # dtype — Orchestrator.ingest() merges shipping and
+                    # market frames on this column and a naive/aware dtype
+                    # mismatch raises ValueError at merge time.
+                    "timestamp": datetime.combine(date, datetime.min.time()),
+                    "vessel_count": unique_vessels,
+                    "avg_delay_hours": delay_hours,
+                    "congestion_index": congestion_idx,
+                }
+            )
+
+        return pd.DataFrame(daily_metrics).sort_values("timestamp").reset_index(drop=True)
 
     # Synthetic-schema CSV columns produced by generate_synthetic / save_raw.
     _SYNTHETIC_SCHEMA: tuple[str, ...] = (
