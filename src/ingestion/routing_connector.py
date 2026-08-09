@@ -5,6 +5,16 @@ operators steer ships around the Strait of Hormuz, the system sees it
 in this dataset before port-side congestion bites. The synthetic mode
 *leads* the shipping disruption windows by ``lead_days`` (default 2)
 so detection harnesses can verify the agent flags early.
+
+The ``_SCENARIOS`` ranges below are real-world-informed but not literal
+measurements — see ``data/routing_research/hormuz_rerouting_patterns.json``
+for the documented precedent (2019 tanker attacks; the 2026-02-28+ Hormuz
+closure, which is also this repo's ``_KNOWN_SHUTDOWN_START``/``_END`` ground
+truth in ``shipping_connector.py``) and an honest per-scenario fit assessment.
+Hormuz has no viable sea alternate route into the Persian Gulf, so
+``avg_route_deviation_km`` has no clean real-world analog here the way it
+would for Suez/Bab el-Mandeb — treat it as a modeled proxy, not a measured
+quantity. The ranges themselves were not changed by that research pass.
 """
 
 from __future__ import annotations

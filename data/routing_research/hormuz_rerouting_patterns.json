@@ -1,0 +1,63 @@
+{
+  "_meta": {
+    "purpose": "Real-world precedent grounding the rerouting/holding/deviation ranges used in RoutingConnector._SCENARIOS (src/ingestion/routing_connector.py) for the Strait of Hormuz — the only chokepoint this thesis covers. Documentation only; does not change the connector's numeric constants (see routing_connector.py's module docstring for the traceability note).",
+    "scope": "Hormuz only. No other chokepoint is modeled by this codebase.",
+    "key_finding": "Unlike Suez or Bab el-Mandeb, Hormuz has no viable sea detour into the Persian Gulf — a vessel bound for a Gulf port cannot 'reroute' around Hormuz and still reach the same destination. Documented 2026 vessel behavior was overwhelmingly holding/loitering (matches the existing 'vessels_holding' column) rather than taking a longer alternate path. 'avg_route_deviation_km' therefore has no clean literal analog for Hormuz; where used below it is an explicitly-labeled proxy (the opportunity-cost-equivalent Cape of Good Hope detour distance felt by adjacent Suez/Red Sea trade lanes during the same crisis), not a measured Hormuz vessel-path deviation.",
+    "compiled": "2026-08-09",
+    "labeling": "Each pattern below is marked 'documented' (traceable to a cited source) or 'extrapolated' (interpolated/reasoned from documented patterns, not itself independently sourced). Do not present 'extrapolated' entries as measured fact."
+  },
+  "precedent_events": {
+    "2019_tanker_attacks": {
+      "label": "documented",
+      "window": "2019-05 to 2019-06",
+      "summary": "Six incidents blamed on Iran near the Strait of Hormuz activated the Joint War Committee's 'listed areas' mechanism (Lloyd's of London / IUA). No closure occurred; vessels continued transiting under increased naval escort (Operation Sentinel / IMSC).",
+      "quantified": {
+        "war_risk_premium_per_voyage_supertanker_usd": {"before": 50000, "after": 185000, "multiplier": 3.7},
+        "vlcc_spot_rate_multiplier": "3-4x",
+        "hull_value_surcharge_pct": "0.2-0.5% (~$200k-$500k for large vessels)",
+        "physical_rerouting": "minimal to none — cost/risk stress, not path deviation; Hormuz has no sea alternate"
+      },
+      "sources": [
+        "https://www.insurancejournal.com/news/international/2019/06/17/529537.htm"
+      ]
+    },
+    "2026_hormuz_closure": {
+      "label": "documented",
+      "window": "2026-02-28 onset; near-total closure by 2026-05-06; matches this repo's _KNOWN_SHUTDOWN_START/_KNOWN_SHUTDOWN_END (2026-04-01 to 2026-05-31) in shipping_connector.py almost exactly — this is the thesis's own primary ground-truth disruption case, not an external analogy.",
+      "summary": "Iran closed the strait to normal commercial traffic following Feb 28, 2026 US/Israeli strikes; mined parts of the waterway; later imposed preapproved-route transit control with tolls exceeding $1M/vessel. Vessel response was dominated by holding/loitering on both sides of the strait, not rerouting.",
+      "quantified": {
+        "vessels_stranded_or_loitering": "1,000-2,000 (source estimates vary by methodology/timeframe)",
+        "loitering_onset": "2026-03-01",
+        "open_transits": "fell to near-zero by 2026-05-06",
+        "global_container_teu_capacity_affected_pct": 10.7,
+        "teu_trapped_in_gulf": 470000,
+        "toll_per_vessel_usd": ">1,000,000",
+        "adjacent_lane_reroute_note": "Cape of Good Hope reroutes by carriers (Maersk, MSC, CMA CGM, Hapag-Lloyd) added 10-14 days / ~3,500-4,000 nm (~6,500-7,400 km) per voyage — this describes Suez/Red Sea-transiting Asia-Europe/Asia-US lanes responding to the simultaneous Red Sea/Houthi resumption, not Hormuz-bound Persian Gulf traffic specifically, which had no equivalent detour available."
+      },
+      "sources": [
+        "https://www.cnn.com/2026/04/29/world/iran-war-gulf-hormuz-shipping-maps-intl-vis",
+        "https://www.aljazeera.com/features/2026/4/28/when-will-strait-of-hormuz-be-safe-for-commercial-shipping-again",
+        "https://news.un.org/en/story/2026/07/1168004",
+        "https://www.seavantage.com/blog/strait-of-hormuz-crisis-2026-shipping-disruption-timeline"
+      ]
+    }
+  },
+  "mapping_to_existing_scenarios": {
+    "note": "src/ingestion/routing_connector.py's _SCENARIOS tuple was not changed by this research pass (user decision 2026-08-09: document precedent, don't retune — retuning would require re-running the Optuna weight optimizer against the new synthetic distribution, out of scope here). This section records how well each existing scenario's ranges track the documented precedent, for whoever revisits this later.",
+    "brief_incident": {
+      "label": "extrapolated",
+      "existing_ranges": {"rerouting_pct": [8, 15], "deviation_km": [800, 2000], "transit_ratio": [0.85, 0.90]},
+      "fit": "Reasonable order-of-magnitude fit for an isolated single-incident news cycle within the 2019-style pattern (elevated caution, no closure). The 2019 precedent itself shows no physical rerouting, so the deviation_km figure here is not independently documented — treat as a plausible interpolation, not a measured value."
+    },
+    "moderate_tension": {
+      "label": "extrapolated",
+      "existing_ranges": {"rerouting_pct": [15, 25], "deviation_km": [2000, 4000], "transit_ratio": [0.70, 0.80]},
+      "fit": "No single documented event cleanly matches a sustained-but-partial disruption at Hormuz specifically — 2019 stayed at 'no closure, cost stress only' and 2026 escalated to 'near-total closure'. This tier is best understood as an interpolation between those two documented endpoints, not itself sourced to a specific event."
+    },
+    "major_blockage": {
+      "label": "documented (directionally), extrapolated (precisely)",
+      "existing_ranges": {"rerouting_pct": [50, 70], "deviation_km": [5000, 8000], "transit_ratio": [0.30, 0.50], "vessels_holding": [15, 30]},
+      "fit": "Directionally grounded in the real 2026-02-28 to 2026-05+ closure — the 'severe, holding-dominant' character is real and matches this thesis's own pinned shutdown window. However the real event was more severe on transit volume than this range assumes (near-zero open transits by 2026-05-06, vs. 30-50% retained here), and 'rerouting_pct'/'deviation_km' as literal path-deviation figures don't have a clean Hormuz analog per the key_finding above — the vessels_holding column is the more faithful proxy for what was actually documented."
+    }
+  }
+}
