@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from src.benchmark.regions import load_region
+import pytest
+
+from src.benchmark.regions import (
+    CANONICAL_REGIONS,
+    REGION_ALIASES,
+    REGION_STATUS,
+    load_region,
+    resolve_region_key,
+)
 from src.benchmark.scenario_generator import load_scenario, materialize_scenario
 
 
@@ -48,3 +56,53 @@ def test_scenario_split() -> None:
     df = materialize_scenario(spec, region)
     train, val, test = df[0:201], df[201:281], df[281:365]
     assert len(train) == 201 and len(val) == 80 and len(test) == 84
+
+
+def test_resolve_region_key_canonical_hit() -> None:
+    assert resolve_region_key("hormuz") == "hormuz"
+    assert resolve_region_key("malacca") == "malacca"
+
+
+def test_resolve_region_key_alias_hit() -> None:
+    """red_sea (the pre-existing settings.yaml/extraction.chokepoints key)
+    resolves to the canonical bab_el_mandeb key."""
+    assert resolve_region_key("red_sea") == "bab_el_mandeb"
+
+
+def test_resolve_region_key_display_name_hit() -> None:
+    assert resolve_region_key("Strait of Hormuz") == "hormuz"
+    assert resolve_region_key("Bab el-Mandeb") == "bab_el_mandeb"
+
+
+def test_resolve_region_key_case_insensitive() -> None:
+    assert resolve_region_key("HORMUZ") == "hormuz"
+    assert resolve_region_key("Red_Sea") == "bab_el_mandeb"
+
+
+def test_resolve_region_key_malacca_is_canonical() -> None:
+    """malacca is a full canonical key, not an alias — it already agrees
+    with extraction.chokepoints, so no aliasing is needed."""
+    assert "malacca" in CANONICAL_REGIONS
+    assert "malacca" not in REGION_ALIASES
+    assert resolve_region_key("malacca") == "malacca"
+
+
+def test_resolve_region_key_unknown_raises_with_options() -> None:
+    with pytest.raises(ValueError, match="Unknown region"):
+        resolve_region_key("nonexistent_region")
+
+
+def test_resolve_region_key_taiwan_strait_not_supported() -> None:
+    """taiwan_strait is explicitly out of scope for this project (per an
+    earlier external plan this codebase never implemented) and must raise."""
+    with pytest.raises(ValueError):
+        resolve_region_key("taiwan_strait")
+
+
+def test_canonical_regions_status() -> None:
+    """Only hormuz is populated; the other four canonical keys are declared
+    but not pretending to have data."""
+    assert REGION_STATUS["hormuz"] == "populated"
+    for key in ("bab_el_mandeb", "panama", "suez", "malacca"):
+        assert REGION_STATUS[key] == "planned"
+    assert set(REGION_STATUS) == set(CANONICAL_REGIONS)

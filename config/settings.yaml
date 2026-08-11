@@ -31,6 +31,40 @@ optimization:
     thresholds: true             # Layer 3: risk thresholds, agreement multipliers
     detection_params: false      # IF contamination, z-thresholds (optional, expensive)
 
+# Canonical region vocabulary for data-source configuration. Region keys,
+# display names, and populated/planned status are the single-source-of-truth
+# CANONICAL_REGIONS / REGION_STATUS dicts in src/benchmark/regions.py — this
+# block only carries the per-region data-source hook, so a new region gets
+# real data attached later as configuration (mode/csv/api), not a code
+# change. Hormuz's existing per-domain ingestion config below (csv_path for
+# shipping/market, etc.) is untouched; this mirrors its primary real source.
+regions:
+  hormuz:
+    data_sources:
+      mode: csv        # synthetic | csv | api
+      csv: "data/raw/shuaiba_arrivals.csv"
+      api: null
+  bab_el_mandeb:
+    data_sources:
+      mode: synthetic
+      csv: null
+      api: null
+  panama:
+    data_sources:
+      mode: synthetic
+      csv: null
+      api: null
+  suez:
+    data_sources:
+      mode: synthetic
+      csv: null
+      api: null
+  malacca:
+    data_sources:
+      mode: synthetic
+      csv: null
+      api: null
+
 ingestion:
   shipping:
     # Source for vessel-arrival signals. One of: "csv", "synthetic", "api".

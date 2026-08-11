@@ -31,6 +31,82 @@ KNOWN_DOMAINS: tuple[str, ...] = (
     "disaster",
 )
 
+# ---------------------------------------------------------------------------
+# Canonical region vocabulary
+#
+# Before this, three parts of the codebase each maintained their own,
+# unreconciled region vocabulary: this module (hormuz only), the dashboard's
+# AVAILABLE_REGIONS (hormuz only, a literal), and config/settings.yaml's
+# extraction.chokepoints (hormuz/red_sea/malacca/suez, for RAG backfill only).
+# CANONICAL_REGIONS below is the single source of truth every subsystem
+# should read from going forward — see docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md
+# and STATE_OF_PROJECT_MULTIREGION.md for the full audit.
+# ---------------------------------------------------------------------------
+
+#: Canonical region key -> display name, in priority order.
+CANONICAL_REGIONS: dict[str, str] = {
+    "hormuz": "Strait of Hormuz",
+    "bab_el_mandeb": "Bab el-Mandeb",
+    "panama": "Panama Canal",
+    "suez": "Suez Canal",
+    "malacca": "Strait of Malacca",
+}
+
+#: Data-readiness per canonical region key. ``"populated"`` = real
+#: scenario/benchmark coverage exists today (only ``hormuz``).
+#: ``"planned"`` = the key is reserved in the canonical vocabulary but has
+#: no data behind it yet — declaring a region here does not claim it has data.
+REGION_STATUS: dict[str, str] = {
+    "hormuz": "populated",
+    "bab_el_mandeb": "planned",
+    "panama": "planned",
+    "suez": "planned",
+    "malacca": "planned",
+}
+
+#: Alternate spellings that resolve to a canonical key. ``red_sea`` is the
+#: key config/settings.yaml's extraction.chokepoints and monitoring_points
+#: blocks already use (pre-existing RAG/live-monitoring config) — aliased
+#: here rather than renamed there, since renaming would invalidate the
+#: existing 553-document knowledge base keyed on ``red_sea``.
+REGION_ALIASES: dict[str, str] = {
+    "red_sea": "bab_el_mandeb",
+}
+
+
+def resolve_region_key(value: str) -> str:
+    """Resolve a canonical key, alias, or display name to its canonical key.
+
+    Matching is case-insensitive and accepts any of: a canonical key
+    (``"hormuz"``), an alias (``"red_sea"``), or a display name
+    (``"Strait of Hormuz"``).
+
+    Args:
+        value: The region reference to resolve.
+
+    Returns:
+        The canonical region key (always one of :data:`CANONICAL_REGIONS`'s
+        keys).
+
+    Raises:
+        ValueError: If ``value`` doesn't match any canonical key, alias, or
+            display name. Lists every valid option.
+    """
+    text = str(value or "").strip()
+    lowered = text.lower()
+
+    if lowered in CANONICAL_REGIONS:
+        return lowered
+    if lowered in REGION_ALIASES:
+        return REGION_ALIASES[lowered]
+    for key, display_name in CANONICAL_REGIONS.items():
+        if display_name.lower() == lowered:
+            return key
+
+    valid = sorted(set(CANONICAL_REGIONS) | set(REGION_ALIASES) |
+                   {d for d in CANONICAL_REGIONS.values()})
+    raise ValueError(f"Unknown region {value!r}. Valid options: {valid}.")
+
 
 @dataclass
 class Region:

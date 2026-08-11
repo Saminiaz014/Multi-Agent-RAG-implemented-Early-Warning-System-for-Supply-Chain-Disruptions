@@ -50,6 +50,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from src.benchmark.regions import CANONICAL_REGIONS, REGION_STATUS  # noqa: E402
 from src.evaluation.decision_effectiveness import (  # noqa: E402
     ACTIONS,
     load_decision_labels,
@@ -130,11 +131,18 @@ SCENARIOS = {
 _TOTAL_DAYS = 365
 RANGE_PRESETS = ["Last 30 days", "Last 90 days", "Last 6 months", "Last year", "Custom range"]
 
-#: Region control: only Hormuz is populated for the thesis, but every fetch
-#: function below accepts an arbitrary region key so post-thesis chokepoints
-#: (red_sea / malacca / suez, already configured in settings.yaml) plug in
-#: without touching the UI code.
-AVAILABLE_REGIONS: dict[str, str] = {"Strait of Hormuz": "hormuz"}
+#: Region control: derived from the canonical registry
+#: (src/benchmark/regions.py), filtered to regions with real data
+#: (``status == "populated"``). Only Hormuz qualifies today, so this
+#: evaluates to exactly ``{"Strait of Hormuz": "hormuz"}`` — but every fetch
+#: function below accepts an arbitrary region key, so flipping a region's
+#: status to "populated" in the registry is all a future chokepoint needs to
+#: appear here, without touching this module.
+AVAILABLE_REGIONS: dict[str, str] = {
+    display_name: key
+    for key, display_name in CANONICAL_REGIONS.items()
+    if REGION_STATUS.get(key) == "populated"
+}
 
 #: Monitored routes per chokepoint. Coordinates are schematic corridor
 #: polylines for visualisation (lng, lat) — not official IMO TSS geometry.
