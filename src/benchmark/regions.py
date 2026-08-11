@@ -116,8 +116,10 @@ class Region:
         name: Region key (matches the YAML filename and top-level key).
         center_lat: Latitude of the chokepoint's geographic center.
         center_lng: Longitude of the chokepoint's geographic center.
-        baseline_transits_per_day: ``[min, max]`` (or a single value) daily
-            vessel-transit range under normal conditions.
+        baseline_transits_per_day: ``[min, max]`` daily vessel-transit range
+            under normal conditions, or a single number — normalized
+            internally to a one-element list. Any other type raises
+            ``ValueError`` at load time (see :func:`load_region`).
         active_domains: Subset of :data:`KNOWN_DOMAINS` this region's
             scenarios are allowed to drive. Domains outside this list are
             *disabled* — materialized scenarios never populate them.
@@ -178,11 +180,26 @@ def load_region(name: str) -> Region:
 
     center = spec.get("center", {}) or {}
     try:
+        raw_transits = spec["baseline_transits_per_day"]
+        if isinstance(raw_transits, (list, tuple)):
+            baseline_transits_per_day = list(raw_transits)
+        elif isinstance(raw_transits, (int, float)) and not isinstance(raw_transits, bool):
+            # A single number is accepted and normalized to a one-element
+            # list, per the Region docstring's "(or a single value)" note —
+            # this used to crash with an uncaught TypeError instead.
+            baseline_transits_per_day = [raw_transits]
+        else:
+            raise ValueError(
+                f"Region '{name}' baseline_transits_per_day must be a "
+                f"[min, max] list or a single number; got {raw_transits!r} "
+                f"({type(raw_transits).__name__})."
+            )
+
         return Region(
             name=name,
             center_lat=float(center["lat"]),
             center_lng=float(center["lng"]),
-            baseline_transits_per_day=list(spec["baseline_transits_per_day"]),
+            baseline_transits_per_day=baseline_transits_per_day,
             active_domains=active_domains,
             reroutable=bool(spec["reroutable"]),
             loss_scaling=str(spec["loss_scaling"]),

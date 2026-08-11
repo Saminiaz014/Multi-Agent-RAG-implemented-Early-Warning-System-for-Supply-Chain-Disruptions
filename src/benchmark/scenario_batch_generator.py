@@ -17,7 +17,11 @@ import numpy as np
 import pandas as pd
 
 from src.benchmark.regions import Region, load_region
-from src.benchmark.scenario_generator import load_scenario, materialize_scenario
+from src.benchmark.scenario_generator import (
+    BAND_TO_INT as _BAND_TO_INT,
+    load_scenario,
+    materialize_scenario,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,18 +47,13 @@ class ScenarioBatchGenerator:
         5. Write the result to parquet.
     """
 
-    # R1 only ever emits "quiet" (default/negative) or the scenario's
-    # configured peak_band ("critical" / "high" in the current Hormuz
-    # specs). "low"/"medium"/"none" are accepted too so this map stays
-    # correct if a future scenario spec introduces them.
-    BAND_TO_INT: dict[str, int] = {
-        "quiet": 0,
-        "none": 0,
-        "low": 0,
-        "medium": 1,
-        "high": 2,
-        "critical": 3,
-    }
+    # Re-exported from scenario_generator.py, the single source of truth —
+    # load_scenario() now validates event.peak_band against this same dict
+    # at load time (docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 fix
+    # 3), so an unrecognized band can no longer reach this mapping at all.
+    # Kept as a class attribute here for backward compatibility with any
+    # caller doing ScenarioBatchGenerator.BAND_TO_INT.
+    BAND_TO_INT: dict[str, int] = _BAND_TO_INT
 
     def __init__(self, output_dir: str | Path):
         self.output_dir = Path(output_dir)

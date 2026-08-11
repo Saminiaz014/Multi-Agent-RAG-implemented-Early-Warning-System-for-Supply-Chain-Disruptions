@@ -1,4 +1,4 @@
-"""Run Tier 1 statistical/SPC baselines on the Hormuz 4x5 benchmark grid.
+"""Run Tier 1 statistical/SPC baselines on a region's 4x5 benchmark grid.
 
 Uses the same pre-declared train(0-200)/val(201-280)/test(281-364)
 protocol as ``scripts/run_tier0_baselines.py`` so Tier 0 and Tier 1
@@ -6,11 +6,18 @@ results are directly comparable.
 
 Run from project root::
 
-    python scripts/run_tier1_baselines.py
+    python scripts/run_tier1_baselines.py [--region REGION]
+
+``--region`` defaults to ``hormuz`` (backward-compatible with every prior
+invocation of this script). It filters ``scenarios_generated/`` to only that
+region's parquet files, so adding a second region's data never silently
+mixes regions into a run — see docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md
+§6 gap 15.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import sys
@@ -29,6 +36,7 @@ from src.baselines.tier1_statistical import (  # noqa: E402
     SARIMABaseline,
     ZScoreBaseline,
 )
+from src.benchmark.regions import resolve_region_key  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,8 +53,17 @@ _VAL_WINDOW = (201, 281)   # [start, end) — 80 days
 _TEST_WINDOW = (281, 365)  # [start, end) — 84 days
 
 
-def run_tier1_baselines() -> None:
-    """Run all Tier 1 baselines on every Hormuz 4x5 scenario parquet."""
+def run_tier1_baselines(region: str = "hormuz") -> None:
+    """Run all Tier 1 baselines on every ``region`` scenario parquet.
+
+    Args:
+        region: Canonical region key, alias, or display name (see
+            :func:`src.benchmark.regions.resolve_region_key`). Defaults to
+            ``"hormuz"`` — every prior call site (no argument) reproduces
+            identical behavior, since every parquet file in
+            ``scenarios_generated/`` today is Hormuz's.
+    """
+    region = resolve_region_key(region)
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     baselines = [
@@ -56,12 +73,16 @@ def run_tier1_baselines() -> None:
         SARIMABaseline(),
         PersistenceBaseline(),
     ]
-    parquet_files = sorted(_SCENARIOS_DIR.glob("*.parquet"))
+    parquet_files = sorted(
+        p for p in _SCENARIOS_DIR.glob("*.parquet")
+        if p.stem.rpartition("_seed_")[0].startswith(f"{region}_")
+    )
     if not parquet_files:
         logger.warning(
-            "No scenario parquet files found in %s — run "
-            "scripts/generate_hormuz_benchmark.py first.",
-            _SCENARIOS_DIR,
+            "No scenario parquet files found for region %r in %s — run "
+            "scripts/generate_hormuz_benchmark.py first (or generate that "
+            "region's benchmark grid).",
+            region, _SCENARIOS_DIR,
         )
         return
 
@@ -90,11 +111,13 @@ def run_tier1_baselines() -> None:
                 metadata["threshold"] = threshold
                 metadata["val_window"] = list(_VAL_WINDOW)
                 metadata["test_window"] = list(_TEST_WINDOW)
+                metadata["region"] = region
 
                 result = {
                     "scenario_id": scenario_id,
                     "baseline_name": baseline.name,
                     "seed": seed,
+                    "region": region,
                     "metrics": metrics,
                     "metadata": metadata,
                 }
@@ -115,9 +138,23 @@ def run_tier1_baselines() -> None:
                 )
 
     logger.info("=" * 60)
-    logger.info("Wrote %d result files to %s", written, _RESULTS_DIR)
+    logger.info("region=%s | Wrote %d result files to %s", region, written, _RESULTS_DIR)
     logger.info("=" * 60)
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Tier 1 statistical/SPC baselines on a region's benchmark grid.",
+    )
+    parser.add_argument(
+        "--region",
+        default="hormuz",
+        help="Region key, alias, or display name to evaluate (default: hormuz). "
+        "Only scenario parquet files for this region are read, so runs never "
+        "silently mix regions.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    run_tier1_baselines()
+    run_tier1_baselines(_parse_args().region)

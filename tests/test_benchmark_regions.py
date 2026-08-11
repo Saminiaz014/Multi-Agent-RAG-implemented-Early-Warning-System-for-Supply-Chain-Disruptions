@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import copy
+
+import yaml
 import pytest
 
 from src.benchmark.regions import (
@@ -106,3 +109,108 @@ def test_canonical_regions_status() -> None:
     for key in ("bab_el_mandeb", "panama", "suez", "malacca"):
         assert REGION_STATUS[key] == "planned"
     assert set(REGION_STATUS) == set(CANONICAL_REGIONS)
+
+
+# ===========================================================================
+# Fix 3/4/6 (docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6): load-time
+# validation that converts previously-silent corruption into a loud
+# ValueError. Fix 5 (scalar baseline_transits_per_day) tests follow.
+# ===========================================================================
+
+_HORMUZ_P_CRIT_YAML = "config/benchmark/scenarios/hormuz_P_CRIT.yaml"
+
+
+def _write_scenario(tmp_path, overrides: dict) -> str:
+    """hormuz_P_CRIT.yaml with a shallow top-level override, written to a
+    temp file — e.g. _write_scenario(tmp_path, {"class": "P-CRT"})."""
+    base = yaml.safe_load(open(_HORMUZ_P_CRIT_YAML, encoding="utf-8"))
+    spec = copy.deepcopy(base)
+    spec.update(overrides)
+    path = tmp_path / "scenario.yaml"
+    path.write_text(yaml.safe_dump(spec), encoding="utf-8")
+    return str(path)
+
+
+def test_load_scenario_bad_peak_band_raises(tmp_path) -> None:
+    base = yaml.safe_load(open(_HORMUZ_P_CRIT_YAML, encoding="utf-8"))
+    bad_event = dict(base["event"])
+    bad_event["peak_band"] = "catastrophic"
+    path = _write_scenario(tmp_path, {"event": bad_event})
+    with pytest.raises(ValueError, match="peak_band"):
+        load_scenario(path)
+
+
+def test_load_scenario_unrecognized_class_raises(tmp_path) -> None:
+    path = _write_scenario(tmp_path, {"class": "P-CRT"})  # typo of P-CRIT
+    with pytest.raises(ValueError, match="class"):
+        load_scenario(path)
+
+
+def test_load_scenario_out_of_range_domain_raises(tmp_path) -> None:
+    """A raw percentage (45) landing in a bounded 0-1 domain (geopolitical)
+    must raise, not silently distort the signal ~100x — the exact incident
+    BENCHMARK_SCHEMA_REFERENCE.md §2/§6 was commissioned to prevent."""
+    base = yaml.safe_load(open(_HORMUZ_P_CRIT_YAML, encoding="utf-8"))
+    bad_signals = dict(base["signals"])
+    bad_signals["geopolitical"] = {"baseline": {"mean": 45, "std": 0.02}, "effect": None}
+    path = _write_scenario(tmp_path, {"signals": bad_signals})
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        load_scenario(path)
+
+
+def test_load_scenario_unbounded_domain_accepts_large_values(tmp_path) -> None:
+    """shipping/market are NOT range-checked to [0, 1] — only bounded
+    domains are. A large raw vessel count must still load fine."""
+    base = yaml.safe_load(open(_HORMUZ_P_CRIT_YAML, encoding="utf-8"))
+    signals = dict(base["signals"])
+    signals["shipping"] = {"baseline": {"mean": 500, "std": 20}, "effect": None}
+    path = _write_scenario(tmp_path, {"signals": signals})
+    spec = load_scenario(path)  # must not raise
+    assert spec.signals["shipping"]["baseline"]["mean"] == 500
+
+
+def test_load_scenario_event_null_raises_helpful_message(tmp_path) -> None:
+    path = _write_scenario(tmp_path, {"event": None})
+    with pytest.raises(ValueError, match="hormuz_N_QUIET"):
+        load_scenario(path)
+
+
+def test_load_region_scalar_baseline_transits(tmp_path, monkeypatch) -> None:
+    """A bare scalar baseline_transits_per_day is accepted and normalized
+    to a one-element list, matching the Region docstring (previously this
+    crashed with an uncaught TypeError)."""
+    monkeypatch.setattr("src.benchmark.regions._CONFIG_DIR", tmp_path)
+    (tmp_path / "scalartest.yaml").write_text(
+        yaml.safe_dump({
+            "scalartest": {
+                "center": {"lat": 1.0, "lng": 2.0},
+                "baseline_transits_per_day": 70,
+                "active_domains": [],
+                "reroutable": False,
+                "loss_scaling": "linear",
+                "disaster_relevance": "low",
+            }
+        }),
+        encoding="utf-8",
+    )
+    region = load_region("scalartest")
+    assert region.baseline_transits_per_day == [70]
+
+
+def test_load_region_bad_baseline_transits_type_raises(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("src.benchmark.regions._CONFIG_DIR", tmp_path)
+    (tmp_path / "badtest.yaml").write_text(
+        yaml.safe_dump({
+            "badtest": {
+                "center": {"lat": 1.0, "lng": 2.0},
+                "baseline_transits_per_day": "sixty to eighty",
+                "active_domains": [],
+                "reroutable": False,
+                "loss_scaling": "linear",
+                "disaster_relevance": "low",
+            }
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="baseline_transits_per_day"):
+        load_region("badtest")

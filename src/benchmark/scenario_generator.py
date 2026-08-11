@@ -10,6 +10,7 @@ another synthetic realisation, not a parallel data path.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,6 +31,40 @@ _REQUIRED_TOP_LEVEL = (
     "noise",
 )
 _REQUIRED_EVENT_KEYS = ("onset_day", "ramp_days", "duration_days", "peak_band")
+
+#: Peak-band label -> integer severity code (0=quiet/none/low, 1=medium,
+#: 2=high, 3=critical). The authoritative set of valid ``event.peak_band``
+#: values: an unrecognized value used to silently become ``NaN`` in
+#: ``y_band_int`` two layers downstream (``ScenarioBatchGenerator``) — see
+#: docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 2. Single-sourced
+#: here; ``scenario_batch_generator.py`` imports and re-exports it as
+#: ``ScenarioBatchGenerator.BAND_TO_INT`` rather than duplicating it.
+BAND_TO_INT: dict[str, int] = {
+    "quiet": 0,
+    "none": 0,
+    "low": 0,
+    "medium": 1,
+    "high": 2,
+    "critical": 3,
+}
+
+#: The only scenario classes defined anywhere in this codebase today (all
+#: four Hormuz scenario files). ``class`` positivity is decided purely by a
+#: leading "P"/"N" (see :func:`_ground_truth_labels`), so this enum exists
+#: to catch a typo of a known class (e.g. ``"P-CRT"``) rather than to
+#: forbid every string a future region might introduce — extend this set
+#: when a new class is genuinely introduced, don't work around it.
+VALID_SCENARIO_CLASSES: frozenset[str] = frozenset({
+    "P-CRIT", "P-HIGH", "N-QUIET", "N-DECOY",
+})
+
+#: Domains whose EVAL01 signal convention is a 0-1 normalized score (see
+#: docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §2 — confirmed against
+#: geopolitical_connector.py's [0,1] clamp-and-log and, for routing,
+#: routing_connector.py's composite_routing_risk clamp). ``shipping`` (raw
+#: vessel-transit count) and ``market`` (unbounded z-score-like index) are
+#: excluded — checked for type/finiteness only, not range.
+_BOUNDED_DOMAINS: frozenset[str] = frozenset({"geopolitical", "routing", "news", "disaster"})
 
 
 @dataclass
@@ -60,6 +95,55 @@ class ScenarioSpec:
     noise: dict[str, Any]
 
 
+def _validate_signal_ranges(yaml_path: str, signals: dict[str, Any]) -> None:
+    """Range/type-check every domain's ``baseline`` + ``effect.target`` values.
+
+    Catches the exact failure class BENCHMARK_SCHEMA_REFERENCE.md §2/§6
+    warns about: a raw percentage (15-70) landing in a field expecting a
+    0-1 score used to materialize without error, just silently distorted
+    ~100x. Bounded domains (geopolitical/routing/news/disaster) must stay
+    within [0, 1]; unbounded domains (shipping/market) are only checked
+    for type + finiteness, per their own documented convention.
+    """
+    for domain, sig in signals.items():
+        if domain not in KNOWN_DOMAINS or not sig:
+            continue
+        bounded = domain in _BOUNDED_DOMAINS
+        baseline = sig.get("baseline") or {}
+        for field_name in ("mean", "std"):
+            if field_name in baseline:
+                _check_numeric_field(
+                    yaml_path, domain, f"baseline.{field_name}",
+                    baseline[field_name], bounded,
+                )
+        effect = sig.get("effect")
+        if effect and "target" in effect:
+            _check_numeric_field(yaml_path, domain, "effect.target", effect["target"], bounded)
+
+
+def _check_numeric_field(
+    yaml_path: str, domain: str, field: str, value: Any, bounded: bool
+) -> None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Scenario spec {yaml_path} signals.{domain}.{field} = {value!r} "
+            "is not numeric."
+        ) from exc
+    if not math.isfinite(numeric):
+        raise ValueError(
+            f"Scenario spec {yaml_path} signals.{domain}.{field} = {numeric} "
+            "is not finite."
+        )
+    if bounded and not (0.0 <= numeric <= 1.0):
+        raise ValueError(
+            f"Scenario spec {yaml_path} signals.{domain}.{field} = {numeric} is "
+            f"out of the expected [0, 1] range for domain {domain!r} "
+            "(see docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §2)."
+        )
+
+
 def load_scenario(yaml_path: str) -> ScenarioSpec:
     """Load and validate a scenario YAML.
 
@@ -71,7 +155,11 @@ def load_scenario(yaml_path: str) -> ScenarioSpec:
         Populated :class:`ScenarioSpec`.
 
     Raises:
-        ValueError: If required top-level or ``event`` keys are missing.
+        ValueError: If required top-level or ``event`` keys are missing;
+            if ``event`` is ``null`` or not a mapping; if ``class`` or
+            ``event.peak_band`` is unrecognized; or if a bounded domain's
+            ``baseline``/``effect.target`` value falls outside ``[0, 1]``
+            (or a numeric field isn't finite).
     """
     with open(yaml_path, "r", encoding="utf-8") as fh:
         raw = yaml.safe_load(fh) or {}
@@ -80,12 +168,45 @@ def load_scenario(yaml_path: str) -> ScenarioSpec:
     if missing:
         raise ValueError(f"Scenario spec {yaml_path} missing keys: {missing}")
 
+    if raw["event"] is None:
+        raise ValueError(
+            f"Scenario spec {yaml_path} has 'event: null', which is not a "
+            "supported way to express \"no event\" (it would otherwise crash "
+            "downstream with an unhelpful TypeError). Use a fully-populated "
+            "event block with all-zero values instead — onset_day: 0, "
+            "ramp_days: 0, duration_days: 0, peak_band: none — combined with "
+            "'effect: null' on every signals.<domain> entry. See "
+            "config/benchmark/scenarios/hormuz_N_QUIET.yaml for the pattern."
+        )
+    if not isinstance(raw["event"], dict):
+        raise ValueError(
+            f"Scenario spec {yaml_path} 'event' must be a mapping; got "
+            f"{raw['event']!r} ({type(raw['event']).__name__})."
+        )
+
     event = dict(raw["event"])
     missing_event = [k for k in _REQUIRED_EVENT_KEYS if k not in event]
     if missing_event:
         raise ValueError(
             f"Scenario spec {yaml_path} 'event' missing keys: {missing_event}"
         )
+
+    peak_band = str(event["peak_band"])
+    if peak_band not in BAND_TO_INT:
+        raise ValueError(
+            f"Scenario spec {yaml_path} has unrecognized event.peak_band "
+            f"{peak_band!r}; expected one of {sorted(BAND_TO_INT)}."
+        )
+
+    scenario_class_normalized = str(raw["class"]).strip().upper()
+    if scenario_class_normalized not in VALID_SCENARIO_CLASSES:
+        raise ValueError(
+            f"Scenario spec {yaml_path} has unrecognized class {raw['class']!r}; "
+            f"expected one of {sorted(VALID_SCENARIO_CLASSES)}."
+        )
+
+    signals = dict(raw["signals"] or {})
+    _validate_signal_ranges(yaml_path, signals)
 
     return ScenarioSpec(
         scenario_id=str(raw["scenario_id"]),
@@ -94,7 +215,7 @@ def load_scenario(yaml_path: str) -> ScenarioSpec:
         seed=int(raw["seed"]),
         days=int(raw["days"]),
         event=event,
-        signals=dict(raw["signals"] or {}),
+        signals=signals,
         noise=dict(raw["noise"] or {}),
     )
 

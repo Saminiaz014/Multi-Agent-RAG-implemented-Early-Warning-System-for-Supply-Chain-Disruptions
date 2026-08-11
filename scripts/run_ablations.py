@@ -1,4 +1,4 @@
-"""Run Tier 5 ablations (A0-A7) on the Hormuz 4x5 benchmark grid, seed=42 only.
+"""Run Tier 5 ablations (A0-A7) on a region's 4x5 benchmark grid, seed=42 only.
 
 Uses the same pre-declared val(201-280)/test(281-364) protocol as
 ``scripts/run_tier0/1/2_baselines.py`` for comparability: A5/A6/A7 tune
@@ -8,11 +8,18 @@ and applied to test.
 
 Run from project root::
 
-    python scripts/run_ablations.py
+    python scripts/run_ablations.py [--region REGION]
+
+``--region`` defaults to ``hormuz`` (backward-compatible with every prior
+invocation of this script). It filters ``scenarios_generated/`` to only that
+region's parquet files, so adding a second region's data never silently
+mixes regions into a run — see docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md
+§6 gap 15.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import sys
@@ -26,6 +33,7 @@ import pandas as pd  # noqa: E402
 from src.baselines.ablation_runner import AblationRunner  # noqa: E402
 from src.baselines.ablations import ABLATIONS  # noqa: E402
 from src.baselines.baseline_evaluator import BaselineEvaluator  # noqa: E402
+from src.benchmark.regions import resolve_region_key  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,16 +51,29 @@ _TEST_WINDOW = (281, 365)  # [start, end) — 84 days
 _SEED = 42  # single seed for speed, per rule 6
 
 
-def run_ablations() -> None:
-    """Run A0-A7 on every Hormuz scenario at seed=42."""
+def run_ablations(region: str = "hormuz") -> None:
+    """Run A0-A7 on every ``region`` scenario at seed=42.
+
+    Args:
+        region: Canonical region key, alias, or display name (see
+            :func:`src.benchmark.regions.resolve_region_key`). Defaults to
+            ``"hormuz"`` — every prior call site (no argument) reproduces
+            identical behavior, since every parquet file in
+            ``scenarios_generated/`` today is Hormuz's.
+    """
+    region = resolve_region_key(region)
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    parquet_files = sorted(_SCENARIOS_DIR.glob(f"*_seed_{_SEED}.parquet"))
+    parquet_files = sorted(
+        p for p in _SCENARIOS_DIR.glob(f"*_seed_{_SEED}.parquet")
+        if p.stem.rpartition("_seed_")[0].startswith(f"{region}_")
+    )
     if not parquet_files:
         logger.warning(
-            "No seed=%d scenario parquet files found in %s — run "
-            "scripts/generate_hormuz_benchmark.py first.",
-            _SEED, _SCENARIOS_DIR,
+            "No seed=%d scenario parquet files found for region %r in %s — "
+            "run scripts/generate_hormuz_benchmark.py first (or generate "
+            "that region's benchmark grid).",
+            _SEED, region, _SCENARIOS_DIR,
         )
         return
 
@@ -82,11 +103,13 @@ def run_ablations() -> None:
                 metadata["threshold"] = threshold
                 metadata["val_window"] = list(_VAL_WINDOW)
                 metadata["test_window"] = list(_TEST_WINDOW)
+                metadata["region"] = region
 
                 result = {
                     "scenario_id": scenario_id,
                     "ablation_config": config_id,
                     "seed": seed,
+                    "region": region,
                     "metrics": metrics,
                     "metadata": metadata,
                 }
@@ -107,9 +130,23 @@ def run_ablations() -> None:
                 )
 
     logger.info("=" * 60)
-    logger.info("Wrote %d result files to %s", written, _RESULTS_DIR)
+    logger.info("region=%s | Wrote %d result files to %s", region, written, _RESULTS_DIR)
     logger.info("=" * 60)
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Tier 5 ablations (A0-A7) on a region's benchmark grid, seed=42 only.",
+    )
+    parser.add_argument(
+        "--region",
+        default="hormuz",
+        help="Region key, alias, or display name to evaluate (default: hormuz). "
+        "Only scenario parquet files for this region are read, so runs never "
+        "silently mix regions.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    run_ablations()
+    run_ablations(_parse_args().region)

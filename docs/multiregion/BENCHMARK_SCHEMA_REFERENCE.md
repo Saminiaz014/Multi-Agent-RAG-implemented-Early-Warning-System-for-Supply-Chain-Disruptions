@@ -386,24 +386,37 @@ region/scenario-schema scope) and its internals are not documented here.
 ## §6 Gaps and Ambiguities
 
 Flagged, not resolved. A new-region author would have to guess at or independently
-decide each of these:
+decide each of these — **except the items marked `FIXED` below**, which were closed
+out in a follow-up pass (2026-08-12) that converted the silent-corruption cases into
+loud `ValueError`s. See that pass's commit for the regression-gate proof that
+Hormuz's committed `results/baselines/tier0/` output reproduces numerically
+identically before and after.
 
-1. **`event: null` is not a supported "no event" spelling.** `load_scenario` does
-   `dict(raw["event"])`; a literal `null` raises an uncaught `TypeError`, not the
-   `ValueError` every other malformed-field path in this loader produces. The actual
-   supported pattern (per `N_QUIET`) is a fully-populated `event` block with all-zero
-   values, combined with every `signals.<domain>.effect: null`.
+1. **`FIXED` — `event: null` is not a supported "no event" spelling.** `load_scenario`
+   now checks for this explicitly and raises a `ValueError` naming the correct pattern
+   and pointing at `config/benchmark/scenarios/hormuz_N_QUIET.yaml` (which now also
+   carries a comment explaining why it's shaped that way), instead of an uncaught
+   `TypeError`. A non-mapping, non-null `event` (e.g. a list or string) also now
+   raises a clear `ValueError`. The supported pattern is unchanged: a fully-populated
+   `event` block with all-zero values, combined with every
+   `signals.<domain>.effect: null`.
 
-2. **`peak_band` has no enum validation at load time**, but a downstream consumer
-   (`ScenarioBatchGenerator.BAND_TO_INT`) only recognizes
-   `{quiet, none, low, medium, high, critical}`. An unrecognized value passes
-   `load_scenario`/`materialize_scenario` cleanly and only manifests as a silent `NaN`
-   in `y_band_int` two layers downstream, with no error anywhere in the chain.
+2. **`FIXED` — `peak_band` had no enum validation at load time.** `load_scenario` now
+   validates `event.peak_band` against `BAND_TO_INT`'s keys
+   (`{quiet, none, low, medium, high, critical}`) and raises `ValueError` listing the
+   valid options. `BAND_TO_INT` itself moved to `scenario_generator.py` (the single
+   source of truth); `ScenarioBatchGenerator.BAND_TO_INT` now re-exports it rather than
+   keeping an independent copy, so the two can no longer drift apart.
 
-3. **`class` is not validated against `{P-CRIT, P-HIGH, N-QUIET, N-DECOY}`.**
-   Positivity is decided purely by `scenario_class.strip().upper().startswith("P")` —
-   any string starting with `P` is a positive scenario; the rest of the string is
-   cosmetic (used only in output filenames/labels).
+3. **`FIXED` — `class` was not validated against `{P-CRIT, P-HIGH, N-QUIET, N-DECOY}`.**
+   `load_scenario` now validates `class` (case/whitespace-normalized) against
+   `VALID_SCENARIO_CLASSES` and raises `ValueError` listing the valid options — e.g. a
+   typo like `P-CRT` now fails loudly instead of silently loading as a valid positive.
+   Positivity is still decided purely by `scenario_class.strip().upper().startswith("P")`
+   at materialize time (unchanged); the new check only rejects strings outside the four
+   known classes, not the startswith-P mechanism itself. This deliberately does **not**
+   forbid a future region from introducing a fifth class — `VALID_SCENARIO_CLASSES` is a
+   small, easily-extended module constant, not a hardcoded region string.
 
 4. **`region` inside a scenario YAML is never cross-checked against `REGION_REGISTRY`
    or the region actually passed into `materialize_scenario`.** `load_scenario` reads it
@@ -415,11 +428,12 @@ decide each of these:
    `_apply_effect`, not a `ValueError` — inconsistent with the rest of the module's
    error handling.
 
-6. **`baseline_transits_per_day` accepting "a single value" (per the `Region`
-   docstring) does not match the code.** `load_region` does
-   `list(spec["baseline_transits_per_day"])`; a bare scalar (e.g. `baseline_transits_per_day: 70`)
-   raises an uncaught `TypeError` (`'int' object is not iterable`), not a `ValueError`.
-   Only a list/tuple value works in practice, contradicting the docstring's parenthetical.
+6. **`FIXED` — `baseline_transits_per_day` accepting "a single value" (per the `Region`
+   docstring) did not match the code.** `load_region` now accepts a bare scalar (e.g.
+   `baseline_transits_per_day: 70`) and normalizes it to a one-element list (`[70]`),
+   matching the (now-true) docstring; a list/tuple still works exactly as before. Any
+   other type (string, dict, bool, ...) raises a clear `ValueError` naming the expected
+   type instead of an uncaught `TypeError`.
 
 7. **`reroutable: "false"` (quoted string) would silently invert.** The cast is
    `bool(spec["reroutable"])`; `bool("false")` is `True` in Python. This only matters if
@@ -427,20 +441,25 @@ decide each of these:
    booleans via `yaml.safe_load` and are unaffected — but nothing guards against the
    quoted case.
 
-8. **No per-domain unit/range validation anywhere in the loader.** The §2 units table
-   (raw count for `shipping`, unbounded z-score-like for `market`, 0–1 for the other
-   four) is a *convention* read off the Hormuz files and one corroborating check in
-   `geopolitical_connector.py` — it is not enforced by `load_scenario` or
-   `materialize_scenario`. A new-region author who puts a raw percentage into a 0–1
-   field (the exact incident this document was commissioned to prevent a repeat of)
-   gets no error, just a silently distorted signal.
+8. **`FIXED` (partially) — no per-domain unit/range validation anywhere in the
+   loader.** `load_scenario` now range-checks `signals.<domain>.baseline.mean`,
+   `baseline.std`, and `effect.target` for the four bounded domains
+   (`geopolitical`/`routing`/`news`/`disaster`) against `[0, 1]`, and checks the two
+   unbounded domains (`shipping`/`market`) for numeric type + finiteness. A raw
+   percentage (e.g. `45` instead of `0.45`) in a bounded field now raises `ValueError`
+   naming the domain, the offending value, and the expected range — the exact incident
+   this document was commissioned to prevent a repeat of. **Not covered** by this fix
+   (still open): `noise.missing_data_rate` (gap 12), and a missing `effect.target` when
+   `effect.type` is present still raises an uncaught `KeyError` rather than a
+   `ValueError` (gap 5) — the new check only validates a `target` that's present, it
+   doesn't add a presence guard.
 
-9. **`routing`'s 0–1 convention was not independently re-confirmed against
-   `routing_connector.py`.** It is inferred from consistent scale across all four Hormuz
-   scenario files (baseline means/stds and effect targets that never leave `[0, 1]`),
-   the same way `geopolitical`/`news`/`disaster` are, but `routing_connector.py` itself
-   was outside this pass's required reading list and was not opened to independently
-   verify the `[0, 1]`-clamp-and-log behavior confirmed for `geopolitical_connector.py`.
+9. **`FIXED` — `routing`'s 0–1 convention is now independently confirmed against
+   `routing_connector.py`.** Read in the same pass as the fixes above:
+   `RoutingConnector._composite()` explicitly clamps `composite_routing_risk` to
+   `[0, 1]` (`np.clip(risk, 0.0, 1.0)`), corroborating the convention inferred from the
+   Hormuz scenario files. `routing` is accordingly included in Fix 8's bounded-domain
+   range check above alongside `geopolitical`/`news`/`disaster`.
 
 10. **A misspelled `signals` domain key is a silent no-op.**
     `materialize_scenario` only ever reads `spec.signals.get(domain)` for
@@ -471,12 +490,18 @@ decide each of these:
     documented as cosmetic/log-only, which raises the same question for these two
     fields specifically.
 
-15. **None of the tier0/tier1/tier2/ablation scripts filter by region.** They glob
-    every parquet file in `data/benchmark/scenarios_generated/` unconditionally. Adding
-    a second region's parquet files to that directory means every subsequent baseline
-    run evaluates across all regions mixed together in one pass — separable afterward
-    only by the `{region}_{CLASS}` filename convention, which is incidental, not
-    enforced.
+15. **`FIXED` — none of the tier0/tier1/tier2/ablation scripts filtered by region.**
+    Each script now takes a `--region` CLI argument (default `"hormuz"`, resolved
+    through `resolve_region_key` so an alias or display name works too, and an
+    unrecognized region raises `ValueError` loudly before any file is touched) and
+    only reads parquet files whose `scenario_id` starts with `{region}_`. Every result
+    JSON now also carries `"region"` at the top level and in `"metadata"`, so output is
+    self-identifying. Regression-gated: re-running the default (`hormuz`) case
+    reproduces the committed `results/baselines/tier0/` output's `metrics` numerically
+    identically (see the fix's commit message for the full tier0/1/2/ablation
+    comparison). The underlying filename convention (`{region}_{CLASS}`) is unchanged
+    and is still what the filter relies on — see gap 16, which this fix does not
+    address, for the still-missing generic generation entry point.
 
 16. **No generic "generate benchmark for region X" entry point exists.**
     `scripts/generate_hormuz_benchmark.py` is Hormuz-specific by name and by hardcoded
