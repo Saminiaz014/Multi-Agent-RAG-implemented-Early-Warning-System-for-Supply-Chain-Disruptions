@@ -1,0 +1,90 @@
+{
+  "region": "bab_el_mandeb",
+  "compiled": "2026-08-11",
+  "_meta": {
+    "purpose": "Real-world precedent for grounding EVAL01 scenario parameters (config/benchmark/bab_el_mandeb.yaml + scenario YAMLs, once written) for the Bab el-Mandeb / Red Sea chokepoint, matching the structure and honesty conventions of data/routing_research/hormuz_rerouting_patterns.json. Documentation only — does not itself write or change any scenario YAML.",
+    "labeling": "Each numeric value carries an evidence tag: 'documented' (a cited source states the number) or 'extrapolated' (derived/interpolated — the derivation is recorded in that event's 'notes'). A null value is a correct result when no credible source was found; it is explained, not guessed.",
+    "units_convention": "Per docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md: the EVAL01 pipeline's 'shipping' signal is a raw vessel-transit count/day; 'market' is an unbounded, roughly z-score-like index; 'geopolitical'/'routing'/'news'/'disaster' are 0-1 normalized scores. The values recorded below are the real-world documented quantities in their own natural units (percent, USD, nautical miles, incident counts) — mapping any of them onto the pipeline's internal 0-1/raw-count convention is scenario-authoring work for a later prompt, not done here."
+  },
+  "events": [
+    {
+      "name": "2023-2024 Houthi Red Sea shipping attack campaign",
+      "start": "2023-11-19",
+      "end": "2025-11-11",
+      "signal_effects": {
+        "shipping": {
+          "value": -50,
+          "unit": "% year-over-year decline in Suez Canal vessel transit count, 2024 vs 2023 (13,213 ships in 2024 vs ~26,434 in 2023)",
+          "evidence": "documented"
+        },
+        "market": {
+          "value": {"asia_europe_spot_rate_peak_dec2023_feb2024_usd_per_feu": 5500, "asia_europe_spot_rate_peak_jul2024_usd_per_feu": 8400, "baseline_pre_crisis_estimate": "roughly a third of the Feb 2024 peak, per 'tripled' framing in source"},
+          "unit": "USD per FEU (forty-foot equivalent unit), Asia-Europe container spot freight rate",
+          "evidence": "documented"
+        },
+        "geopolitical": {
+          "value": ">100",
+          "unit": "cumulative documented Houthi attack incidents on shipping, Nov 2023 - mid 2024",
+          "evidence": "documented"
+        },
+        "disaster": {
+          "value": null,
+          "unit": "n/a",
+          "evidence": "documented",
+          "explanation": "No natural-hazard driver applies to this event. This is a security/geopolitical campaign, not a natural disaster — structurally analogous to Hormuz's P_CRIT/P_HIGH scenarios, where the disaster domain stays enabled-but-silent (effect: null) throughout a geopolitical/blockage event."
+        },
+        "routing": {
+          "value": {"pct_large_container_vessels_via_cape_dec31_2023": 85, "pct_via_cape_late_nov_2023": 13, "cape_route_ship_count_increase_pct_nov2023_to_feb2024": 130, "distance_added_nm": [3500, 4000], "time_added_days": [10, 14]},
+          "unit": "% of 7,500+ TEU vessels rerouted via Cape of Good Hope; nautical miles / days added per voyage",
+          "evidence": "documented"
+        },
+        "news": {
+          "value": null,
+          "unit": "n/a — no direct sentiment/volume index found",
+          "evidence": "extrapolated",
+          "explanation": "No published news-sentiment or article-volume index specific to this campaign was located in this research pass. The cumulative-incident-count trajectory (1 incident 2023-11-19, ramping to 100+ by mid-2024, per the geopolitical field above) is a plausible proxy for the shape of a news-volume ramp, but is not itself a measured news signal — treat any use of it as extrapolated, not documented."
+        }
+      },
+      "sources": [
+        {"outlet": "gCaptain", "url": "https://gcaptain.com/red-sea-crisis-a-timeline-of-maritime-chaos-over-the-past-year/", "accessed": "2026-08-11"},
+        {"outlet": "IMF (blog)", "url": "https://www.imf.org/en/blogs/articles/2024/03/07/red-sea-attacks-disrupt-global-trade", "accessed": "2026-08-11"},
+        {"outlet": "Bloomberg", "url": "https://www.bloomberg.com/news/articles/2024-12-26/red-sea-disruptions-cost-egypt-7-billion-in-suez-revenues", "accessed": "2026-08-11"},
+        {"outlet": "AGBI", "url": "https://www.agbi.com/logistics/2024/02/cost-of-red-sea-shipping-insurance-rises-20-fold/", "accessed": "2026-08-11"},
+        {"outlet": "Maritime Executive", "url": "https://maritime-executive.com/article/msc-and-cma-cgm-suspend-red-sea-transits-as-us-and-uk-down-multiple-drones", "accessed": "2026-08-11"},
+        {"outlet": "Container News", "url": "https://container-news.com/80-of-all-container-ships-on-suez-route-divert-to-cape-of-good-hope/", "accessed": "2026-08-11"},
+        {"outlet": "CNBC", "url": "https://www.cnbc.com/2024/05/23/a-sudden-container-crunch-is-sending-ocean-freight-rates-soaring.html", "accessed": "2026-08-11"},
+        {"outlet": "shipsandports.com.ng (citing Egyptian presidential statement)", "url": "https://shipsandports.com.ng/houthi-attacks-cost-egypts-suez-canal-7-billion-in-2024-revenue/", "accessed": "2026-08-11"}
+      ],
+      "notes": "Escalation timeline (documented): 2023-11-19 Galaxy Leader seized near Hodeida (opening incident); 2023-12-14 missile near-misses Maersk Gibraltar; 2023-12-15 Maersk and Hapag-Lloyd suspend Red Sea transits; 2023-12-16/17 MSC and CMA CGM follow. War-risk premiums (from a separate strand of the same search pass, not independently re-verified against a single primary source here) rose from ~0.07% of hull value pre-crisis to as high as 2% by mid-2024 — recorded for context but not entered as a signal_effects field since Hormuz's own war-risk-premium precedent (data/routing_research/hormuz_rerouting_patterns.json, 2019 event) already establishes this quantity's role for the routing/market domains and this file avoids duplicating that derivation. 'shipping' uses the Suez Canal aggregate transit count as a proxy for Bab el-Mandeb transits specifically, because virtually every vessel that transits Bab el-Mandeb northbound continues directly into the Suez Canal within the same days-long voyage leg — the two chokepoints' transit counts move together almost 1:1 for this event, unlike Hormuz where the destination chokepoint IS the endpoint. This proxy relationship should be stated explicitly wherever this file is used to ground a scenario parameter, not treated as a literal Bab el-Mandeb-specific measurement."
+    },
+    {
+      "name": "2025-2026 pause and February 2026 resumption",
+      "start": "2025-11-11",
+      "end": "ongoing",
+      "signal_effects": {
+        "shipping": {
+          "value": -60,
+          "unit": "% below corresponding 2023 (pre-crisis) weekly Suez Canal transit level, as of early January 2026, despite ~100 days without a confirmed Houthi attack",
+          "evidence": "documented"
+        },
+        "market": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "No specific freight-rate figure for this sub-window was located; only the traffic-recovery shortfall above was documented."},
+        "geopolitical": {
+          "value": "attacks resumed following 2026-02-28 US/Israeli strikes on Iran",
+          "unit": "qualitative — trigger-event timeline",
+          "evidence": "documented"
+        },
+        "disaster": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "Not applicable — same reasoning as the 2023-2024 event."},
+        "routing": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "A specific reroute-percentage figure for this sub-window was not located; only the aggregate traffic-recovery shortfall (shipping field above) was documented."},
+        "news": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "Not independently sourced for this sub-window."}
+      },
+      "sources": [
+        {"outlet": "gCaptain", "url": "https://gcaptain.com/suez-canal-traffic-stalls-at-60-below-normal-despite-100-days-without-houthi-attacks/", "accessed": "2026-08-11"},
+        {"outlet": "gCaptain", "url": "https://gcaptain.com/houthis-signal-renewed-red-sea-shipping-attacks-after-u-s-israeli-strikes-on-iran/", "accessed": "2026-08-11"},
+        {"outlet": "gCaptain", "url": "https://gcaptain.com/red-sea-corridor-slips-back-into-crisis-as-houthi-threats-resurface/", "accessed": "2026-08-11"},
+        {"outlet": "Security Council Report", "url": "https://www.securitycouncilreport.org/monthly-forecast/2026-07/the-red-sea.php", "accessed": "2026-08-11"}
+      ],
+      "notes": "IMPORTANT CROSS-REGION LINK: the 2026-02-28 US/Israeli strikes on Iran that reignited this campaign are the SAME trigger event as this thesis's own pinned Hormuz ground-truth disruption, documented in data/routing_research/hormuz_rerouting_patterns.json under '2026_hormuz_closure' (onset 2026-02-28, matching shipping_connector.py's _KNOWN_SHUTDOWN_START/_END). Bab el-Mandeb and Hormuz scenarios grounded in this shared window are not independent events — a multi-region benchmark run spanning both should account for this correlation (e.g. a P_CRIT scenario for one region co-occurring with elevated risk in the other is realistic, not an artifact). The pause itself (2025-11-11 to ~2026-02-28, ~3.5 months) shows traffic recovers only partially and slowly even after a sustained attack-free period (60% below baseline after 100 attack-free days) — worth preserving as a 'recovery is asymmetric and slow' finding distinct from Hormuz, where no comparable multi-month calm-then-still-depressed period has been documented in this pass."
+    }
+  ],
+  "limitations": "(1) Bab el-Mandeb-specific transit-count figures, independent of the Suez Canal aggregate, were not found in this pass; the Suez proxy relationship is noted explicitly above and should not be treated as a literal Bab el-Mandeb measurement. (2) No natural-disaster driver exists for this region's documented disruption history within this research scope — the region's risk profile in this file is entirely geopolitical/security, which should be reflected by declining to invent a disaster scenario class for bab_el_mandeb rather than forcing one. (3) A specific 'news' sentiment/volume index was not located for either event; any news-domain scenario parameter grounded in this file is extrapolated from incident-count timing, not a measured news signal. (4) War-risk insurance premium figures were found (0.07% to ~2% of hull value) but not cross-verified against a second independent primary source within this pass, and were deliberately left out of signal_effects to avoid presenting a single-source figure as more solid than it is — a future pass wanting a market-domain war-risk-premium number should re-verify this figure first. (5) The 2025-2026 sub-window is thinner than the 2023-2024 campaign: several signal_effects fields are null because a focused, quantified secondary-source search for that narrower window was not exhaustive."
+}
