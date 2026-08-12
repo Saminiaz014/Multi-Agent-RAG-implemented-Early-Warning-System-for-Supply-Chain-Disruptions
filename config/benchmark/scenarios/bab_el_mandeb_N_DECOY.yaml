@@ -1,0 +1,51 @@
+# N-DECOY: an isolated market (freight-rate) blip with no corroborating
+# move in shipping/geopolitical/routing/news. Ground truth stays negative —
+# this scenario exists to catch detectors that over-trigger on a single
+# noisy domain.
+#
+# DECOY DOMAIN CHOICE: this region's dominant signals are geopolitical and
+# routing (config/benchmark/bab_el_mandeb.yaml) — a decoy built from either
+# would be indistinguishable from a real, if muted, positive, defeating the
+# point. hormuz_N_DECOY.yaml uses a news rumor, but a market blip is used
+# here instead: `disaster` (weather/disaster is the guidance's first
+# suggestion for a decoy domain) is ABSENT from this region's
+# active_domains entirely, not merely silent, so it isn't available to pick
+# from. market is genuinely non-dominant here ("MODERATE" at most, per the
+# region spec) and, per the evidence file's own convention, a market move
+# with no corroboration is exactly the kind of isolated blip real freight
+# markets produce for reasons unrelated to a Bab el-Mandeb-specific crisis
+# (seasonal swings, unrelated port congestion elsewhere) — a legitimate
+# decoy shape.
+#
+# NULL-GUARD NOTE: this file's baseline blocks were built in the same
+# scratch verification script as bab_el_mandeb_P_HIGH.yaml by iterating
+# bab_el_mandeb_P_CRIT.yaml's five domains and copying each domain's
+# `baseline` block (never assuming a sixth `disaster` entry exists, since it
+# doesn't) — guarding with `if not sig: continue` before touching
+# `sig["baseline"]` on each domain, so an absent/null domain is skipped
+# rather than crashing the whole generation before any file is written.
+scenario_id: bab_el_mandeb_N_DECOY
+region: bab_el_mandeb
+class: N-DECOY
+seed: 42
+days: 365
+event:
+  onset_day: 200
+  ramp_days: 3
+  duration_days: 15
+  peak_band: none
+signals:
+  shipping: {baseline: {mean: 72, std: 5}, effect: null}
+  # extrapolated: an isolated freight-rate spike, deliberately smaller than
+  # bab_el_mandeb_P_CRIT.yaml's genuine crisis-level market target (2.0) —
+  # visibly elevated but not calibrated to represent a real sustained
+  # disruption, since the point of this scenario is a real signal move with
+  # no true underlying event.
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 1.5, lead_days: 0}}
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: null}
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: null}
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: null}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

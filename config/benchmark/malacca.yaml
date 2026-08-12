@@ -66,17 +66,20 @@ malacca:
   # before its own follow-up search found real diversion evidence; unlike
   # panama, this search did NOT surface comparably credible diversion
   # evidence for malacca.
-  # WEAK (evidence-silent, not evidence-contradicted): market -- the
-  # weakest-evidenced inclusion in this file, and arguably in the whole
-  # benchmark so far: all four documented events' market fields are null,
-  # with no quantified OR even qualitative market signal located anywhere
-  # in the evidence file. Included on domain-plausibility grounds (chronic
-  # petty piracy could plausibly nudge marine war-risk/insurance costs at
-  # the margin; haze-driven port slowdowns could plausibly have minor
-  # freight-cost effects) rather than direct evidence, since nothing in the
-  # evidence file actively CONTRADICTS a market signal existing (unlike
-  # panama's geopolitical, which the evidence explicitly ruled out).
-  active_domains: [shipping, disaster, news, geopolitical, routing, market]
+  # REMOVED 2026-08-12: market. Originally included as "weak
+  # (evidence-silent, not evidence-contradicted)" on domain-plausibility
+  # grounds alone -- chronic petty piracy could plausibly nudge marine
+  # war-risk/insurance costs at the margin, haze-driven port slowdowns
+  # could plausibly have minor freight-cost effects -- but this project's
+  # standard is evidence, not plausibility: all four documented events in
+  # data/region_research/malacca_disruption_patterns.json have a null
+  # market field, with no quantified OR qualitative market signal located
+  # anywhere in that file. Plausibility-only inclusion was a standards
+  # violation, not a defensible weak-evidence call the way e.g. panama's
+  # news field is (which has a real, if unquantified, documented press
+  # footprint). Removal recorded here and in that evidence file's
+  # limitations section.
+  active_domains: [shipping, disaster, news, geopolitical, routing]
   # HIGH, but structurally different from panama's HIGH: this is
   # ACUTE-ONSET ATMOSPHERIC (haze; documented onset-to-peak gradients of
   # 3-5 days in 2019 and 15 days in 2015 -- see the evidence file's

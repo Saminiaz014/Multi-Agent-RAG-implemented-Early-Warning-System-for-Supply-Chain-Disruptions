@@ -1,0 +1,57 @@
+# P-HIGH: a shorter, less severe variant of bab_el_mandeb_P_CRIT.yaml —
+# tests that detectors scale their response to event magnitude rather than
+# firing identically on every positive (same intent as hormuz_P_HIGH.yaml).
+#
+# DERIVATION METHOD (stated explicitly, per this prompt's requirement):
+# built via an explicit `copy.deepcopy(P_CRIT)` in a scratch verification
+# script (not shipped), then scaled — never a shallow copy / dict-spread,
+# which would share the nested `signals` dict with P_CRIT and let this
+# reduction mutate that file's already-written values in place. The script
+# re-loaded and asserted bab_el_mandeb_P_CRIT.yaml's own values (target
+# 0.50, onset_day 240) were unchanged after building this file's numbers;
+# see this prompt's validation output for the same check re-run against the
+# actual written files.
+#
+# Event timing (onset_day/ramp_days/duration_days) mirrors
+# hormuz_P_HIGH.yaml exactly, for the same reason bab_el_mandeb_P_CRIT.yaml
+# mirrors hormuz_P_CRIT.yaml's timing. Each domain's effect target and
+# lead_days are P_CRIT's own value scaled by that SAME domain's Hormuz
+# P_CRIT-to-P_HIGH ratio (e.g. market: 1.4/2.5 = 0.56; shipping is scaled on
+# its drop-from-baseline, i.e. (1-0.65)/(1-0.40) = 0.583, since a
+# multiplicative target isn't linearly comparable the way additive targets
+# are) — reusing Hormuz's own established scaling relationship rather than
+# inventing a new one, since the evidence file has no independent P_HIGH-
+# equivalent event to derive this region's own ratio from.
+scenario_id: bab_el_mandeb_P_HIGH
+region: bab_el_mandeb
+class: P-HIGH
+seed: 42
+days: 365
+event:
+  onset_day: 120
+  ramp_days: 7
+  duration_days: 25
+  peak_band: high
+signals:
+  # extrapolated: P_CRIT's 0.50 (50% drop) scaled by Hormuz's own
+  # shipping-drop ratio (1-0.65)/(1-0.40) = 0.583 -> a 29% drop -> target
+  # 0.71 (1 - 0.50*0.583, rounded).
+  shipping: {baseline: {mean: 72, std: 5}, effect: {type: multiplicative_ramp, target: 0.71, lead_days: 0}}
+  # extrapolated: P_CRIT's 2.0 * Hormuz's market ratio (1.4/2.5 = 0.56) =
+  # 1.12.
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 1.12, lead_days: -3}}
+  # extrapolated: P_CRIT's 0.85 * Hormuz's geopolitical ratio (0.45/0.80 =
+  # 0.5625) = 0.48.
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: {type: additive_ramp, target: 0.48, lead_days: 4}}
+  # extrapolated: P_CRIT's 0.85 * Hormuz's routing ratio (0.30/0.60 = 0.50)
+  # = 0.42 -- still notably higher than Hormuz's own P_HIGH routing target
+  # (0.30), correctly preserving bab_el_mandeb's routing dominance relative
+  # to Hormuz even at reduced P_HIGH intensity.
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: {type: additive_ramp, target: 0.42, lead_days: 3}}
+  # extrapolated: P_CRIT's 0.55 * Hormuz's news ratio (0.40/0.75 = 0.533) =
+  # 0.29.
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.29, lead_days: 5}}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

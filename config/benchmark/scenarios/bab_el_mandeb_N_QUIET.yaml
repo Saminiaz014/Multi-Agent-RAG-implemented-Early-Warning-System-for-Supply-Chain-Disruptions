@@ -1,0 +1,40 @@
+# N-QUIET: calm baseline year, no event at all. Every domain is
+# enabled-but-silent (effect: null) — a pure negative control.
+#
+# Why `event` is a full all-zero block instead of `event: null`: the loader
+# (src/benchmark/scenario_generator.py:load_scenario) requires `event` to be
+# a mapping with onset_day/ramp_days/duration_days/peak_band — `event: null`
+# raises a clear ValueError pointing back at hormuz_N_QUIET.yaml's own
+# comment on this exact pattern. The four fields below are syntactically
+# required but functionally inert here: this scenario's `class` doesn't
+# start with "P" (so _ground_truth_labels never reads them) and every
+# signal's `effect` is null (so materialize_scenario never reads them
+# either). Copied structure exactly from hormuz_N_QUIET.yaml.
+scenario_id: bab_el_mandeb_N_QUIET
+region: bab_el_mandeb
+class: N-QUIET
+seed: 42
+days: 365
+event:
+  onset_day: 0
+  ramp_days: 0
+  duration_days: 0
+  peak_band: none
+signals:
+  # baseline mean/std for all five domains match bab_el_mandeb_P_CRIT.yaml's
+  # own baseline blocks exactly — a region's steady-state level doesn't
+  # change between scenarios, only what the event does on top of it. No
+  # `disaster` entry: it is absent from
+  # config/benchmark/bab_el_mandeb.yaml's active_domains entirely, so a
+  # signals entry for it would be silently ignored regardless (see
+  # docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §2) — omitted for
+  # clarity rather than included and disabled.
+  shipping: {baseline: {mean: 72, std: 5}, effect: null}
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: null}
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: null}
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: null}
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: null}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

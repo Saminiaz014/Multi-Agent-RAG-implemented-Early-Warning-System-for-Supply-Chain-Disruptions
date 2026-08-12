@@ -1,0 +1,79 @@
+# P-CRIT: the 2023-2024 Houthi Red Sea shipping attack campaign — the
+# well-quantified event in data/region_research/bab_el_mandeb_disruption_patterns.json
+# (event 1 of 2; the 2025-2026 pause/resumption event is NOT blended in here,
+# per that file's own key finding that the two are structurally distinct).
+# All five of this region's active domains move (shipping, market,
+# geopolitical, routing, news); disaster is absent from
+# config/benchmark/bab_el_mandeb.yaml's active_domains entirely (not merely
+# silent) — the evidence file states outright "No natural-hazard driver
+# applies to this event... a security/geopolitical campaign, not a natural
+# disaster" — so no disaster signal entry appears below at all.
+#
+# Timing (onset_day/ramp_days/duration_days) mirrors hormuz_P_CRIT.yaml
+# exactly, as do each domain's lead_days: the evidence file's escalation
+# timeline (documented dates, see notes below) doesn't give enough
+# day-level precision to derive independent region-specific timing, so
+# Hormuz's own relative lead/lag structure (which region-agnostically
+# encodes "geopolitical/routing lead, market/news lag or trail") is reused.
+# Only the MAGNITUDES (baseline mean/std, effect targets) are grounded in
+# this region's own evidence — see each domain's comment below.
+scenario_id: bab_el_mandeb_P_CRIT
+region: bab_el_mandeb
+class: P-CRIT
+seed: 42
+days: 365
+event:
+  onset_day: 240
+  ramp_days: 12
+  duration_days: 60
+  peak_band: critical
+signals:
+  # documented: -50% YoY Suez-proxy transit decline (evidence file event 1
+  # 'shipping' field: 13,213 ships 2024 vs ~26,434 in 2023) -> multiplicative
+  # target 0.50 (a -50% decline means final = 0.50 * baseline; NOT "-50",
+  # NOT "50"). baseline mean=72 matches config/benchmark/bab_el_mandeb.yaml's
+  # baseline_transits_per_day; std=5 extrapolated at the same relative noise
+  # (~7% of mean) as hormuz's own shipping std.
+  shipping: {baseline: {mean: 72, std: 5}, effect: {type: multiplicative_ramp, target: 0.50, lead_days: 0}}
+  # extrapolated: Asia-Europe freight rates "tripled" by Feb 2024 (documented,
+  # evidence file event 1 'market' field: ~$5,500/FEU peak). market's z-score
+  # convention has no native "tripled" mapping, so this is calibrated against
+  # Hormuz's own P_CRIT market target (2.5), scaled slightly down to 2.0 to
+  # match this region's slightly milder shipping-domain shock (0.50 vs
+  # Hormuz's 0.40). lead_days mirrors Hormuz's structural choice (market lags
+  # the physical campaign onset, consistent with freight impact following the
+  # Dec 2023 carrier-suspension response by weeks per the evidence file's
+  # escalation timeline).
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 2.0, lead_days: -5}}
+  # extrapolated: ">100 documented Houthi attack incidents" (evidence file
+  # event 1 'geopolitical' field) has no native 0-1 mapping (it's a raw
+  # incident count, not a percentage or ratio), so this is a reasoned
+  # analogy: config/benchmark/bab_el_mandeb.yaml explicitly ranks geopolitical
+  # DOMINANT ("the campaign IS the driver") — pushed above Hormuz's own
+  # P_CRIT geopolitical target (0.80) to reflect that region-spec ranking,
+  # rather than merely matching Hormuz's comparable-but-not-region-defining
+  # tension level.
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: {type: additive_ramp, target: 0.85, lead_days: 7}}
+  # documented: 85% of large (7,500+ TEU) containerships diverted via Cape of
+  # Good Hope by end of Dec 2023 (evidence file event 1 'routing' field) ->
+  # additive target 0.85 (percent-to-fraction: 85% = 0.85, NOT raw "85" —
+  # this is the exact unit trap flagged in
+  # docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md's units section). The
+  # single most precisely quantified domain in the evidence file; notably
+  # higher than Hormuz's own P_CRIT routing target (0.60), which is itself a
+  # modeled proxy since Hormuz has no viable sea alternate at all (see
+  # data/routing_research/hormuz_rerouting_patterns.json) — bab_el_mandeb's
+  # figure is a real, measured diversion rate, not a proxy.
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: {type: additive_ramp, target: 0.85, lead_days: 5}}
+  # extrapolated: no quantified news sentiment/volume index exists (evidence
+  # file event 1 'news' field is explicitly marked extrapolated, using
+  # incident-count timing as an unmeasured proxy). Set below Hormuz's
+  # dominant-tier P_CRIT news target (0.75) to match this region's own
+  # "MODERATE" news classification (config/benchmark/bab_el_mandeb.yaml) —
+  # real, sourced reporting volume (8+ independent outlets in the evidence
+  # file's sources list) but not overstated as a dominant signal.
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.55, lead_days: 10}}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

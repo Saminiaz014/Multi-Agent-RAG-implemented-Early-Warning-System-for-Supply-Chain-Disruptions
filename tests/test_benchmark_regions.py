@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import yaml
 import pytest
@@ -39,6 +40,25 @@ def test_load_region_succeeds_for_every_populated_region(region_key: str) -> Non
     as more regions validate."""
     region = load_region(region_key)
     assert region.name == region_key
+
+
+@pytest.mark.parametrize(
+    "scenario_path",
+    sorted(str(p) for p in Path("config/benchmark/scenarios").glob("*.yaml")),
+)
+def test_every_scenario_yaml_loads_and_materializes(scenario_path: str) -> None:
+    """Every scenario YAML actually on disk must load and materialize
+    cleanly, for whichever region it targets — the regression net for
+    scenario authoring across every region, not just hormuz. Parametrized
+    off the directory listing itself, so a new scenario file is covered
+    automatically without touching this test."""
+    spec = load_scenario(scenario_path)
+    region = load_region(spec.region)
+    df = materialize_scenario(spec, region)
+    assert len(df) == spec.days
+    assert set(region.active_domains).issubset(df.columns)
+    if spec.scenario_class.strip().upper().startswith("N"):
+        assert df["y_disruption"].max() == 0, f"{scenario_path}: N-class scenario has a positive label"
 
 
 def test_load_scenario() -> None:
