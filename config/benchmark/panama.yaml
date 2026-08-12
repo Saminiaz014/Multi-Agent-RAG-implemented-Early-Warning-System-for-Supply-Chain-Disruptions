@@ -1,0 +1,85 @@
+# Region spec for the Panama Canal — EVAL01 third region, grounded in
+# data/region_research/panama_disruption_patterns.json.
+#
+# Consumed by src/benchmark/regions.py:load_region(). All region-specific
+# numeric parameters live here; regions.py and scenario_generator.py stay
+# region-agnostic and only read what this file provides.
+panama:
+  center:
+    # documented: approximate midpoint of the Panama Canal transit route,
+    # near Gatun Lake (the drought-affected reservoir itself — see
+    # baseline_transits_per_day below), standard published coordinates
+    # ~9.08 N, 79.68 W. First region in this codebase west of Greenwich —
+    # lng is genuinely negative here, unlike hormuz/bab_el_mandeb's
+    # positive Eastern-Hemisphere values; nothing downstream (regions.py,
+    # scenario_generator.py) assumes a sign, so this is safe.
+    lat: 9.08
+    lng: -79.68
+  # documented: "36" is the evidence file's own stated normal_daily_transits
+  # (event 1 'shipping' field) — the pre-drought baseline this region spec
+  # describes. Cross-source variance (32-38/day, per that event's notes) is
+  # minor context around this anchor, not a reason to invent a fabricated
+  # [min, max] spread. The RESTRICTED figures (18 at the drought's trough,
+  # 22-24 for most of the crisis) are event-specific and belong in the A5
+  # scenario YAML, not here — this field describes normal conditions.
+  baseline_transits_per_day: 36
+  # DOMINANT: disaster (Gatun Lake drought is THE documented driver —
+  # elevation fell from a normal 85ft to a 79.6ft trough against an 88ft
+  # operating max, directly forcing the transit-slot cap down).
+  # STRONG: shipping (36 -> 18-24 daily transit-slot cap, -29% FY2024 total
+  # transits) and market (auction slots: normal $15k-140k -> $2.85M record
+  # in Nov 2023; later $4M in the 2026 event -- both documented).
+  # WEAK: routing -- included, not absent, because Suez and the Magellan
+  # Strait are real physical alternatives (see reroutable below), but the
+  # evidence file documents no vessels actually diverting to either during
+  # the 2023-2024 drought. What IS documented in this domain's territory is
+  # queueing/congestion AT Panama itself (avg wait 11.4 days, max 22.8 days,
+  # Neopanamax daily transits -25% YoY) -- vessels waited rather than
+  # rerouted away. That queueing behavior is the weak proxy signal actually
+  # available here, not genuine diversion evidence.
+  # MODERATE: news -- no quantified sentiment/volume index was found
+  # (evidence file limitations #3); a slow-building drought story is
+  # plausible but unmeasured, same caveat as bab_el_mandeb's news field.
+  # ABSENT, DELIBERATELY: geopolitical -- the evidence file states outright
+  # "No geopolitical driver applies -- this event is purely
+  # hydrological/climate-driven" (event 1 'geopolitical' field). The 2026
+  # demand-surge event's CAUSE is geopolitical (the Hormuz closure), but
+  # that is a geopolitical event happening TO Hormuz, not a Panama-local
+  # sanctions/military/diplomatic signal -- no such signal is documented
+  # for Panama itself in either event. This is the one region in the
+  # benchmark where the domain that dominates elsewhere (geopolitical, at
+  # both hormuz and bab_el_mandeb) contributes nothing at all -- that
+  # asymmetry is what makes the multi-agent-value claim falsifiable rather
+  # than a foregone conclusion; do not add it back for symmetry.
+  active_domains: [shipping, market, disaster, routing, news]
+  # documented: the inverse of bab_el_mandeb's "none" -- Panama's 2023-2024
+  # disruption has a single, dominant, extensively-documented hydrological
+  # cause (see active_domains above), unlike bab_el_mandeb's zero
+  # documented natural-hazard driver. This asymmetry across the two regions
+  # is deliberate, not an oversight.
+  disaster_relevance: high
+  # true, but nuanced -- do not read this as "Panama behaves like
+  # bab_el_mandeb." Suez and the Magellan Strait are real, physically
+  # existing alternate routes (hence true, not Hormuz's false), but at
+  # extreme added cost/distance for most Panama-optimized trans-hemispheric
+  # cargo. Critically, NO source in the evidence file documents vessels
+  # actually diverting to either during the 2023-2024 drought -- the
+  # documented response was queueing (up to 22.8 days) and paying record
+  # auction premiums ($2.85M, later $4M) to hold a slot, not rerouting
+  # away. So "true" reflects physical/geographic possibility, per this
+  # field's documented meaning ("whether traffic CAN divert"), while the
+  # observed 2023-2024 behavior was functionally much closer to Hormuz's
+  # hold-in-place pattern than to bab_el_mandeb's real 85% diversion.
+  reroutable: true
+  # extrapolated: because the Suez/Magellan alternative is largely
+  # theoretical for most Panama traffic (see reroutable above), it does not
+  # function as a real pressure valve the way bab_el_mandeb's Cape of Good
+  # Hope route does -- superlinear, not linear, by the same reasoning
+  # applied there in reverse. Directional support: queue wait times more
+  # than doubled within a single peak month (11.4-day average to a 22.8-day
+  # maximum, "triple the maximum wait at the beginning of the month" per
+  # the evidence file's routing notes) and auction prices later reached
+  # 4x the 2023 record in the 2026 event -- both consistent with
+  # accelerating, not proportional, cost growth as the constraint tightens.
+  # No source states "superlinear" outright, hence extrapolated.
+  loss_scaling: superlinear

@@ -8,6 +8,14 @@ this module only knows how to read and validate that shape.
 
 For R1 only ``hormuz`` is populated. Additional regions are added by
 dropping a new ``config/benchmark/{name}.yaml`` — no code changes here.
+
+Two independent readiness flags, not one — do not conflate them:
+    :data:`REGION_STATUS` — live-pipeline readiness. The only flag
+        src/dashboard/core.py's ``AVAILABLE_REGIONS`` reads.
+    :data:`BENCHMARK_STATUS` — EVAL01 benchmark-spec readiness. What
+        tests/test_benchmark_regions.py's parametrized ``load_region``
+        coverage reads. A region can be "populated" here with no live
+        ingestion behind it at all (e.g. bab_el_mandeb).
 """
 
 from __future__ import annotations
@@ -52,14 +60,45 @@ CANONICAL_REGIONS: dict[str, str] = {
     "malacca": "Strait of Malacca",
 }
 
-#: Data-readiness per canonical region key. ``"populated"`` = real
-#: scenario/benchmark coverage exists today (only ``hormuz``).
-#: ``"planned"`` = the key is reserved in the canonical vocabulary but has
-#: no data behind it yet — declaring a region here does not claim it has data.
+#: LIVE-PIPELINE readiness per canonical region key — "does this region have
+#: real ingestion (connectors/agents/orchestrator) behind it, such that a
+#: manager-facing surface (the dashboard) should offer it?" ``"populated"``
+#: = real live data exists today (only ``hormuz``, until Phase B wires
+#: ingestion for another region). ``"planned"`` = reserved in the canonical
+#: vocabulary but not live yet. This is the ONLY status flag
+#: src/dashboard/core.py's ``AVAILABLE_REGIONS`` reads — see
+#: :data:`BENCHMARK_STATUS` below for the separate, EVAL01-only concern.
+#:
+#: These two flags were one field through A4; A4 surfaced that "this region
+#: has validated benchmark scenarios" (an EVAL01/offline concern) and "this
+#: region should appear in the live dashboard" (a live-ingestion/UI concern)
+#: are genuinely different questions that can diverge — bab_el_mandeb is
+#: benchmark-ready (a validated Region spec) but has no live ingestion, so
+#: it belongs in BENCHMARK_STATUS as "populated" while staying "planned"
+#: here. Flipping a key here to "populated" without real ingestion behind
+#: it would surface an empty-data region in the dashboard; flipping it in
+#: BENCHMARK_STATUS only affects EVAL01 test coverage.
 REGION_STATUS: dict[str, str] = {
     "hormuz": "populated",
     "bab_el_mandeb": "planned",
     "panama": "planned",
+    "suez": "planned",
+    "malacca": "planned",
+}
+
+#: BENCHMARK readiness per canonical region key — "does this region have a
+#: validated config/benchmark/{key}.yaml Region spec (and, once A5 lands,
+#: passing scenario YAMLs)?" Same "populated"/"planned" vocabulary as
+#: :data:`REGION_STATUS`, but a separate concern: this gates EVAL01 test
+#: coverage (see tests/test_benchmark_regions.py's
+#: ``test_load_region_succeeds_for_every_populated_region``, parametrized
+#: off this dict), not anything user-facing. Nothing outside the benchmark
+#: harness and its tests should read this — the dashboard reads
+#: :data:`REGION_STATUS` only.
+BENCHMARK_STATUS: dict[str, str] = {
+    "hormuz": "populated",
+    "bab_el_mandeb": "populated",
+    "panama": "populated",
     "suez": "planned",
     "malacca": "planned",
 }

@@ -8,6 +8,7 @@ import yaml
 import pytest
 
 from src.benchmark.regions import (
+    BENCHMARK_STATUS,
     CANONICAL_REGIONS,
     REGION_ALIASES,
     REGION_STATUS,
@@ -26,15 +27,16 @@ def test_load_region() -> None:
 
 @pytest.mark.parametrize(
     "region_key",
-    [key for key, status in REGION_STATUS.items() if status == "populated"],
+    [key for key, status in BENCHMARK_STATUS.items() if status == "populated"],
 )
 def test_load_region_succeeds_for_every_populated_region(region_key: str) -> None:
-    """Every region REGION_STATUS marks 'populated' must have a
+    """Every region BENCHMARK_STATUS marks 'populated' must have a
     config/benchmark/{key}.yaml that actually loads — a status flip not
     backed by a valid, passing YAML should fail this test immediately,
-    not surface later as a silent gap. Parametrized off REGION_STATUS
-    itself, so this extends automatically as more regions go populated —
-    today that's just hormuz."""
+    not surface later as a silent gap. Parametrized off BENCHMARK_STATUS
+    (the EVAL01 benchmark-readiness flag, not REGION_STATUS's live-pipeline
+    one — see regions.py's module docstring), so this extends automatically
+    as more regions validate."""
     region = load_region(region_key)
     assert region.name == region_key
 

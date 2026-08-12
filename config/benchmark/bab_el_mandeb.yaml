@@ -33,12 +33,18 @@ bab_el_mandeb:
   # that file's event-1 notes on why Suez tracks Bab el-Mandeb ~1:1).
   # MODERATE: market (Asia-Europe freight rates tripled to ~$5,500/FEU by
   # Feb 2024, peaked ~$8,400/FEU in Jul 2024).
-  # INCLUDED, with a caveat: news — the campaign was heavily and repeatedly
-  # reported across 2+ years by 8+ independent outlets in the evidence
-  # file's own sources list, but no quantified sentiment/volume index was
-  # found; any news-domain scenario magnitude drawn from this file is
-  # extrapolated from incident-count timing, not a measured news signal
-  # (see that file's event-1 'news' field and limitations #3).
+  # MODERATE (revised down from an earlier "dominant" reading of this same
+  # evidence): news — the evidence file offers only incident-count-as-proxy
+  # for this domain, not a quantified sentiment or article-volume index
+  # (event-1 'news' field, limitations #3). The news_agent's real signal is
+  # article-text sentiment (VADER, nltk.sentiment.vader) clustered by
+  # source-consensus (DBSCAN over embeddings) — see
+  # src/ingestion/news_connector.py's planned pipeline docstring. A count of
+  # attack incidents is not evidence about sentiment polarity or article
+  # clustering, so it cannot by itself establish a dominant news signal;
+  # heavy topical coverage is plausible but unmeasured here. Still included
+  # (real, sourced reporting volume documented via 8+ independent outlets in
+  # this file's own sources list), just not overstated as dominant.
   # EXCLUDED: disaster — the evidence file states explicitly "No
   # natural-hazard driver applies to this event ... a security/geopolitical
   # campaign, not a natural disaster" (event 1 'disaster' field).
