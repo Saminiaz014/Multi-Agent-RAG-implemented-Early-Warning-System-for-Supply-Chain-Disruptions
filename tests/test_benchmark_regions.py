@@ -24,6 +24,21 @@ def test_load_region() -> None:
     assert region.reroutable == False
 
 
+@pytest.mark.parametrize(
+    "region_key",
+    [key for key, status in REGION_STATUS.items() if status == "populated"],
+)
+def test_load_region_succeeds_for_every_populated_region(region_key: str) -> None:
+    """Every region REGION_STATUS marks 'populated' must have a
+    config/benchmark/{key}.yaml that actually loads — a status flip not
+    backed by a valid, passing YAML should fail this test immediately,
+    not surface later as a silent gap. Parametrized off REGION_STATUS
+    itself, so this extends automatically as more regions go populated —
+    today that's just hormuz."""
+    region = load_region(region_key)
+    assert region.name == region_key
+
+
 def test_load_scenario() -> None:
     spec = load_scenario("config/benchmark/scenarios/hormuz_P_CRIT.yaml")
     assert spec.region == "hormuz"

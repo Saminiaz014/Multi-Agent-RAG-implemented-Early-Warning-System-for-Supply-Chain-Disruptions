@@ -1,0 +1,68 @@
+# Region spec for Bab el-Mandeb — EVAL01 second region, grounded in
+# data/region_research/bab_el_mandeb_disruption_patterns.json.
+#
+# Consumed by src/benchmark/regions.py:load_region(). All region-specific
+# numeric parameters live here; regions.py and scenario_generator.py stay
+# region-agnostic and only read what this file provides.
+bab_el_mandeb:
+  center:
+    # documented: matches the existing "Bab el-Mandeb" monitoring point in
+    # config/settings.yaml's agents.natural_disaster.monitoring_points.red_sea
+    # block (the strait's narrowest point, between Yemen and Djibouti) —
+    # reused rather than re-sourced, so this codebase doesn't carry two
+    # divergent coordinate pairs for the same chokepoint.
+    lat: 12.58
+    lng: 43.33
+  # extrapolated: no Bab el-Mandeb-specific absolute transit count was found
+  # (data/region_research/bab_el_mandeb_disruption_patterns.json limitations
+  # #1) — only percentage-decline figures. Derived from that file's
+  # documented Suez Canal proxy: 2023 (pre-crisis) Suez transits ~26,434/yr
+  # (event 1 'shipping' field, sourced via shipsandports.com.ng / Bloomberg)
+  # / 365 days ~= 72/day. A scalar, not a [min, max] range, since only a
+  # single point estimate is documented, not a real min/max spread —
+  # src/benchmark/regions.py:load_region() accepts either form and
+  # normalizes a scalar to a one-element list.
+  baseline_transits_per_day: 72
+  # DOMINANT: geopolitical (the campaign IS the driver — >100 documented
+  # attack incidents, Nov 2023-mid 2024) and routing (85% of large
+  # containerships diverted via Cape of Good Hope by end of Dec 2023,
+  # +3,500-4,000 nm / +10-14 days per voyage — the most precisely
+  # quantified domain in the evidence file).
+  # STRONG: shipping (-50% YoY Suez transit decline, used throughout the
+  # evidence file as a documented proxy for Bab el-Mandeb transits — see
+  # that file's event-1 notes on why Suez tracks Bab el-Mandeb ~1:1).
+  # MODERATE: market (Asia-Europe freight rates tripled to ~$5,500/FEU by
+  # Feb 2024, peaked ~$8,400/FEU in Jul 2024).
+  # INCLUDED, with a caveat: news — the campaign was heavily and repeatedly
+  # reported across 2+ years by 8+ independent outlets in the evidence
+  # file's own sources list, but no quantified sentiment/volume index was
+  # found; any news-domain scenario magnitude drawn from this file is
+  # extrapolated from incident-count timing, not a measured news signal
+  # (see that file's event-1 'news' field and limitations #3).
+  # EXCLUDED: disaster — the evidence file states explicitly "No
+  # natural-hazard driver applies to this event ... a security/geopolitical
+  # campaign, not a natural disaster" (event 1 'disaster' field).
+  active_domains: [shipping, market, geopolitical, routing, news]
+  # documented: the evidence file explicitly finds no natural-disaster
+  # driver anywhere in this region's disruption history within its
+  # research scope (limitations #2) — "none" rather than Hormuz's "low",
+  # since this is an affirmative absence found in the evidence, not merely
+  # an absence of data to look at.
+  disaster_relevance: none
+  # true, documented: Cape of Good Hope is a real, heavily-used substitute
+  # route — 85% of large (7,500+ TEU) containerships diverted via Cape by
+  # end of Dec 2023 (up from 13% in late Nov 2023), adding ~3,500-4,000
+  # nautical miles / ~10-14 days per voyage. Contrast with Hormuz
+  # (reroutable: false below its own file) — no sea alternate exists into
+  # the Persian Gulf; here one does and is well-documented in active use.
+  reroutable: true
+  # extrapolated: unlike Hormuz (no alternate route -> no pressure valve ->
+  # superlinear losses as closure severity rises), Bab el-Mandeb has a
+  # real, well-used substitute that lets vessels absorb disruption via
+  # added distance/time/fuel cost roughly in proportion to how much
+  # traffic diverts, rather than losses compounding catastrophically.
+  # Directionally supported by the roughly proportional (not wildly
+  # divergent) ~50% shipping-volume decline vs ~60% Suez revenue decline
+  # both documented for 2024 — no source states "linear" outright, hence
+  # extrapolated rather than documented.
+  loss_scaling: linear
