@@ -1,0 +1,115 @@
+# Region spec for the Strait of Malacca — EVAL01 fifth region, grounded in
+# data/region_research/malacca_disruption_patterns.json.
+#
+# Consumed by src/benchmark/regions.py:load_region(). All region-specific
+# numeric parameters live here; regions.py and scenario_generator.py stay
+# region-agnostic and only read what this file provides.
+malacca:
+  center:
+    # documented: matches the existing "Malacca Strait Center" monitoring
+    # point in config/settings.yaml's
+    # agents.natural_disaster.monitoring_points.malacca block, reused for
+    # the same reason bab_el_mandeb's and suez's coordinates were reused
+    # (one coordinate per chokepoint across this codebase).
+    lat: 2.50
+    lng: 101.80
+  # documented: "normal daily flow" of 200-220 vessels/day, the figure
+  # given the most authoritative-reading framing in a targeted search (this
+  # region's evidence file has no shipping-count baseline of its own — the
+  # field guidance for this file didn't ask for one either, but it's a
+  # required field). Corroborating context, not used as the anchor: ~82,000
+  # -94,000 vessels/yr (~225-257/day) is the commonly cited annual figure,
+  # and 2025 set a new record at 102,525 transits (~281/day) — this region
+  # spec describes long-run normal conditions, not the 2025 peak.
+  baseline_transits_per_day: [200, 220]
+  # STRONG: disaster (haze) -- PSI 322-341 "Hazardous" in 2015, PSI 145
+  # "Unhealthy" in 2019, burned area 2.6M ha in 2015 alone, well documented
+  # across two separate episodes.
+  # MODERATE: news -- secondary channel for BOTH signal families: ReCAAP
+  # ISC issues dedicated public "Incident Alert" bulletins when piracy
+  # clusters occur (documented, though bulletin issuance is not itself a
+  # volume/sentiment index), and both haze episodes drew extensive
+  # contemporary press (CNN, BBC, CNBC, Malay Mail, Asia Times) despite no
+  # quantified index being found for either.
+  # WEAK: geopolitical -- this is the piracy-domain-mapping decision: piracy
+  # maps PRIMARILY to geopolitical (fits that composite's stability
+  # sub-component), NOT to shipping (the evidence file explicitly finds "no
+  # source describing piracy... measurably reducing SOMS vessel-transit
+  # counts" -- individually-targeted opportunistic boardings don't deter
+  # strait-wide traffic the way a closure or drought does). "Weak" reflects
+  # the incidents' own documented severity, not the richness of the
+  # evidence: 86% of SOMS attacks are ReCAAP CAT 4 (opportunistic,
+  # hit-and-run), chronic low-grade background noise (27-108 incidents/yr
+  # across the years examined) rather than campaign-level tension the way
+  # bab_el_mandeb's geopolitical domain is dominant. This decision and its
+  # reasoning are also recorded in
+  # data/region_research/malacca_disruption_patterns.json's limitations
+  # section, which previously left it an open ambiguity.
+  # WEAK: routing -- a targeted follow-up search (2026-08-12, matching the
+  # rigor applied to panama.yaml/suez.yaml) specifically checked for
+  # documented diversion to the Sunda or Lombok Straits due to piracy or
+  # haze. None was found: the evidence file's own routing fields are
+  # explicitly null for the piracy events ("no documented rerouting
+  # response... attributable specifically to chronic piracy risk"), and the
+  # closest haze-routing precedent is a 2010 Malaysian navigational hazard
+  # warning at <2nm visibility (not a 2015/2019-specific measurement, and
+  # an advisory, not documented diversion). The follow-up search surfaced
+  # some very specific-sounding secondary-source statistics (e.g. seasonal
+  # Sunda/Lombok traffic-split percentages, an "incidents/month" routing-
+  # review threshold) that read as synthetic/unattributed rather than
+  # credible primary reporting and are deliberately NOT cited here or in
+  # the evidence file. What IS well-established: Sunda and Lombok are real,
+  # physically existing alternate straits, but DRAFT-CONSTRAINED (shallower
+  # than Malacca, unusable by the largest/deepest-draft vessels), at
+  # substantial added distance/time. Included as weak, not absent, on that
+  # structural-possibility basis -- same treatment as panama's routing
+  # before its own follow-up search found real diversion evidence; unlike
+  # panama, this search did NOT surface comparably credible diversion
+  # evidence for malacca.
+  # WEAK (evidence-silent, not evidence-contradicted): market -- the
+  # weakest-evidenced inclusion in this file, and arguably in the whole
+  # benchmark so far: all four documented events' market fields are null,
+  # with no quantified OR even qualitative market signal located anywhere
+  # in the evidence file. Included on domain-plausibility grounds (chronic
+  # petty piracy could plausibly nudge marine war-risk/insurance costs at
+  # the margin; haze-driven port slowdowns could plausibly have minor
+  # freight-cost effects) rather than direct evidence, since nothing in the
+  # evidence file actively CONTRADICTS a market signal existing (unlike
+  # panama's geopolitical, which the evidence explicitly ruled out).
+  active_domains: [shipping, disaster, news, geopolitical, routing, market]
+  # HIGH, but structurally different from panama's HIGH: this is
+  # ACUTE-ONSET ATMOSPHERIC (haze; documented onset-to-peak gradients of
+  # 3-5 days in 2019 and 15 days in 2015 -- see the evidence file's
+  # event-2 notes on why "the" gradient isn't a fixed constant), versus
+  # panama's SLOW-ONSET HYDROLOGICAL drought (months from first restriction
+  # to trough). Two structurally different disaster shapes across the
+  # benchmark's two disaster-dominant regions is deliberate -- it is why
+  # malacca belongs in this benchmark alongside panama rather than as a
+  # second drought-shaped region or a fifth geopolitical one.
+  disaster_relevance: high
+  # true, with caveats -- do not read this as equivalent to bab_el_mandeb's
+  # 85%-documented Cape of Good Hope diversion. Sunda and Lombok Straits
+  # are real substitutes (hence true), but DRAFT-CONSTRAINED: both are
+  # shallower than Malacca and cannot take the largest/deepest-draft
+  # vessels regardless of cost tolerance -- a physical limit, not just an
+  # economic one. Added distance/time is substantial by general geographic
+  # knowledge (materially longer than the Malacca transit) though this
+  # file's follow-up search did not surface a source reliable enough to
+  # cite a specific added-nm/added-days figure (see the routing comment
+  # above on why some found figures were excluded as unreliable). No
+  # documented instance of vessels actually diverting to either strait
+  # because of piracy or haze specifically was found -- "true" reflects
+  # physical/geographic possibility (this field's documented meaning), not
+  # an observed diversion response to either driver in this file.
+  reroutable: true
+  # extrapolated: linear, not superlinear -- the evidence file's own
+  # key_finding is explicit that haze "degrade[s] throughput without ever
+  # closing the strait -- there is no full-closure precedent in any source
+  # found in this pass," and piracy is chronic background noise, not a
+  # compounding crisis. Both signal families degrade gradually/continuously
+  # (worse PSI -> more restriction; more incidents -> more alerts) rather
+  # than having a catastrophic-closure failure mode the way hormuz/suez do
+  # (where a real or near-total closure creates compounding backlog
+  # dynamics). No source states "linear" outright, hence extrapolated, but
+  # the "never closes" structural fact is itself documented, not inferred.
+  loss_scaling: linear

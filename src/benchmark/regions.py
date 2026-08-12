@@ -99,8 +99,8 @@ BENCHMARK_STATUS: dict[str, str] = {
     "hormuz": "populated",
     "bab_el_mandeb": "populated",
     "panama": "populated",
-    "suez": "planned",
-    "malacca": "planned",
+    "suez": "populated",
+    "malacca": "populated",
 }
 
 #: Alternate spellings that resolve to a canonical key. ``red_sea`` is the

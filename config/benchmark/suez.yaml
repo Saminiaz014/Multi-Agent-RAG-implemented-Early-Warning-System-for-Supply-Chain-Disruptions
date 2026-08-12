@@ -1,0 +1,104 @@
+# Region spec for the Suez Canal — EVAL01 fourth region, grounded in
+# data/region_research/suez_disruption_patterns.json.
+#
+# Consumed by src/benchmark/regions.py:load_region(). All region-specific
+# numeric parameters live here; regions.py and scenario_generator.py stay
+# region-agnostic and only read what this file provides.
+suez:
+  center:
+    # documented: midpoint of config/settings.yaml's existing
+    # extraction.chokepoints.suez bounding_box (lat_min 29.5/lat_max 31.5,
+    # lon_min 32.0/lon_max 33.0) -> (30.5, 32.5), reused rather than
+    # re-sourced for the same reason bab_el_mandeb's coordinate was reused
+    # (config/benchmark/bab_el_mandeb.yaml) -- one coordinate per
+    # chokepoint across this codebase, not two divergent ones. Sits near
+    # Ismailia / the Great Bitter Lake, roughly the canal's midpoint
+    # between Port Said (Mediterranean) and Suez (Red Sea).
+    lat: 30.5
+    lng: 32.5
+  # documented: ~50-56 vessels/day is the genuinely pre-2021 (pre-Ever
+  # Given) normal — "about 50 ships per day" in 2019, "mid-50s" through
+  # 2019, "51.5 per day" 2020 average (Statista/Bloomberg, per a targeted
+  # search for this specific figure; not itself in
+  # data/region_research/suez_disruption_patterns.json, which only carries
+  # POST-2021 annual counts). For context (not used here, since the task
+  # asks for the pre-2021 normal specifically): the evidence file's own
+  # 2023 annual count (26,434 transits, event 2 'shipping' field) implies
+  # ~72/day -- notably higher, reflecting real post-pandemic Suez traffic
+  # growth between 2020 and the 2023-2024 Houthi-driven decline. A real
+  # [min, max] range, not a fabricated one -- both endpoints are sourced.
+  baseline_transits_per_day: [50, 56]
+  # DOMINANT: shipping -- both events are shipping-count events by
+  # definition (Ever Given: 6-day physical blockage, 429 vessels queued;
+  # 2023-2024: -50% YoY transit decline, 13,213 vs 26,434 ships).
+  # MODERATE: market ($9-9.6bn/day trade value halted during Ever Given;
+  # $7bn cumulative 2024 revenue loss, -60%, in the sustained event).
+  # DOMINANT: routing -- passes the same congestion-vs-diversion test just
+  # applied to panama.yaml, cleanly, for the SUSTAINED event: the Cape of
+  # Good Hope reroute (85% of large containerships diverted, +3,500-4,000
+  # nm / +10-14 days -- see bab_el_mandeb.yaml, the same physical corridor)
+  # is genuine route DEVIATION, exactly what an AIS-deviation model
+  # detects, not mere congestion. NOT applicable to Ever Given, though:
+  # the evidence file's routing field for that event is explicitly null --
+  # "no rerouting occurred or was meaningfully possible during the 6-day
+  # physical blockage itself... vessels not yet committed... had not yet
+  # had time to divert before the canal reopened." routing is dominant
+  # for this region because of the sustained event, not despite Ever
+  # Given contributing nothing to it.
+  # WEAK: geopolitical -- the evidence file records a real number here
+  # (>100 documented Houthi attack incidents, event 2), not null, but the
+  # attacks themselves occur south of the canal in the Red Sea/Bab
+  # el-Mandeb corridor (see bab_el_mandeb.yaml), not within Suez's own
+  # canal zone -- Suez's infrastructure was never itself a conflict site.
+  # Included as weak/indirect (the causal driver and a real, sourced
+  # incident count exist) rather than absent (the driver has no
+  # relationship to this region at all) or dominant (unlike bab_el_mandeb,
+  # where the campaign IS the region's own event).
+  # STRONG: news -- Ever Given generated "an exceptionally large,
+  # near-instantaneous global media spike" (evidence file, event 1 'news'
+  # field -- viral within 24-48h, though not itself a quantified index);
+  # the sustained event separately drew heavy, sustained coverage (IMF,
+  # Bloomberg, gCaptain, among others, per that event's sources list).
+  # ABSENT: disaster -- Ever Given's proximate cause cited ~40kt winds and
+  # a sandstorm, but the evidence file itself flags this as "qualitative
+  # -- a contributing weather factor, NOT a scenario-grade quantified
+  # disaster signal" (event 1 'disaster' field): a single anecdotal
+  # contributing factor to one accident, not an ongoing, measurable
+  # environmental risk pattern the way panama's drought or a future
+  # malacca haze signal are. The 2023-2024 event has no disaster
+  # component at all (evidence file: "not applicable").
+  active_domains: [shipping, market, routing, geopolitical, news]
+  # documented (by omission): no disaster domain drives either event (see
+  # active_domains above) -- "none" rather than hormuz's "low", the same
+  # affirmative-absence reasoning used for bab_el_mandeb.
+  disaster_relevance: none
+  # true, documented: Cape of Good Hope is a real, heavily-used substitute
+  # for the sustained event -- 85% of large containerships diverted,
+  # +3,500-4,000 nm / +10-14 days per voyage (same corridor and figures as
+  # bab_el_mandeb.yaml, since Bab el-Mandeb and Suez are the same shipping
+  # lane observed from its two ends). Does NOT apply to Ever Given: the
+  # evidence file is explicit that no rerouting was possible or occurred
+  # during that 6-day blockage itself (see the routing comment above) --
+  # true describes the region's capacity to reroute over a sustained
+  # disruption, not an instantaneous one.
+  reroutable: true
+  # extrapolated, and deliberately in tension with itself -- the two
+  # documented events pull in different directions and this field can only
+  # hold one value, so the choice and its reasoning are recorded here
+  # rather than smoothed away. Ever Given (binary physical blockage, no
+  # detour possible in time) shows a queue-clearing dynamic that outlasts
+  # the blockage itself -- a 6-day closure took 5 more days to clear a
+  # 429-vessel backlog, i.e. total disruption (11 days) nearly doubled the
+  # blockage duration, consistent with recovery time scaling faster than
+  # closure duration (superlinear). The sustained 2023-2024 event, taken
+  # alone, would argue the other way -- a real pressure valve (Cape of
+  # Good Hope) exists and is heavily used, the same reasoning that got
+  # bab_el_mandeb.yaml a "linear" call for this SAME underlying event.
+  # superlinear is chosen here because a full physical blockage (Ever
+  # Given's failure mode) is Suez's structurally distinctive risk --
+  # the single point of catastrophic failure no reroute can help with in
+  # time -- and its queue-compounding dynamic is real and documented,
+  # not inferred. A scenario author drawing a P_CRIT-equivalent from Ever
+  # Given specifically should weigh this reasoning against a
+  # sustained-event scenario, which behaves more like bab_el_mandeb's.
+  loss_scaling: superlinear

@@ -29,14 +29,23 @@ panama:
   # STRONG: shipping (36 -> 18-24 daily transit-slot cap, -29% FY2024 total
   # transits) and market (auction slots: normal $15k-140k -> $2.85M record
   # in Nov 2023; later $4M in the 2026 event -- both documented).
-  # WEAK: routing -- included, not absent, because Suez and the Magellan
-  # Strait are real physical alternatives (see reroutable below), but the
-  # evidence file documents no vessels actually diverting to either during
-  # the 2023-2024 drought. What IS documented in this domain's territory is
-  # queueing/congestion AT Panama itself (avg wait 11.4 days, max 22.8 days,
-  # Neopanamax daily transits -25% YoY) -- vessels waited rather than
-  # rerouted away. That queueing behavior is the weak proxy signal actually
-  # available here, not genuine diversion evidence.
+  # WEAK: routing -- kept in, per a targeted follow-up search (2026-08-12)
+  # specifically for DIVERSION (not congestion) evidence, which found real,
+  # credible, dated diversion: Stolt-Nielsen's 166-vessel chemical-tanker
+  # fleet publicly rerouted via Suez in Nov 2023 (TradeWinds/Bloomberg/AJOT/
+  # SupplyChainBrain, corroborating), and Maersk used a Balboa-Manzanillo
+  # rail "land bridge" to bypass the canal for part of its OC1 service
+  # (CNBC/gCaptain). This is genuine route DEVIATION -- what
+  # routing_connector.py/routing_agent's AIS-deviation model can actually
+  # detect -- structurally distinct from the queueing/congestion figures
+  # also on record here (avg wait 11.4 days, max 22.8 days, Neopanamax
+  # daily transits -25% YoY): a queued vessel's path hasn't changed, so
+  # congestion alone would NOT be detectable by this domain. Both are real;
+  # neither is "the" signal alone. Still WEAK, not moderate/strong: no
+  # source gives a total-fleet diversion percentage, and the queued/
+  # premium-paying population appears much larger than the population that
+  # actually diverted. See data/region_research/panama_disruption_patterns.json's
+  # event-1 routing field and limitations #5 for the full resolution.
   # MODERATE: news -- no quantified sentiment/volume index was found
   # (evidence file limitations #3); a slow-building drought story is
   # plausible but unmeasured, same caveat as bab_el_mandeb's news field.
@@ -60,16 +69,21 @@ panama:
   disaster_relevance: high
   # true, but nuanced -- do not read this as "Panama behaves like
   # bab_el_mandeb." Suez and the Magellan Strait are real, physically
-  # existing alternate routes (hence true, not Hormuz's false), but at
-  # extreme added cost/distance for most Panama-optimized trans-hemispheric
-  # cargo. Critically, NO source in the evidence file documents vessels
-  # actually diverting to either during the 2023-2024 drought -- the
-  # documented response was queueing (up to 22.8 days) and paying record
-  # auction premiums ($2.85M, later $4M) to hold a slot, not rerouting
-  # away. So "true" reflects physical/geographic possibility, per this
-  # field's documented meaning ("whether traffic CAN divert"), while the
-  # observed 2023-2024 behavior was functionally much closer to Hormuz's
-  # hold-in-place pattern than to bab_el_mandeb's real 85% diversion.
+  # existing alternate routes (hence true, not Hormuz's false), and a
+  # targeted follow-up search found real (if modest-scale) diversion during
+  # the 2023-2024 drought: Stolt-Nielsen's 166-vessel fleet via Suez (Nov
+  # 2023) and Maersk's Balboa-Manzanillo rail land bridge -- see the
+  # routing field above and data/region_research/panama_disruption_patterns.json
+  # for the sources. But this remains a minority response: the dominant,
+  # much larger documented pattern was queueing (up to 22.8 days) and
+  # paying record auction premiums ($2.85M, later $4M) to hold a slot
+  # rather than physically diverting -- most Panama-optimized
+  # trans-hemispheric cargo still faces extreme added cost/distance via
+  # either alternative. So "true" is now backed by genuine, if limited,
+  # diversion evidence (stronger footing than "physical possibility
+  # alone"), while the dominant observed 2023-2024 behavior still leans
+  # closer to Hormuz's hold-in-place pattern than to bab_el_mandeb's real
+  # 85% diversion.
   reroutable: true
   # extrapolated: because the Suez/Magellan alternative is largely
   # theoretical for most Panama traffic (see reroutable above), it does not
