@@ -508,3 +508,26 @@ identically before and after.
     `DEFAULT_SCENARIOS`/`region_name="hormuz"`. Per `MULTIREGION_IMPLEMENTATION_SEQUENCE.md`
     Prompt 11, a second region requires either editing this script or writing an
     equivalent, region-parameterized one — this does not exist today.
+
+17. **`Region.baseline_transits_per_day` is unused in `materialize_scenario`.**
+    Confirmed by reading the consumer code directly (not inferred from values):
+    `materialize_scenario(spec, region)` only reads `region.active_domains` off its
+    `region` argument (`src/benchmark/scenario_generator.py`, the `if domain not in
+    region.active_domains or not sig` check) — `region.baseline_transits_per_day` is
+    never referenced there, nor anywhere in `scenario_batch_generator.py`. The
+    `shipping` domain's actual level comes entirely from the *scenario* YAML's
+    `signals.shipping.baseline.mean`, which `_apply_effect`'s `multiplicative_ramp`
+    then multiplies directly (`out[day] = out[day] * (1.0 + (target - 1.0) *
+    strength)`, reducing to `out[day] * target` at full intensity) — a ratio against
+    the signal's own baseline, not against the region spec's field. Grepping
+    `baseline_transits_per_day` across `src/benchmark/` confirms every reference
+    outside `regions.py` (where `load_region` parses it onto the dataclass) is empty.
+    **Authoring convention, not enforced by any code:** every scenario YAML written so
+    far sets `signals.shipping.baseline.mean` equal to its region's
+    `baseline_transits_per_day` (e.g. hormuz: signal mean `70` sits inside region
+    `[60, 80]`; bab_el_mandeb: signal mean `72` equals the region's scalar `72`) — this
+    keeps the scenario's shipping level consistent with the region spec's documented
+    normal-conditions figure, but nothing checks it. A scenario author could set
+    `signals.shipping.baseline.mean` to any value with no relationship to the region's
+    `baseline_transits_per_day` and nothing would raise or warn. Each scenario YAML's
+    `shipping` line now carries a comment noting this convention.

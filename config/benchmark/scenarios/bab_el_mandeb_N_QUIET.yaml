@@ -29,6 +29,10 @@ signals:
   # signals entry for it would be silently ignored regardless (see
   # docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §2) — omitted for
   # clarity rather than included and disabled.
+  # shipping.baseline.mean=72 matches bab_el_mandeb.yaml's
+  # baseline_transits_per_day BY CONVENTION ONLY, not enforced — see
+  # bab_el_mandeb_P_CRIT.yaml's shipping comment and
+  # docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 17.
   shipping: {baseline: {mean: 72, std: 5}, effect: null}
   market: {baseline: {mean: 0.0, std: 1.0}, effect: null}
   geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: null}

@@ -35,6 +35,10 @@ event:
   duration_days: 15
   peak_band: none
 signals:
+  # shipping.baseline.mean=72 matches bab_el_mandeb.yaml's
+  # baseline_transits_per_day BY CONVENTION ONLY, not enforced — see
+  # bab_el_mandeb_P_CRIT.yaml's shipping comment and
+  # docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 17.
   shipping: {baseline: {mean: 72, std: 5}, effect: null}
   # extrapolated: an isolated freight-rate spike, deliberately smaller than
   # bab_el_mandeb_P_CRIT.yaml's genuine crisis-level market target (2.0) —

@@ -32,8 +32,13 @@ signals:
   # 'shipping' field: 13,213 ships 2024 vs ~26,434 in 2023) -> multiplicative
   # target 0.50 (a -50% decline means final = 0.50 * baseline; NOT "-50",
   # NOT "50"). baseline mean=72 matches config/benchmark/bab_el_mandeb.yaml's
-  # baseline_transits_per_day; std=5 extrapolated at the same relative noise
-  # (~7% of mean) as hormuz's own shipping std.
+  # baseline_transits_per_day BY CONVENTION ONLY, not enforced:
+  # materialize_scenario() never reads region.baseline_transits_per_day
+  # (confirmed by reading the consumer code; see
+  # docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 17) — this
+  # baseline.mean is what the shipping signal and effect.target multiplier
+  # actually run on. std=5 extrapolated at the same relative noise (~7% of
+  # mean) as hormuz's own shipping std.
   shipping: {baseline: {mean: 72, std: 5}, effect: {type: multiplicative_ramp, target: 0.50, lead_days: 0}}
   # extrapolated: Asia-Europe freight rates "tripled" by Feb 2024 (documented,
   # evidence file event 1 'market' field: ~$5,500/FEU peak). market's z-score

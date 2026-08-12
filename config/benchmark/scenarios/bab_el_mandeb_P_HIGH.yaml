@@ -35,7 +35,10 @@ event:
 signals:
   # extrapolated: P_CRIT's 0.50 (50% drop) scaled by Hormuz's own
   # shipping-drop ratio (1-0.65)/(1-0.40) = 0.583 -> a 29% drop -> target
-  # 0.71 (1 - 0.50*0.583, rounded).
+  # 0.71 (1 - 0.50*0.583, rounded). baseline.mean=72 matches
+  # config/benchmark/bab_el_mandeb.yaml's baseline_transits_per_day BY
+  # CONVENTION ONLY, not enforced — see bab_el_mandeb_P_CRIT.yaml's shipping
+  # comment and docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 17.
   shipping: {baseline: {mean: 72, std: 5}, effect: {type: multiplicative_ramp, target: 0.71, lead_days: 0}}
   # extrapolated: P_CRIT's 2.0 * Hormuz's market ratio (1.4/2.5 = 0.56) =
   # 1.12.

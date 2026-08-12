@@ -12,6 +12,9 @@ event:
   duration_days: 25
   peak_band: high
 signals:
+  # baseline.mean kept equal to hormuz.yaml's baseline_transits_per_day by
+  # convention only, not enforced — see hormuz_P_CRIT.yaml's shipping
+  # comment and docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 17.
   shipping: {baseline: {mean: 70, std: 5}, effect: {type: multiplicative_ramp, target: 0.65, lead_days: 0}}
   market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 1.4, lead_days: -3}}
   geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: {type: additive_ramp, target: 0.45, lead_days: 4}}

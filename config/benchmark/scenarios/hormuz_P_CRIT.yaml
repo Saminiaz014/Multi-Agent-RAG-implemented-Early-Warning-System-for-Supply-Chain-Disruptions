@@ -12,6 +12,13 @@ event:
   duration_days: 60
   peak_band: critical
 signals:
+  # baseline.mean (70) is kept equal to config/benchmark/hormuz.yaml's
+  # baseline_transits_per_day range [60, 80] by authoring convention only —
+  # materialize_scenario() never reads region.baseline_transits_per_day
+  # (confirmed by reading the consumer code; see
+  # docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 17), so nothing
+  # enforces this. shipping's effect.target is a multiplier on this
+  # baseline.mean, not on the region field.
   shipping: {baseline: {mean: 70, std: 5}, effect: {type: multiplicative_ramp, target: 0.40, lead_days: 0}}
   market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 2.5, lead_days: -5}}
   geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: {type: additive_ramp, target: 0.80, lead_days: 7}}
