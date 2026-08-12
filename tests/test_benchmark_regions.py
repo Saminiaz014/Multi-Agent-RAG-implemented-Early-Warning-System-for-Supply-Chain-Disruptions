@@ -111,6 +111,19 @@ def test_canonical_regions_status() -> None:
     assert set(REGION_STATUS) == set(CANONICAL_REGIONS)
 
 
+def test_status_filtering_returns_only_hormuz() -> None:
+    """The exact filter src/dashboard/core.py's AVAILABLE_REGIONS applies
+    (CANONICAL_REGIONS filtered to status == "populated") yields exactly
+    hormuz today — mirrored here as a direct unit test of the filtering
+    mechanism itself, independent of the dashboard module."""
+    populated = {
+        display_name: key
+        for key, display_name in CANONICAL_REGIONS.items()
+        if REGION_STATUS.get(key) == "populated"
+    }
+    assert populated == {"Strait of Hormuz": "hormuz"}
+
+
 # ===========================================================================
 # Fix 3/4/6 (docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6): load-time
 # validation that converts previously-silent corruption into a loud
