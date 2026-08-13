@@ -1,0 +1,114 @@
+# P-CRIT: the 2021 Ever Given grounding — the well-quantified event in
+# data/region_research/suez_disruption_patterns.json (event 1 of 2). The
+# 2023-2024 Red Sea/Bab el-Mandeb knock-on decline (event 2) is deliberately
+# NOT blended in here, per that file's own key finding that the two events
+# are structurally distinct (instantaneous zero-warning physical blockage
+# vs. slow sustained diversion) and per the explicit decision recorded in
+# this prompt's Task 0d: P_CRIT = Ever Given, because it is the
+# best-documented, defining Suez event and its zero-warning shape is the
+# structural contrast that makes the cross-region lead-time comparison
+# meaningful — poor lead time on this scenario is an expected, honest
+# finding, not a defect to engineer around.
+#
+# ONLY THREE DOMAINS MOVE: shipping, market, news. routing and geopolitical
+# are `effect: null` here, exactly as documented — the evidence file's
+# 'routing' field for this event is explicitly null ("no rerouting occurred
+# or was meaningfully possible during the 6-day physical blockage itself...
+# vessels not yet committed... had not yet had time to divert before the
+# canal reopened") and its 'geopolitical' field is explicitly null ("not
+# applicable — this is a navigational/physical accident..., not a
+# geopolitical event. No adversarial actor, no escalation timeline, no
+# precursor tension to detect"). config/benchmark/suez.yaml classifies
+# routing as this region's DOMINANT domain, but that rating is earned by the
+# SEPARATE 2023-2024 Red Sea knock-on event (Cape of Good Hope diversion,
+# 85% of large containerships, +3,500-4,000 nm) — a region-level
+# classification describes the region across both its documented events,
+# not any single scenario drawn from just one of them. This scenario does
+# not model that event at all, so routing stays silent here despite the
+# region's own DOMINANT rating. Same reasoning for geopolitical (WEAK
+# region-level, driven entirely by the Houthi campaign, which is likewise
+# absent from Ever Given).
+#
+# ZERO-WARNING SHAPE: ramp_days=1 means intensity is already at 1.0 on the
+# onset day itself (scenario_generator.py:_intensity_curve — offset 0 <
+# ramp=1, intensity=(0+1)/1=1.0), i.e. no gradual buildup, matching the
+# evidence file's own instruction: "the entire signal is contemporaneous
+# with or lagging the shipping-domain shock..., not leading it... its
+# event.ramp_days should be authored as very short (near-instantaneous
+# onset)". Every active domain's lead_days is 0 for the same reason — this
+# directly encodes the file's key_finding that "no upstream signal...
+# meaningfully precedes it", unlike hormuz/bab_el_mandeb's P_CRIT (real
+# multi-day precursor leads on geopolitical/routing/news), which is exactly
+# the point of this scenario: it exists to produce a genuinely poor
+# lead-time result, honestly.
+#
+# duration_days=11 matches the evidence file's own explicit guidance:
+# "Total event window for scenario-authoring purposes should probably span
+# 2021-03-23 (grounding) through 2021-04-03 (queue fully cleared) — 11 days
+# end-to-end — even though the canal itself was physically blocked for only
+# 6 of those days." A known simplification (flagged, not smoothed away):
+# this pipeline applies one flat effect target across the whole window, so
+# it cannot separately represent the 6-day full closure and the following
+# 5-day backlog-clearing recovery (which would actually show ELEVATED, not
+# reduced, throughput as the queue drains) — the shipping target below
+# models the dominant, most severe sub-period (the closure itself), not the
+# recovery surge.
+scenario_id: suez_P_CRIT
+region: suez
+class: P-CRIT
+seed: 42
+days: 365
+event:
+  onset_day: 240
+  ramp_days: 1
+  duration_days: 11
+  peak_band: critical
+signals:
+  # documented: the canal was "physically impassable" for 6 days 7 hours
+  # (evidence file event 1 'shipping' field) — during the closure itself,
+  # real transit throughput is ~0, not merely reduced. target=0.05 (a ~95%
+  # drop) approximates "near-total closure" without a literal 0.0, which
+  # would degenerate the multiplicative effect entirely
+  # (out*(1+(0-1)*strength) = out*(1-strength) -> exactly 0 at full
+  # intensity) for no documented reason to prefer a hard zero over a
+  # near-zero. baseline.mean=53 = midpoint of suez.yaml's documented
+  # baseline_transits_per_day range [50, 56] (BY CONVENTION ONLY, not
+  # enforced — see docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap
+  # 17); std=4, extrapolated at this region's own ~7% mean ratio (matching
+  # hormuz 5/70=7.1%, bab_el_mandeb 5/72=6.9%, panama 3/36=8.3%).
+  shipping: {baseline: {mean: 53, std: 4}, effect: {type: multiplicative_ramp, target: 0.05, lead_days: 0}}
+  # extrapolated: no native $-to-index mapping exists for market's z-score
+  # convention (same gap noted in bab_el_mandeb_P_CRIT.yaml), so this is
+  # calibrated the same way that file was: against Hormuz's own P_CRIT
+  # market target (2.5), scaled by the relative severity of the
+  # shipping-domain shock. severity_ratio = (1 - 0.05) / (1 - 0.40) =
+  # 0.95/0.60 = 1.5833 (Suez's shipping shock is far more severe than
+  # Hormuz's — full closure vs. partial reduction). target = 2.5 * 1.5833 =
+  # 3.9583, rounded to 4.0. Plausibility cross-check against the evidence
+  # file's own documented dollar figures: trade value halted was
+  # $9-9.6bn/day against a documented "normal daily transit value range" of
+  # only $3-9bn/day (evidence file event 1 'market' field) — i.e. the
+  # halted value EXCEEDS the top of the normal range, an extreme shock by
+  # the evidence file's own numbers, consistent with scaling above Hormuz's
+  # anchor rather than below it (the direction bab_el_mandeb's milder
+  # shipping shock required).
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 4.0, lead_days: 0}}
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: null}
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: null}
+  # extrapolated: no quantified news index exists (evidence file event 1
+  # 'news' field, evidence tag itself "extrapolated" — only the qualitative
+  # fact of "an exceptionally large, near-instantaneous global media spike"
+  # is recorded, the ship becoming "a viral meme within 24-48 hours").
+  # config/benchmark/suez.yaml classifies news STRONG for this region
+  # (between bab_el_mandeb's MODERATE, P_CRIT target 0.55, and hormuz's
+  # DOMINANT, P_CRIT target 0.75) — placed at 0.65, between those two
+  # anchors, matching the STRONG tier's position between MODERATE and
+  # DOMINANT. lead_days=0 (not hormuz's leading +10 or bab's +10): per the
+  # zero-warning shape note above, virality followed the grounding by
+  # ~24-48h, i.e. it lagged (or at most was contemporaneous with) the
+  # shipping shock at this scenario's day-level granularity, never led it.
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.65, lead_days: 0}}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

@@ -1,0 +1,59 @@
+# P-HIGH: a shorter, less severe variant of suez_P_CRIT.yaml, drawn from
+# the SAME zero-warning Ever Given archetype (a shorter, faster-cleared
+# blockage), not the sustained Red Sea knock-on event — keeping the same
+# archetype avoids reintroducing a slow-ramp shape into what P_CRIT
+# establishes as this region's structurally distinct, zero-lead-time
+# scenario.
+#
+# DERIVATION METHOD (stated explicitly): built via an explicit
+# `copy.deepcopy(P_CRIT)` in a scratch verification script (not shipped),
+# then scaled — never a shallow copy / dict-spread. The script re-loaded
+# and asserted suez_P_CRIT.yaml's own values (shipping target 0.05, market
+# target 4.0, onset_day 240) were unchanged after building this file's
+# numbers, both in memory (`crit.signals == snapshot`) and by re-reading
+# the actual written files (see this prompt's validation output).
+#
+# Event timing: Hormuz's own established P_CRIT-to-P_HIGH ratios (onset
+# 120/240=0.5, ramp 7/12=0.583, duration 25/60=0.417) applied to
+# suez_P_CRIT.yaml's own timing (240/1/11) -- onset 240*0.5=120,
+# duration 11*0.417=4.58 rounded to 5. ramp_days is NOT scaled down from
+# P_CRIT's already-minimal 1 (0.583*1=0.583 has no meaningful day-level
+# floor below 1) -- both P_CRIT and P_HIGH keep the same near-instantaneous
+# onset shape, since that shape (not its magnitude) is what defines this
+# archetype; scaling ramp toward zero would not change anything
+# observable and scaling it up would contradict the zero-warning premise
+# entirely. All three active domains' lead_days stay 0, same reasoning as
+# P_CRIT's header: a smaller-magnitude Ever Given variant still has zero
+# meaningful precursor lead time, so there is nothing to scale there.
+scenario_id: suez_P_HIGH
+region: suez
+class: P-HIGH
+seed: 42
+days: 365
+event:
+  onset_day: 120
+  ramp_days: 1
+  duration_days: 5
+  peak_band: high
+signals:
+  # extrapolated: P_CRIT's 0.05 drop (95%) scaled by Hormuz's own
+  # shipping-drop ratio (1-0.65)/(1-0.40) = 0.5833 -> drop = 0.95*0.5833 =
+  # 0.5542 -> a 55% drop -> target = 1 - 0.5542 = 0.4458, rounded to 0.45.
+  shipping: {baseline: {mean: 53, std: 4}, effect: {type: multiplicative_ramp, target: 0.45, lead_days: 0}}
+  # extrapolated: P_CRIT's 4.0 * Hormuz's market ratio (1.4/2.5 = 0.56) =
+  # 2.24.
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 2.24, lead_days: 0}}
+  # null, unchanged from P_CRIT -- see suez_P_CRIT.yaml's header: routing's
+  # DOMINANT rating belongs to the (unmodeled) knock-on event, not Ever
+  # Given, at any magnitude.
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: null}
+  # null, unchanged from P_CRIT -- same reasoning, geopolitical belongs to
+  # the Houthi campaign, absent from any Ever-Given-derived scenario.
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: null}
+  # extrapolated: P_CRIT's 0.65 * Hormuz's news ratio (0.40/0.75 = 0.5333)
+  # = 0.3467, rounded to 0.35.
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.35, lead_days: 0}}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

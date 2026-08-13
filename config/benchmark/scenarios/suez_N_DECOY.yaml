@@ -1,0 +1,84 @@
+# N-DECOY: an isolated freight-rate/market blip with no corroborating move
+# in shipping/routing/geopolitical/news. Ground truth stays negative — this
+# scenario exists to catch detectors that over-trigger on a single noisy
+# domain.
+#
+# DECOY DOMAIN CHOICE — market, the only viable candidate for this region:
+# shipping and routing are DOMINANT (a decoy there is the true signal, not
+# noise); news is STRONG, near-dominant, and would be confounded with the
+# genuine Ever-Given-style media spike this region's P_CRIT already models;
+# geopolitical is WEAK but is the causal mechanism behind the Red Sea
+# knock-on (see suez.yaml), so entangled with a real driver rather than
+# free-standing noise; disaster is absent entirely. market is MODERATE and
+# genuinely independent of a physical canal blockage (see suez.yaml's own
+# strength classification) — the only domain that can move on its own
+# without implying a real event.
+#
+# SIZING METHOD — measured empirically, NOT the fixed k_hormuz=5.4925
+# sigma-convention used for hormuz/bab_el_mandeb/panama (see
+# docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 18's revised text):
+# market is unbounded, and gap 18 already showed applying k_hormuz across a
+# domain boundary produces implausible results (bab_el_mandeb's rejected
+# ~6.81 market retrofit). Instead: decoy_target = 1.0 x suez_P_CRIT's own
+# market target (4.0) = 4.0, then VALIDATED empirically rather than assumed
+# safe, per this prompt's explicit measure-don't-assume instruction:
+#
+#   - decoy duration_days = 11, matched EXACTLY to suez_P_CRIT.yaml's own
+#     event.duration_days (11) -- NOT the other regions' fixed 15, because
+#     P_CRIT's duration here (11 days) is shorter than the fixed 15, and a
+#     15-day decoy would out-read an 11-day P_CRIT on any matched window,
+#     reintroducing exactly the window-length artifact BENCHMARK_SCHEMA_
+#     REFERENCE.md's gap 18 documents as dissolved for Panama.
+#   - matched-window check: suez_P_CRIT's own best contiguous 11-day
+#     window of market (days 240-250, the event window itself, since
+#     ramp_days=1 keeps the whole window near-full-intensity) has
+#     mean=3.9730. At target=4.0, this decoy's 11-day event-window
+#     (days 200-210) mean=3.1860 (average ramp intensity over
+#     onset_day=200/ramp_days=3/duration_days=11 is below 1.0, since 3 of
+#     11 days ramp up before reaching full intensity) -- ratio =
+#     3.9730 / 3.1860 = 1.2470, i.e. P_CRIT out-reads the decoy by 24.7%,
+#     already clearing the required >=15% margin at the STARTING target
+#     (1.0x ratio) with no step-down needed.
+#   - achieved k (sigma units of suez_N_QUIET's own market baseline,
+#     mean=-0.001857, std=1.038089): k = (3.1860 - (-0.001857)) / 1.038089
+#     = 3.0709 -- well under the ~8 plausibility-gate ceiling, and
+#     structurally different from (much lower than) k_hormuz=5.4925,
+#     confirming gap 18's point that the sigma constant is not the
+#     transferable invariant across domains.
+#   - event-window peak = 5.7947, checked against suez_P_CRIT.yaml's own
+#     market peak (5.9869, same series' global max, at the same event
+#     onset) -- the decoy's peak stays BELOW the region's own worst
+#     documented-derived reading, so it has no magnitude with no
+#     real-world analogue (the same test that rejected bab_el_mandeb's
+#     original market retrofit).
+#
+# Because the starting ratio (1.0x) already satisfied the >=15% matched-
+# window requirement, no step-down iteration was needed here -- see this
+# prompt's validation output for the full step table (a single row).
+scenario_id: suez_N_DECOY
+region: suez
+class: N-DECOY
+seed: 42
+days: 365
+event:
+  onset_day: 200
+  ramp_days: 3
+  duration_days: 11
+  peak_band: none
+signals:
+  # shipping.baseline.mean=53 matches suez.yaml's baseline_transits_per_day
+  # midpoint BY CONVENTION ONLY, not enforced — see
+  # docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 17.
+  shipping: {baseline: {mean: 53, std: 4}, effect: null}
+  # sized to decoy_target = 1.0 x suez_P_CRIT's own market target (4.0) —
+  # see header comment for the full measured arithmetic and plausibility
+  # checks (matched-window ratio 1.2470, achieved k=3.0709, peak below
+  # P_CRIT's own peak).
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 4.0, lead_days: 0}}
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: null}
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: null}
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: null}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02
