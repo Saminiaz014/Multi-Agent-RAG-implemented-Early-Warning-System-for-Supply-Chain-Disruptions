@@ -1,21 +1,23 @@
-# N-DECOY: an isolated market (freight-rate) blip with no corroborating
-# move in shipping/geopolitical/routing/news. Ground truth stays negative —
-# this scenario exists to catch detectors that over-trigger on a single
-# noisy domain.
+# N-DECOY: a news rumor spikes on its own with no corroborating move in
+# shipping/market/geopolitical/routing. Ground truth stays negative — this
+# scenario exists to catch detectors that over-trigger on a single noisy
+# domain.
 #
-# DECOY DOMAIN CHOICE: this region's dominant signals are geopolitical and
-# routing (config/benchmark/bab_el_mandeb.yaml) — a decoy built from either
-# would be indistinguishable from a real, if muted, positive, defeating the
-# point. hormuz_N_DECOY.yaml uses a news rumor, but a market blip is used
-# here instead: `disaster` (weather/disaster is the guidance's first
-# suggestion for a decoy domain) is ABSENT from this region's
-# active_domains entirely, not merely silent, so it isn't available to pick
-# from. market is genuinely non-dominant here ("MODERATE" at most, per the
-# region spec) and, per the evidence file's own convention, a market move
-# with no corroboration is exactly the kind of isolated blip real freight
-# markets produce for reasons unrelated to a Bab el-Mandeb-specific crisis
-# (seasonal swings, unrelated port congestion elsewhere) — a legitimate
-# decoy shape.
+# DECOY DOMAIN CHOICE — REVISED 2026-08-13, market -> news: this file
+# originally used a market blip (see git history / prior commit messages for
+# that reasoning). market's decoy was retired after the sigma-normalized
+# convention (docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 18)
+# showed the k_hormuz constant, applied to market's own (much larger, ~1.06)
+# baseline std, requires an implausible raw target (~6.81 — larger than this
+# region's own genuine P_CRIT market shock) with no documented real-world
+# analogue. news does not have this problem: its baseline std (~0.081) is
+# close to Hormuz's own news baseline std, so k_hormuz produces a target
+# (0.54) that is actually slightly BELOW this region's own P_CRIT news
+# target (0.55, ratio 0.98) — see the news signal comment below for the full
+# arithmetic. This also matches hormuz_N_DECOY.yaml's own domain choice,
+# giving every region's decoy the same domain for the first time (see
+# BENCHMARK_SCHEMA_REFERENCE.md §6 gap 18's updated text on what this does
+# and does not buy).
 #
 # NULL-GUARD NOTE: this file's baseline blocks were built in the same
 # scratch verification script as bab_el_mandeb_P_HIGH.yaml by iterating
@@ -40,15 +42,26 @@ signals:
   # bab_el_mandeb_P_CRIT.yaml's shipping comment and
   # docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 17.
   shipping: {baseline: {mean: 72, std: 5}, effect: null}
-  # extrapolated: an isolated freight-rate spike, deliberately smaller than
-  # bab_el_mandeb_P_CRIT.yaml's genuine crisis-level market target (2.0) —
-  # visibly elevated but not calibrated to represent a real sustained
-  # disruption, since the point of this scenario is a real signal move with
-  # no true underlying event.
-  market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 1.5, lead_days: 0}}
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: null}
   geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: null}
   routing: {baseline: {mean: 0.08, std: 0.03}, effect: null}
-  news: {baseline: {mean: 0.15, std: 0.08}, effect: null}
+  # sigma-convention target (docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md
+  # §6 gap 18): sized so the event-window mean sits k_hormuz=5.4925 N_QUIET
+  # baseline standard deviations above this region's own N_QUIET news
+  # baseline mean. Arithmetic: bab_el_mandeb_N_QUIET's own news baseline
+  # (days 0-199) mean=0.158258, std=0.080767; the exact pre-effect noise for
+  # this specific event window (days 200-214, read directly off
+  # bab_el_mandeb_N_QUIET.yaml's own news values, since both files share
+  # seed 42 and identical baseline configs) mean=0.169731; average ramp
+  # intensity over onset_day=200/ramp_days=3/duration_days=15 is 0.8
+  # (scenario_generator.py:_intensity_curve, deterministic). target =
+  # ((0.158258 + 5.4925*0.080767) - 0.169731) / 0.8 = 0.540, rounded to
+  # 0.54. Empirically validated: achieved k=5.3953, event-window peak=0.8311
+  # (safely inside [0, 1]). PLAUSIBILITY CHECK: bab_el_mandeb_P_CRIT.yaml's
+  # own news target is 0.55 — this decoy's target (0.54) is actually
+  # slightly BELOW it (ratio 0.98), well under the 1.5x concern threshold,
+  # unlike the rejected market retrofit (ratio 3.4x). Applied.
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.54, lead_days: 0}}
 noise:
   autocorrelation: 0.35
   seasonality: {period: 365, amplitude: 0.08}

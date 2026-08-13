@@ -531,3 +531,139 @@ identically before and after.
     `signals.shipping.baseline.mean` to any value with no relationship to the region's
     `baseline_transits_per_day` and nothing would raise or warn. Each scenario YAML's
     `shipping` line now carries a comment noting this convention.
+
+18. **`FIXED` — decoy (`N_DECOY`) magnitudes were originally specified in raw per-domain
+    units, so a decoy's difficulty varied wildly by which domain it targeted.** Measured
+    directly (materializing each region's `N_QUIET`, computing baseline-window mean/σ,
+    then comparing each `N_DECOY`'s event-window mean against it): hormuz's original
+    decoy (`news`, target `0.55`) sat 5.49 baseline standard deviations above its own
+    `N_QUIET` mean; bab_el_mandeb's original decoy (`market`, target `1.5`) sat only 1.47
+    standard deviations above its own — a 3.7x gap in effect size between two scenarios
+    meant to play the same structural role.
+
+    **The convention adopted:** every `N_DECOY` scenario's ramped domain is sized so its
+    event-window mean sits `k = 5.4925` baseline standard deviations above that region's
+    own `N_QUIET` baseline mean for that domain (`k_hormuz`, i.e. Hormuz's own
+    already-committed decoy, reused as the constant). Formula, using the domain's
+    deterministic ramp `_intensity_curve` average intensity over the event window and the
+    *exact* pre-effect noise realization for that specific window (read directly off the
+    region's own `N_QUIET` file, since `N_QUIET` and `N_DECOY` share `seed: 42` and
+    identical baseline configs, so their pre-effect noise is bit-identical):
+
+    ```
+    target = (N_QUIET_baseline_mean + k * N_QUIET_baseline_std - N_QUIET_window_local_mean) / avg_intensity
+    ```
+
+    **Why `k_hormuz` and not something else:** *not* because it uniquely "trips a
+    single-domain detector while a fused system stays quiet" — that criterion turned out
+    to be unachievable as a general test. Reading the actual EVAL01 evaluators
+    (`src/baselines/tier0_controls.py`, `tier1_statistical.py`) shows Tier 0 reads no
+    domain values at all and Tier 1's five baselines (`ZScoreBaseline`, `EWMABaseline`,
+    `CUSUMBaseline`, `SARIMABaseline`, `PersistenceBaseline`) read **only**
+    `df["shipping"]` — a decoy on any other domain is invisible to four of the five
+    non-trivial baselines regardless of magnitude (see gap 19 below). `k_hormuz` is
+    adopted instead for **cross-region comparability and backward compatibility**:
+    it is the one empirically-realized value already backing Hormuz's committed results,
+    so reusing it (rather than deriving a fresh constant) means every region's decoy is
+    calibrated the same way and Hormuz's own numbers never move.
+
+    **This is a documentation-only authoring convention. Nothing in
+    `src/benchmark/scenario_generator.py` enforces it** — a future scenario YAML could set
+    any target at all and load/materialize without error or warning; `k` is not a field
+    this loader knows about. **Hormuz's own four scenario YAMLs were deliberately not
+    touched** — `hormuz_N_DECOY.yaml` remains the reference point (`k=5.4925` by
+    construction, unchanged) so its committed results stay bit-for-bit reproducible.
+
+    **Equal σ does not imply equal real-world plausibility — σ-normalization is valid
+    WITHIN a domain and invalid ACROSS domains.** The convention holds a decoy's *relative*
+    displacement constant when comparing scenarios that share a domain (e.g. hormuz's news
+    decoy vs. panama's news decoy, both `k=5.49`-ish), because it is anchored to that
+    region's own measured baseline σ for that specific domain. It does **not** hold across
+    domains within or between regions, because each domain's baseline σ carries a wildly
+    different real-world scale and a fixed `k` inherits that mismatch: retrofitting
+    bab_el_mandeb's original `market` decoy to `k_hormuz` (2026-08-13 revision) required a
+    raw target of `~6.81` — 3.4x bab_el_mandeb's own documented P_CRIT market target
+    (`2.0`, itself grounded in the region's evidence file) and larger than the market signal
+    ever reaches even at genuine P_CRIT intensity (peak `8.60` vs. the real,
+    historically-documented worst case). No source in
+    `data/region_research/bab_el_mandeb_disruption_patterns.json` describes a market move
+    of that size, so this retrofit was rejected and **not applied**.
+
+    **Resolution: every region's decoy now sits in the same domain (`news`) instead of
+    trying to make one constant work across differently-scaled domains.** This sidesteps the
+    within-vs-across problem structurally rather than patching it region by region:
+    `hormuz_N_DECOY.yaml` (news, target `0.55`, k=5.49, unchanged, still the reference),
+    `bab_el_mandeb_N_DECOY.yaml` (news, target `0.54`, k=5.40 analytic/5.3953 achieved —
+    revised 2026-08-13 from its original `market` target `1.5`, k=1.47, once the rejected
+    `6.81` retrofit above showed `market` had no plausible path to `k_hormuz`; plausibility
+    check against bab_el_mandeb's own P_CRIT news target `0.55`: ratio `0.98`, passed), and
+    `panama_N_DECOY.yaml` (news, target `0.60`, k=5.47 analytic/5.4728 achieved;
+    plausibility check against panama's own P_CRIT news target `0.50`: ratio `1.20`, passed).
+    All three passed the same plausibility check (implied target compared against that
+    region's own documented P_CRIT news target / evidence file) that the market retrofit
+    failed. A direct consequence: **no market-domain false positive is tested anywhere in
+    this benchmark** — every region's `N_DECOY.market.effect` is `null`, so Tier 2 (the only
+    tier that reads `market` at all — see gap 19a) is never exercised against a market-only
+    false alarm. This is an explicit, accepted scope reduction, not an oversight: it trades
+    market-domain false-positive coverage for cross-region comparability on a single shared
+    decoy domain. A scenario author reusing `k_hormuz` for a future region's `news` decoy can
+    rely on this precedent; extending the convention to any *other* domain would need its
+    own fresh plausibility check, not an assumption that news's favorable σ-to-real-world-scale
+    ratio generalizes.
+
+    **Read-only cross-check (2026-08-13, no files changed):** materializing each region's
+    `P_CRIT` and `N_DECOY` and comparing the news domain's event-window peak/mean shows the
+    σ-convention does not guarantee the decoy stays *below* the genuine crisis on this raw
+    metric — only that its σ-displacement from `N_QUIET` matches `k_hormuz`. hormuz's decoy
+    stays below P_CRIT on both peak (`0.84` vs `1.14`) and mean (`0.60` vs `0.69`).
+    bab_el_mandeb's decoy stays below P_CRIT on peak (`0.83` vs `0.94`) but exceeds it on mean
+    (`0.59` vs `0.55`). panama's decoy exceeds P_CRIT on both peak (`0.89` vs `0.86`) and mean
+    (`0.64` vs `0.35`). The cause is structural, not a sizing error: each region's P_CRIT news
+    effect ramps slowly over a long window (panama's P_CRIT spans 200 days), pulling its
+    window mean down, while every `N_DECOY` is a short, sharp 15-day spike at full intensity —
+    so a brief decoy can locally out-read a slow-building genuine crisis on peak and/or mean
+    even while sitting at a fixed, comparable σ above its own region's `N_QUIET` baseline.
+    Flagged here as a known property of the convention, not fixed.
+
+19. **Benchmark-wide limitations surfaced while establishing the σ-convention above
+    (2026-08-13), not specific to any one region:**
+
+    (a) **Tier 0 and Tier 1 baselines are blind to every domain except `shipping`.**
+    `RandomBaseline`/`AlwaysAlarmBaseline`/`NeverAlarmBaseline` (`tier0_controls.py`) read
+    no domain signal at all (score is a function of `len(df)`/seed only); all five Tier 1
+    baselines read `df["shipping"]` exclusively (confirmed by grep across
+    `tier1_statistical.py` — every baseline's `run()` opens with
+    `_fill_missing(df["shipping"].to_numpy())`). Only Tier 2's `IsolationForestBaseline`
+    and `MatrixProfileBaseline` are genuinely multivariate (`AGENT_COLS` in
+    `tier2_classical.py` lists all six domains). Consequence: an `N_DECOY` scenario built
+    on any domain other than `shipping` is **not a like-for-like negative across method
+    tiers** — Tier 0/1 literally cannot see it move at all, so a clean Tier 0/1 result on
+    such a decoy demonstrates nothing about false-positive resistance; only Tier 2 (and,
+    if added later, a genuinely multivariate method) exercises the decoy as designed.
+
+    (b) **Tier 2's `contamination=0.1` imposes a structural false-flag floor on *any*
+    `N_QUIET` scenario, independent of decoy design.** `IsolationForestBaseline` is
+    configured with a fixed contamination rate, which by construction labels roughly 10%
+    of its scored window as anomalous whether or not real anomalies exist. Measured
+    directly on the test window (days 281–364, both scenarios' own already-committed or
+    newly-authored `N_QUIET` files, threshold F1-tuned on the validation split per the
+    existing protocol): `hormuz_N_QUIET` flags 20/84 days (23.8%); `bab_el_mandeb_N_QUIET`
+    flags 13/84 (15.5%). Hormuz's own already-committed reference scenario has the
+    *higher* false-flag rate of the two, confirming this is a pre-existing property of the
+    Tier 2 method, not a defect introduced by authoring new regions. **Reported here as an
+    open finding, not fixed in this pass** — fixing it would mean changing
+    `contamination` or the thresholding protocol, which would move Hormuz's committed
+    Tier 2 numbers and needs its own explicit regression gate.
+
+    (c) **All regions share `seed: 42` across their `N_QUIET`/`N_DECOY` pair (and, per
+    region, across `P_CRIT`/`P_HIGH` too), so per-domain negatives are the same noise
+    realization offset by that domain's own baseline mean, not independent samples.**
+    Confirmed directly: `shipping` and `market` are the first two domains
+    `materialize_scenario` processes for every region (fixed `KNOWN_DOMAINS` iteration
+    order), so their pre-effect noise draws are bit-identical across hormuz/bab_el_mandeb/
+    panama's `N_QUIET` files regardless of which domains that region has active later in
+    the iteration order — only each domain's own `baseline.mean`/`std` shifts the result.
+    This is a controlled, deliberate design choice (it is what makes the exact-arithmetic
+    derivation in gap 18 possible at all), not a bug — but it means cross-region
+    comparisons of baseline noise character are not comparisons of independent draws, and
+    should not be presented as such.
