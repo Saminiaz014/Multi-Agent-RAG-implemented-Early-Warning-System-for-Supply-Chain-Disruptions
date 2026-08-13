@@ -2,6 +2,7 @@
   "scenario_id": "hormuz_N_DECOY",
   "baseline_name": "always_alarm",
   "seed": 42,
+  "region": "hormuz",
   "metrics": {
     "D1_vus_pr": NaN,
     "D2_vus_roc": NaN,
@@ -32,6 +33,7 @@
     "test_window": [
       281,
       365
-    ]
+    ],
+    "region": "hormuz"
   }
 }
