@@ -1,0 +1,65 @@
+# N-QUIET: calm baseline year, no event at all. Every domain is
+# enabled-but-silent (effect: null) — a pure negative control.
+#
+# PIRACY BASELINE DECISION (Option B, ordinary flat baseline — resolved by
+# amendment 2026-08-13, superseding the two options weighed in this
+# prompt's Task 0d): geopolitical's baseline uses the SAME shared 0.05/0.02
+# constant reused byte-identical across every other region, NOT an
+# elevated value reflecting Malacca's chronic piracy background. Reasoning
+# recorded here (see docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap
+# 18's Malacca section for the full writeup): config/benchmark/
+# bab_el_mandeb.yaml classifies geopolitical DOMINANT — a materially
+# stronger, better-quantified, more severe rating than Malacca's WEAK — and
+# even THAT region's N_QUIET/baseline geopolitical value is this same
+# shared constant; its severity shows up entirely in P_CRIT's event target
+# (0.85), never in its baseline. Elevating Malacca's (WEAK) baseline would
+# be a MORE aggressive deviation than what a DOMINANT-rated region never
+# got. Piracy's severity is authored into malacca_N_DECOY.yaml's event
+# instead — see that file. This also has no principled numeric anchor: the
+# evidence file's chronic-incident counts (22-108/yr depending on
+# source/year) have no established count -> [0,1]-baseline-score
+# conversion that isn't circular (the domain's own designated "event" home
+# for piracy IS the N_DECOY, so sizing the BASELINE off the same signal
+# meant to depart from baseline would be self-referential).
+#
+# Why `event` is a full all-zero block instead of `event: null`: the loader
+# (src/benchmark/scenario_generator.py:load_scenario) requires `event` to be
+# a mapping with onset_day/ramp_days/duration_days/peak_band — `event: null`
+# raises a clear ValueError pointing back at hormuz_N_QUIET.yaml's own
+# comment on this exact pattern. The four fields below are syntactically
+# required but functionally inert here: this scenario's `class` doesn't
+# start with "P" (so _ground_truth_labels never reads them) and every
+# signal's `effect` is null (so materialize_scenario never reads them
+# either). Copied structure exactly from hormuz_N_QUIET.yaml.
+scenario_id: malacca_N_QUIET
+region: malacca
+class: N-QUIET
+seed: 42
+days: 365
+event:
+  onset_day: 0
+  ramp_days: 0
+  duration_days: 0
+  peak_band: none
+signals:
+  # baseline mean/std for all five domains match malacca_P_CRIT.yaml's own
+  # baseline blocks exactly — a region's steady-state level doesn't change
+  # between scenarios, only what the event does on top of it. No `market`
+  # entry: removed from config/benchmark/malacca.yaml's active_domains
+  # entirely (documented — see that file's own "REMOVED 2026-08-12: market"
+  # comment; every market field across all four events in
+  # data/region_research/malacca_disruption_patterns.json is null with no
+  # qualitative signal either).
+  # shipping.baseline.mean=210 = midpoint of malacca.yaml's documented
+  # baseline_transits_per_day range [200, 220] BY CONVENTION ONLY, not
+  # enforced — see docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap
+  # 17.
+  shipping: {baseline: {mean: 210, std: 15}, effect: null}
+  disaster: {baseline: {mean: 0.02, std: 0.01}, effect: null}
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: null}
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: null}
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: null}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

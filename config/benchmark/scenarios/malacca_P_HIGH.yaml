@@ -1,0 +1,62 @@
+# P-HIGH: a shorter, less severe variant of malacca_P_CRIT.yaml.
+#
+# DERIVATION METHOD (stated explicitly): built via an explicit
+# `copy.deepcopy(P_CRIT)` in a scratch verification script (not shipped),
+# then scaled — never a shallow copy / dict-spread. The script re-loaded
+# and asserted malacca_P_CRIT.yaml's own values (disaster target 0.65, news
+# target 0.35, onset_day 240) were unchanged after building this file's
+# numbers, both in memory (`crit.signals == snapshot`) and by re-reading
+# the actual written files (see this prompt's validation output).
+#
+# MAGNITUDE RATIO — Malacca's own evidence, not Hormuz's borrowed ratios:
+# unlike panama/suez (each with only ONE well-quantified real event, forced
+# to borrow Hormuz's generic P_CRIT-to-P_HIGH domain ratios), Malacca has
+# TWO independently documented haze episodes of the same phenomenon — this
+# makes a region-specific magnitude ratio possible: 2019's peak PSI (145,
+# "Unhealthy") / 2015's peak PSI (322, "Hazardous") = 0.4503, rounded to
+# 0.45, applied UNIFORMLY to every active domain's target (disaster AND
+# news) rather than mixing in Hormuz's per-domain ratios, since Malacca no
+# longer needs a borrowed anchor. disaster: 0.65*0.45=0.2925 -> 0.29.
+# news: REVISED 2026-08-13 following malacca_P_CRIT.yaml's own news
+# revision (0.50 -> 0.35, see that file's header) — re-scaled from the new
+# P_CRIT value, not the retired one: 0.35*0.45=0.1575 -> 0.16.
+#
+# RAMP/DURATION/ONSET — scaled via the SAME Hormuz-ratio timing convention
+# every prior region's P_HIGH already uses (onset 120/240=0.5, ramp
+# 7/12=0.583, duration 25/60=0.417), applied to malacca_P_CRIT's own timing
+# (240/15/30): onset=240*0.5=120, ramp=15*0.583=8.75->9,
+# duration=30*0.417=12.5->13. This is DELIBERATELY NOT 2019's own faster
+# documented onset (3-5 days) — per this prompt's explicit instruction,
+# P_HIGH varies from P_CRIT in MAGNITUDE only, using the mechanical
+# ramp-ratio scaling already applied to every other region, so severity and
+# onset shape are never confounded with each other; 2019's genuinely
+# faster documented onset is real evidence, noted here, but deliberately
+# unused for P_HIGH's shape so that a P_CRIT-vs-P_HIGH comparison isolates
+# magnitude as the only varying dimension (the same isolation every other
+# region's P_HIGH already preserves).
+scenario_id: malacca_P_HIGH
+region: malacca
+class: P-HIGH
+seed: 42
+days: 365
+event:
+  onset_day: 120
+  ramp_days: 9
+  duration_days: 13
+  peak_band: high
+signals:
+  shipping: {baseline: {mean: 210, std: 15}, effect: null}
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: null}
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: null}
+  # extrapolated: P_CRIT's 0.35 (revised value, see header) * 0.45
+  # (Malacca's own PSI magnitude ratio) = 0.1575, rounded to 0.16.
+  # lead_days scaled by the same ramp ratio (0.583): -3*0.583=-1.75,
+  # rounded to -2.
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.16, lead_days: -2}}
+  # extrapolated: P_CRIT's 0.65 * 0.45 = 0.2925, rounded to 0.29. lead_days
+  # unchanged at 0 (root cause, same reasoning as P_CRIT).
+  disaster: {baseline: {mean: 0.02, std: 0.01}, effect: {type: additive_ramp, target: 0.29, lead_days: 0}}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

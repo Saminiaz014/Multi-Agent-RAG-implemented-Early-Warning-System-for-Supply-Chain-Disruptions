@@ -1,0 +1,95 @@
+# N-DECOY: an isolated piracy-incident-reporting spike (geopolitical) with
+# no corroborating move in shipping/disaster/news/routing. Ground truth
+# stays negative — this scenario exists to catch detectors that
+# over-trigger on a single noisy domain.
+#
+# DECOY DOMAIN CHOICE — geopolitical, NOT news (supersedes this prompt's
+# original news-based Task 1, per amendment): Malacca's news is
+# extrapolated-null across all four documented events in
+# data/region_research/malacca_disruption_patterns.json (no index for
+# either haze episode OR for piracy) — using it as a decoy would have no
+# real anchor, AND haze generates heavy documented media coverage
+# (malacca_P_CRIT.yaml's own news target, 0.50), so a news decoy risks
+# confounding with the genuine P_CRIT signal. geopolitical avoids both
+# problems: it is causally orthogonal to haze (malacca_P_CRIT.yaml leaves
+# geopolitical `null` entirely — there is nothing to confound with, and
+# nothing to run a matched-window comparison against, see below), it is
+# bounded [0,1], it carries a real documented precedent (the Late-2024
+# Pulau Cula piracy escalation), and the evidence file's own key_finding
+# states outright that "a piracy spike is a textbook candidate for an
+# N_DECOY scenario: one signal moves... with no corroborating move in
+# shipping/market/routing."
+#
+# SIZING — anchored to Malacca's own evidence, NOT a P_CRIT ratio (the
+# convention used by every prior region): a P_CRIT ratio is meaningless
+# here since P_CRIT never moves geopolitical at all (target would be
+# undefined — "ratio to zero"). Instead, derived directly from the
+# documented Late-2024 Pulau Cula escalation as a multiple of the chronic
+# SOMS baseline RATE, same calendar year for internal consistency:
+#
+#   weekly_baseline_rate = recaap_soms_2024_full_year (62, documented) / 52
+#                        = 1.1923 incidents/week
+#   weekly_spike = incidents_within_one_week_nov_2024 (8, documented)
+#   multiple = 8 / 1.1923 = 6.7097
+#
+# (Corroborating, not primary: the Pulau-Cula-specific YoY escalation,
+# 27->45 incidents 2023->2024, is a 1.667x multiple — consistent in
+# direction with, but far milder than, the acute one-week spike; the
+# sharper weekly-rate reading was used because it is the more directly
+# "rate"-comparable figure against the chronic SOMS baseline RATE, and
+# because a brief, acute spike is the more decoy-appropriate shape.)
+#
+#   target = geopolitical baseline mean (0.05) * 6.7097 = 0.3355,
+#            rounded to 0.34
+#
+# duration_days=7 matches the evidence figure used to derive the target
+# itself ("incidents_within_one_week_nov_2024") directly, rather than
+# P_CRIT's duration (30) — unlike every prior region, there is no
+# matched-window comparison this needs to survive (see below), so nothing
+# requires borrowing P_CRIT's window length; the decoy's own duration is
+# grounded in the same evidence its magnitude came from. ramp_days=3 keeps
+# the standard decoy shape convention used by every other region's decoy
+# (no onset-shape evidence exists for a piracy spike specifically, so this
+# is not itself evidence-derived, only the magnitude and duration are).
+#
+# ACHIEVED (empirically measured, in-memory, before writing this file):
+# event-window (days 200-206) mean=0.2577, peak=0.4259, k=10.0054 sigma of
+# malacca_N_QUIET's own geopolitical baseline (mean=0.049963,
+# std=0.020762). GATE: peak (0.4259) stays within [0, 1] — PASSED.
+# y_disruption max = 0 (N-DECOY class, confirmed in validation) — PASSED.
+#
+# MATCHED-WINDOW CHECK IS N/A HERE, stated explicitly rather than silently
+# skipped: malacca_P_CRIT.yaml does not meaningfully move geopolitical at
+# all (effect: null — see that file's header), so "P_CRIT's best window on
+# this domain" is undefined; there is nothing to compare against. This
+# orthogonality is the decoy's structural strength, not a methodological
+# gap — see BENCHMARK_SCHEMA_REFERENCE.md §6 gap 18's Malacca section.
+# Verified instead: decoy elevated above N_QUIET on geopolitical only, no
+# other domain differs, y_disruption max 0 (see this prompt's validation
+# output).
+scenario_id: malacca_N_DECOY
+region: malacca
+class: N-DECOY
+seed: 42
+days: 365
+event:
+  onset_day: 200
+  ramp_days: 3
+  duration_days: 7
+  peak_band: none
+signals:
+  # shipping.baseline.mean=210 matches malacca.yaml's baseline_transits_per_day
+  # midpoint BY CONVENTION ONLY, not enforced — see
+  # docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 17.
+  shipping: {baseline: {mean: 210, std: 15}, effect: null}
+  # sized from the documented Late-2024 Pulau Cula piracy escalation — see
+  # header comment for the full derivation (multiple=6.7097, target=0.34,
+  # achieved k=10.0054, peak=0.4259 within [0,1]).
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: {type: additive_ramp, target: 0.34, lead_days: 0}}
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: null}
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: null}
+  disaster: {baseline: {mean: 0.02, std: 0.01}, effect: null}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

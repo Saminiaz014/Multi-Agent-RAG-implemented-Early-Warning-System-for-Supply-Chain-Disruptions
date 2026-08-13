@@ -1,0 +1,129 @@
+# P-CRIT: the 2015 Southeast Asian haze — the more severe, better-documented
+# of the two episodes in data/region_research/malacca_disruption_patterns.json
+# (PSI 322-341 "Hazardous" vs. 2019's PSI 145 "Unhealthy"; 2.6M ha burned;
+# a specific dated ferry-suspension anecdote and a declared Indonesian state
+# of emergency, vs. 2019's thinner sourcing). The chronic piracy signal
+# family (events 3-4 in the evidence file) is NOT modeled here — it is this
+# region's N_DECOY (see malacca_N_DECOY.yaml), deliberately kept a separate,
+# causally orthogonal signal per this prompt's amendment.
+#
+# ONLY TWO DOMAINS MOVE: disaster (dominant) and news. shipping, geopolitical,
+# and routing are all `effect: null`:
+#
+#   - shipping: the ONLY documented 2015 shipping figure is "Batam-Singapore
+#     ferry services suspended for approximately 1 hour" on a single day
+#     (2015-10-23, two specific routes) — a route-specific, sub-day anecdote
+#     that does not translate into this domain's unit convention (a
+#     whole-strait DAILY vessel-transit count) without inventing a
+#     conversion factor from "1-hour, 2-route suspension" to "day-level,
+#     whole-strait deficit". Per this prompt's explicit instruction, authored
+#     null with this explanation, exactly as suez_P_CRIT.yaml nulled routing
+#     for Ever Given (a real, dated, sourced fact that still doesn't
+#     quantify to this domain's convention).
+#   - geopolitical: the 2015 event DOES have real qualitative content
+#     ("Regional diplomatic friction... 'Singapore anger'... Indonesia
+#     declared a state of emergency in Riau province") — but
+#     config/benchmark/malacca.yaml's only region-level classification for
+#     geopolitical is WEAK, and that rating is earned by an entirely
+#     different signal family (chronic piracy: "'Weak' reflects the
+#     incidents' own documented severity" — piracy's, not haze's). Per the
+#     same principle already established for suez_P_CRIT.yaml ("region-level
+#     strength classifications describe the region across events, not any
+#     single scenario" — BENCHMARK_SCHEMA_REFERENCE.md §6 gap 18), reusing a
+#     piracy-scoped WEAK rating for a haze-driven diplomatic reaction would
+#     be exactly the kind of unprincipled cross-signal-family transfer gap
+#     18 already warns against (its own lesson: a rating/magnitude earned in
+#     one context doesn't automatically transfer to an unrelated one).
+#     Authored null rather than invent a haze-specific geopolitical tier
+#     with no documented anchor.
+#   - routing: documented null in the evidence file for BOTH haze episodes
+#     ("No full-strait closure precedent found for any haze episode"; the
+#     closest precedent, a 2010 <2nm-visibility navigational warning, is
+#     explicitly flagged as non-contemporaneous with 2015 or 2019
+#     specifically) — a hard documented null, not merely an unquantified
+#     qualitative description, same category as suez's routing null.
+#
+# This leaves a genuinely sparse, 2-domain P_CRIT (disaster + news) — not
+# engineered down to that count, but the honest result of what this
+# region's evidence actually supports once shipping/geopolitical/routing
+# are each checked individually rather than assumed to move because the
+# region spec lists them as active_domains.
+#
+# ACUTE ONSET (the structural point of this region): ramp_days=15 matches
+# the 2015 event's own documented onset_to_peak_days (first 'unhealthy' PSI
+# crossing 2015-09-10 -> peak 2015-09-25). duration_days=30 is a symmetric
+# ramp-up/ramp-down window (ramp=15, decay=15, no plateau, per
+# scenario_generator.py:_intensity_curve, since event.ramp_days governs both
+# — the same simplification convention every other region's P_CRIT already
+# uses) — a known simplification, not a second documented figure: the
+# evidence file's own notes describe onset_to_peak_days=15 as "a single
+# representative window within a much longer (June-October) smoldering/
+# re-flaring haze season," with no documented decay-speed figure to anchor
+# a second, independently-derived tail length.
+scenario_id: malacca_P_CRIT
+region: malacca
+class: P-CRIT
+seed: 42
+days: 365
+event:
+  onset_day: 240
+  ramp_days: 15
+  duration_days: 30
+  peak_band: critical
+signals:
+  # null — see header. baseline.mean=210 = midpoint of malacca.yaml's
+  # documented baseline_transits_per_day range [200, 220] BY CONVENTION
+  # ONLY, not enforced — see docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md
+  # §6 gap 17. std=15, extrapolated at ~7.1% of mean (matching the ~7-8%
+  # ratio convention used by hormuz/bab_el_mandeb/panama/suez).
+  shipping: {baseline: {mean: 210, std: 15}, effect: null}
+  # null — see header.
+  geopolitical: {baseline: {mean: 0.05, std: 0.02}, effect: null}
+  # null — see header.
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: null}
+  # extrapolated: no quantified news index exists for either haze episode
+  # (evidence file, both events' 'news' fields explicitly tagged
+  # "extrapolated", "no news-volume/sentiment index found" — though
+  # flight-cancellation and school-closure reporting are noted as
+  # qualitative severity proxies, not a number). config/benchmark/
+  # malacca.yaml classifies news MODERATE, and — unlike geopolitical's
+  # piracy-only WEAK scoping above — this MODERATE rating explicitly covers
+  # BOTH signal families ("secondary channel for BOTH signal families"),
+  # so it directly applies to haze, unlike geopolitical's mismatched scope.
+  #
+  # REVISED 2026-08-13, 0.50 -> 0.35: the original 0.50 (matching
+  # panama_P_CRIT.yaml's own MODERATE-tier news target) put news's peak
+  # (0.6951) within 1% of disaster's peak (0.6997) — news is an
+  # unquantified tier-convention placeholder (no source anchors it to any
+  # number), while disaster's 0.65 is anchored to a real figure (PSI 322,
+  # "Hazardous", the top category on Singapore NEA's own scale). A
+  # placeholder should not be permitted to rival an evidenced value at
+  # peak, given malacca.yaml's own documented STRONG-disaster / MODERATE-
+  # news classification. Re-sized by measurement: stepped down in 0.05
+  # increments, re-materializing each time, until disaster's peak exceeded
+  # news's peak by >=20% (see this prompt's validation output for the full
+  # step table): 0.50 -> ratio 1.0066 (fail), 0.45 -> 1.0790 (fail), 0.40 ->
+  # 1.1627 (fail), 0.35 -> 1.2373 (pass, disaster peak 0.6997 vs news peak
+  # 0.5655). Landed at 0.35.
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.35, lead_days: -3}}
+  # extrapolated: PSI 322-341 falls in Singapore NEA's "Hazardous" category
+  # — the WORST/top band on that scale (evidence file event 1 'disaster'
+  # field). No documented PSI-scale ceiling exists to compute a literal
+  # fraction (e.g. "322/500") without inventing a denominator, so — per the
+  # SAME "functional/operational severity, not a literal percentage"
+  # methodology panama_P_CRIT.yaml's own disaster comment uses — this is
+  # tier-anchored instead: config/benchmark/malacca.yaml classifies disaster
+  # STRONG (not DOMINANT — haze "degrade[s] throughput without ever closing
+  # the strait", a materially milder structural consequence than panama's
+  # forced 50% capacity cut or bab_el_mandeb's near-total Suez decline,
+  # despite PSI's own reading being categorically extreme). Set to 0.65,
+  # matching suez_P_CRIT.yaml's own STRONG-tier news target exactly (same
+  # tier, same anchor — suez's STRONG news and malacca's STRONG disaster are
+  # the only two STRONG-classified domains authored so far). lead_days=0:
+  # this is the root cause the other domain reacts to, not itself leading
+  # or lagging anything, same reasoning as panama's disaster.
+  disaster: {baseline: {mean: 0.02, std: 0.01}, effect: {type: additive_ramp, target: 0.65, lead_days: 0}}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

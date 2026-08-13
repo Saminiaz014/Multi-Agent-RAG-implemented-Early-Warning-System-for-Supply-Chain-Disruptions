@@ -706,6 +706,187 @@ identically before and after.
     causally — is the event this scenario deliberately does not use. This is a direct
     consequence of the P_CRIT archetype choice in Task 0d, not a separate design decision.
 
+    **Outstanding note on Suez, added 2026-08-13:** Suez's decoy peak (`5.7947`) sits within
+    ~3% of its own `P_CRIT`'s peak (`5.9869`) — the closest margin of any region's decoy in
+    this benchmark. This is a direct, structural consequence of Suez having only one viable
+    decoy domain (`market` — every other active domain is dominant, near-dominant, or
+    causally entangled with Ever Given), and that same domain being the one Suez's true event
+    moves *most* aggressively (severity_ratio `1.5833` above Hormuz's own anchor — see above).
+    **A weak Suez false-positive-rate result in a later cross-region evaluation pass is an
+    expected consequence of this constraint, identified in advance here, not a defect to
+    debug when it appears.** Malacca's decoy (below) was deliberately built to avoid this
+    exact trap by choosing a domain P_CRIT does not touch *at all*.
+
+    **Malacca (2026-08-13) — a third convention shift: decoy sized from region-specific
+    evidence directly, not from any P_CRIT ratio, because the decoy domain is one P_CRIT
+    never touches.** Malacca's decoy uses `geopolitical` (piracy), *not* `news` — a
+    late-stage domain substitution (superseding this region's original Task 1, which had
+    specified `news` following the hormuz/bab_el_mandeb/panama pattern). Reasoning: Malacca's
+    `news` is extrapolated-null across all four documented events in
+    `data/region_research/malacca_disruption_patterns.json` (no anchor for any target), and
+    haze — this region's `P_CRIT` driver — generates real, documented, heavy media coverage
+    (`malacca_P_CRIT.yaml`'s own news target, `0.50`), so a news decoy would be confounded
+    with the genuine positive signal, not orthogonal to it. `geopolitical` has neither
+    problem: `malacca_P_CRIT.yaml` leaves it `effect: null` entirely (haze's only
+    geopolitical trace — Singapore-Indonesia diplomatic friction — has no documented
+    numeric anchor and no region-level classification that covers haze specifically, only
+    piracy's WEAK rating, which does not transfer across signal families per this gap's own
+    established principle — see the Suez section above), it is bounded `[0,1]`, and it has a
+    real documented precedent: the Late-2024 Pulau Cula piracy escalation.
+
+    **Because `P_CRIT` never moves `geopolitical` at all, a P_CRIT-ratio (this gap's
+    transferable convention for every prior region) is undefined here — "ratio to zero" has
+    no meaning.** The target was instead derived directly from the evidence: the documented
+    Pulau Cula escalation (`incidents_within_one_week_nov_2024`, `8`, documented) expressed as
+    a multiple of the chronic SOMS baseline rate for the same calendar year
+    (`recaap_soms_2024_full_year`, `62`, documented, ÷ 52 weeks = `1.1923`/week):
+    `multiple = 8 / 1.1923 = 6.7097`. Applied directly to the domain's own baseline mean
+    (`0.05`, the shared cross-region constant, per the Option B decision below):
+    `target = 0.05 × 6.7097 = 0.3355`, rounded to `0.34`. (Corroborating, not primary: the
+    Pulau-Cula-specific YoY escalation, `27→45` incidents, gives a milder `1.667×` multiple —
+    consistent in direction, but the sharper weekly-rate reading was used as the more
+    directly rate-comparable figure and the more decoy-appropriate acute shape.) Achieved
+    `k = 10.0054`σ of Malacca's own `N_QUIET` geopolitical baseline; event-window mean
+    `0.2577`, peak `0.4259` — the plausibility gate (peak within `[0,1]`, `y_disruption`
+    remains `0`) passed with considerable headroom (peak reaches less than half the domain's
+    ceiling).
+
+    **The matched-window check — every prior region's primary validation — is N/A here,
+    stated explicitly rather than silently skipped.** `malacca_P_CRIT.yaml` does not move
+    `geopolitical` at all, so "`P_CRIT`'s best window on this domain" is undefined; there is
+    nothing to compare the decoy against. This is not a gap in the methodology — it is
+    the point: perfect domain orthogonality (a decoy on a domain the true event structurally
+    cannot touch) is a *stronger* guarantee against confounding than any matched-window
+    margin can provide, since even a comfortable margin (Suez's `24.7%`) still shares a
+    domain with the real signal. Verified instead (see this prompt's validation output):
+    decoy elevated above `N_QUIET` on `geopolitical` only, no other active domain differs,
+    `y_disruption` max `0` for both negatives. Decoy `duration_days=7` is grounded directly
+    in the same evidence used to derive its magnitude (the documented one-week spike window)
+    rather than borrowed from `P_CRIT`'s duration (`30`) — with no matched-window comparison
+    to satisfy, there was no reason to tie the two durations together the way Suez's decoy
+    had to.
+
+    **The piracy baseline decision (Task 0d): Option B (ordinary flat baseline) chosen over
+    Option A (elevated quiet baseline reflecting chronic piracy).** Both options were real
+    trade-offs (see Task 0d's original framing): Option A is more realistic — Malacca's
+    piracy is chronic and "never zero" per the evidence file — and would make Malacca's
+    negatives genuinely noisier, arguably the benchmark's strongest FPR test. Option B keeps
+    "quiet" meaning the same thing across all five regions. **Chosen: Option B**, on two
+    grounds. First, direct precedent: `bab_el_mandeb.yaml` rates `geopolitical` **DOMINANT** —
+    a stronger, better-quantified, more severe classification than Malacca's **WEAK** — and
+    even that region's `N_QUIET`/baseline `geopolitical` value is the same shared `0.05/0.02`
+    constant used everywhere; its severity lives entirely in `P_CRIT`'s event target (`0.85`),
+    never in its baseline. Elevating Malacca's (WEAK) baseline would be a *more* aggressive
+    deviation than a DOMINANT-rated region never received. Second, no non-circular numeric
+    anchor exists: piracy's designated "event" home in this benchmark is the `N_DECOY` itself
+    (per the evidence file's own key finding, "a piracy spike is a textbook candidate for an
+    N_DECOY scenario"); sizing the *baseline* off the same signal designed to depart from
+    baseline would be self-referential. **Consequence for cross-region FPR comparability:**
+    because Option B was chosen, Malacca's negatives are governed by the *same* baseline
+    convention as all four other regions — cross-region FPR comparisons remain strictly
+    like-for-like across all five regions, with no region-specific denominator adjustment to
+    account for. The alternative (Option A) was rejected specifically because it would have
+    broken that comparability for one region out of five.
+
+    **The disaster onset contrast (this region's stated reason for existing alongside
+    Panama):** Malacca's haze is **acute-onset atmospheric** — documented onset-to-peak of
+    **15 days** (2015 episode, first-unhealthy PSI crossing to peak) to as fast as **3–5
+    days** (2019 episode) — versus Panama's **slow-onset hydrological** drought, which took
+    **~90 days** (`panama_P_CRIT.yaml`'s own `ramp_days`, drawn from the ~4-month Jul–Nov 2023
+    tightening window) to reach its own trough. `malacca_P_CRIT.yaml` uses the more severe
+    2015 episode's own `ramp_days=15` directly (not the faster 2019 figure, which anchors
+    `P_HIGH`'s *magnitude* scaling instead — `145/322 = 0.45` — per this region's explicit
+    instruction to vary `P_HIGH` from `P_CRIT` in magnitude only, keeping onset shape constant
+    between the two so severity and shape are never confounded in the same comparison). The
+    two disaster-dominant regions' ramp lengths differ by roughly **6x** (15 vs. ~90 days),
+    giving the disaster agent two genuinely differently-shaped instances to be evaluated
+    against, which is this region's stated purpose in the benchmark.
+
+    **Open item, recorded rather than resolved:** `malacca.yaml` carries no explicit strength
+    classification for `shipping` at all (unlike every other domain in this file, and unlike
+    every other region's own shipping domain, which likewise carries no classification —
+    this is consistent across the whole benchmark, not unique to Malacca, but is flagged here
+    since it was noticed while authoring this region). `malacca_P_CRIT.yaml`'s own shipping
+    effect is `null` — the only documented 2015 figure (a 1-hour, 2-route ferry suspension)
+    does not translate into this domain's whole-strait daily-transit-count convention without
+    inventing a conversion factor, so it was left `null` with that explanation, per this
+    region's amendment and exactly matching how `suez_P_CRIT.yaml` handled `routing` for Ever
+    Given.
+
+    **Malacca's `P_CRIT` news target was revised a second time (2026-08-13), after the
+    section above was first written: `0.50 -> 0.35`.** The original `0.50` (a MODERATE-tier
+    placeholder, matching `panama_P_CRIT.yaml`'s own news target, with no numeric evidence
+    anchor at all — Malacca's news is extrapolated-null across all four documented events)
+    put news's peak (`0.6951`) within 1% of `disaster`'s peak (`0.6997`, which *is* anchored
+    to a real figure, PSI 322 "Hazardous") — an unevidenced placeholder rivaling an evidenced
+    value at peak, contradicting `malacca.yaml`'s own documented STRONG-disaster /
+    MODERATE-news classification. Re-sized by measurement, not preference: stepped down in
+    `0.05` increments, re-materializing each time, until `disaster`'s peak exceeded `news`'s
+    peak by ≥20%: `0.50`→ratio `1.0066` (fail), `0.45`→`1.0790` (fail), `0.40`→`1.1627`
+    (fail), `0.35`→`1.2373` (**pass**). `P_HIGH`'s news target was re-scaled from the new
+    value via the same `0.45` magnitude ratio (`0.35×0.45=0.1575→0.16`), not re-derived
+    independently.
+
+    **This fix surfaced a second, smaller-magnitude issue on re-validation — resolved not by
+    changing any scenario file, but by correcting what the "`P_HIGH` strictly between
+    `N_QUIET` and `P_CRIT`" check actually asserts on.** Measuring `news` over each scenario's
+    own lead-shifted effective window (accounting for `lead_days`, not the event's nominal
+    window), `P_HIGH`'s *realized* news reading (`0.3049`) exceeded `P_CRIT`'s (`0.2956`) for
+    this one seed. **The ordering requirement is a property of scenario *design*, not of any
+    one noise realization — so it is verified on the DESIGNED signal (`baseline.mean +
+    effect.target × mean(_intensity_curve(...))`), which is exact and deterministic, not
+    measured off materialized data at all.** By that criterion, `news` is or­dered correctly:
+    designed `N_QUIET=0.15 < P_HIGH=0.23 < P_CRIT=0.325` (`P_CRIT`: `0.15+0.35×0.5=0.325`;
+    `P_HIGH`: `0.15+0.16×0.5=0.23`, both intensity curves averaging exactly `0.5`) —
+    **strictly between, passes.** The realized window means are still printed alongside every
+    check (`P_HIGH` window mean `0.3049` vs. `P_CRIT` window mean `0.2956`) but are now
+    explicitly labelled noise-affected and are NOT the pass criterion: they are one sample
+    from a shared, non-independent seed-42 noise series (`P_CRIT`'s window, days 243–272, and
+    `P_HIGH`'s window, days 122–134, are different slices of the same underlying series, per
+    gap 19c) and can invert an otherwise-correctly-designed ordering whenever the tier gap is
+    small relative to the domain's own noise floor — exactly what happened here once `news`
+    was lowered from `0.50` to `0.35`. Malacca's news is the documented instance of this: it
+    is itself a tier-convention placeholder (extrapolated-null across all four documented
+    events in `data/region_research/malacca_disruption_patterns.json` — no source anchors it
+    to any number), so its signal-to-noise margin was always thinner than a
+    documented-figure-anchored domain like `disaster` (PSI 322). This is a property of the
+    validation *methodology* now fixed project-wide (assert on design, report noise
+    separately), not a scenario-file change — no scenario YAML was touched to resolve it. See
+    gap 19c for the underlying non-independent-noise property this instance depends on.
+
+    **Decoy threshold-crossing is NOT uniform across regions — N_DECOY tests a different
+    thing per region, and cross-region FPR comparison must be qualified accordingly.**
+    Comparing each region's decoy peak against its own domain's real single-domain agent
+    threshold (`config/settings.yaml`: `news_sentiment.threshold=0.40`,
+    `geopolitical.threshold=0.5`) — a caveat first: this raw-signal-vs-threshold comparison is
+    only mathematically equivalent to what the real agent actually decides for
+    `geopolitical`, where the sigmoid composite's fixed point coincidentally equals its own
+    threshold (`0.5`); for `news`/`market` the real agent's threshold gates a *derived*
+    composite/sentiment score, not the raw EVAL01 signal directly, so these are illustrative
+    reference points, not literal agent-decision reproductions:
+
+    | region | decoy domain | decoy peak | domain threshold | peak/threshold | crosses? |
+    |---|---|---|---|---|---|
+    | hormuz | news | 0.8411 | 0.40 | 2.10× | yes |
+    | bab_el_mandeb | news | 0.8311 | 0.40 | 2.08× | yes |
+    | panama | news | 0.8949 | 0.40 | 2.24× | yes |
+    | malacca | geopolitical | 0.4259 | 0.50 | 0.85× | **no** |
+    | suez | market | 5.7947 | n/a | n/a | no comparable-units threshold (market's real agent gates a z-scored, further-processed statistic, not this raw additive index) |
+
+    hormuz/bab_el_mandeb/panama's news decoys clear their single-domain gate by roughly 2×
+    — a real detector reading news alone would fire on all three. Malacca's geopolitical
+    decoy, despite clearing its own `N_QUIET` baseline by `k=10.0`σ and being deliberately
+    the most evidence-grounded, evidence-orthogonal decoy in the benchmark, stays
+    **sub-threshold** against the real agent's own gate — a single-domain detector reading
+    geopolitical alone would *not* fire on it. Suez's market decoy has no comparably-scaled
+    real threshold to compare against at all. **Consequence: `N_DECOY` is not a like-for-like
+    stimulus across regions** — for three regions it's "a signal that fools a real
+    single-domain detector into firing," for Malacca it's "a signal well above its own
+    negative-control noise floor but below what would trip a real detector," and for Suez
+    it's not comparable on this axis at all. Any cross-region false-positive-rate comparison
+    drawn from `N_DECOY` results must be qualified by this table, not presented as five
+    equivalent trials of the same underlying test.
+
 19. **Benchmark-wide limitations surfaced while establishing the σ-convention above
     (2026-08-13), not specific to any one region:**
 
