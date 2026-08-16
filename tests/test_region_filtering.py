@@ -141,3 +141,158 @@ def test_ablations_region_filter_selects_correctly(two_region_scenarios_dir, tmp
     written = sorted(p.name for p in results_dir.glob("*.json"))
     assert written
     assert all(name.startswith("hormuz_") for name in written)
+
+
+# --------------------------------------------------------------------------
+# Aggregation scripts (scripts/aggregate_ablation_results.py,
+# scripts/aggregate_all_results.py) — found unfiltered during A6 (2026-08-14)
+# after the four R4-R7 runner scripts above had already been fixed. Both
+# globbed their results directory with no region filter at all: with a
+# second region's results on disk, aggregate_ablation_results.py silently
+# pooled both regions into one groupby(...).mean() under a header hardcoded
+# to say "mean over Hormuz 4 scenarios" regardless of what was actually
+# aggregated. These tests prove the fix the same way the tests above prove
+# it for the runner scripts: tiny synthetic fixtures, two regions on disk
+# at once, assert the filter actually restricts to one.
+# --------------------------------------------------------------------------
+
+
+def _write_fixture_ablation_result(
+    path: Path, region_key: str, scenario_suffix: str, config: str, seed: int = 42
+) -> None:
+    import json
+
+    path.mkdir(parents=True, exist_ok=True)
+    result = {
+        "scenario_id": f"{region_key}_{scenario_suffix}",
+        "ablation_config": config,
+        "seed": seed,
+        "region": region_key,
+        "metadata": {"ablation_name": f"{config}_fixture"},
+        "metrics": {
+            "D3_auc_pr": 0.5, "D4_auc_roc": 0.5, "D5_f1_tau": 0.5,
+            "D6_best_f1": 0.5, "D8_recall_tau": 0.5, "D9_fpr_tau": 0.5,
+        },
+    }
+    out = path / f"{region_key}_{scenario_suffix}_{config}_seed_{seed}.json"
+    out.write_text(json.dumps(result), encoding="utf-8")
+
+
+def _write_fixture_tier_result(
+    path: Path, region_key: str, scenario_suffix: str, baseline: str, seed: int = 42
+) -> None:
+    import json
+
+    path.mkdir(parents=True, exist_ok=True)
+    result = {
+        "scenario_id": f"{region_key}_{scenario_suffix}",
+        "baseline_name": baseline,
+        "seed": seed,
+        "region": region_key,
+        "metadata": {"region": region_key},
+        "metrics": {"D3_auc_pr": 0.5, "D6_best_f1": 0.5, "D8_recall_tau": 0.5, "D9_fpr_tau": 0.5},
+    }
+    out = path / f"{region_key}_{scenario_suffix}_{baseline}_seed_{seed}.json"
+    out.write_text(json.dumps(result), encoding="utf-8")
+
+
+@pytest.fixture
+def two_region_ablation_results_dir(tmp_path: Path) -> Path:
+    results_dir = tmp_path / "results" / "ablations"
+    _write_fixture_ablation_result(results_dir, "hormuz", "N_QUIET", "A0")
+    _write_fixture_ablation_result(results_dir, "panama", "N_QUIET", "A0")
+    return results_dir
+
+
+def test_aggregate_ablations_region_filter_selects_correctly(
+    two_region_ablation_results_dir, monkeypatch, capsys
+) -> None:
+    import aggregate_ablation_results as agg
+
+    monkeypatch.setattr(agg, "_RESULTS_DIR", two_region_ablation_results_dir)
+
+    agg.aggregate_ablations("panama")
+
+    out = capsys.readouterr().out
+    assert "region=panama" in out
+    assert "panama_N_QUIET" in out
+    assert "hormuz_N_QUIET" not in out
+    written = two_region_ablation_results_dir / "ablation_summary_panama.csv"
+    assert written.exists()
+
+
+def test_aggregate_ablations_region_filter_defaults_to_hormuz(
+    two_region_ablation_results_dir, monkeypatch, capsys
+) -> None:
+    import aggregate_ablation_results as agg
+
+    monkeypatch.setattr(agg, "_RESULTS_DIR", two_region_ablation_results_dir)
+
+    agg.aggregate_ablations()  # no region argument
+
+    out = capsys.readouterr().out
+    assert "region=hormuz" in out
+    assert "hormuz_N_QUIET" in out
+    assert "panama_N_QUIET" not in out
+
+
+def test_aggregate_ablations_output_filenames_do_not_collide_across_regions(
+    two_region_ablation_results_dir, monkeypatch
+) -> None:
+    """Before the fix, both regions' summaries would have overwritten the
+    same ablation_summary.csv — the region-suffixed filename prevents that."""
+    import aggregate_ablation_results as agg
+
+    monkeypatch.setattr(agg, "_RESULTS_DIR", two_region_ablation_results_dir)
+
+    agg.aggregate_ablations("hormuz")
+    agg.aggregate_ablations("panama")
+
+    assert (two_region_ablation_results_dir / "ablation_summary_hormuz.csv").exists()
+    assert (two_region_ablation_results_dir / "ablation_summary_panama.csv").exists()
+
+
+@pytest.fixture
+def two_region_all_tiers_dir(tmp_path: Path) -> Path:
+    root = tmp_path / "results"
+    _write_fixture_tier_result(root / "baselines" / "tier0", "hormuz", "N_QUIET", "random")
+    _write_fixture_tier_result(root / "baselines" / "tier0", "panama", "N_QUIET", "random")
+    _write_fixture_ablation_result(root / "baselines" / "ablations", "hormuz", "N_QUIET", "A0")
+    _write_fixture_ablation_result(root / "baselines" / "ablations", "panama", "N_QUIET", "A0")
+    return root
+
+
+def test_aggregate_all_results_load_results_filters_by_region(
+    two_region_all_tiers_dir,
+) -> None:
+    from scripts.aggregate_all_results import load_results
+
+    tier0_dir = two_region_all_tiers_dir / "baselines" / "tier0"
+    panama_results = load_results(tier0_dir, "panama")
+    hormuz_results = load_results(tier0_dir, "hormuz")
+
+    assert len(panama_results) == 1
+    assert panama_results[0]["scenario_id"] == "panama_N_QUIET"
+    assert len(hormuz_results) == 1
+    assert hormuz_results[0]["scenario_id"] == "hormuz_N_QUIET"
+
+
+def test_aggregate_all_results_main_filters_and_names_output_by_region(
+    two_region_all_tiers_dir, monkeypatch
+) -> None:
+    import aggregate_all_results as agg
+
+    monkeypatch.setattr(agg, "_RESULTS_ROOT", two_region_all_tiers_dir)
+    monkeypatch.setattr(agg, "_TIER0_DIR", two_region_all_tiers_dir / "baselines" / "tier0")
+    monkeypatch.setattr(agg, "_TIER1_DIR", two_region_all_tiers_dir / "baselines" / "tier1")
+    monkeypatch.setattr(agg, "_TIER2_DIR", two_region_all_tiers_dir / "baselines" / "tier2")
+    monkeypatch.setattr(agg, "_ABLATIONS_DIR", two_region_all_tiers_dir / "baselines" / "ablations")
+
+    agg.main("panama")
+
+    all_runs = two_region_all_tiers_dir / "results_all_runs_panama.csv"
+    assert all_runs.exists()
+    content = all_runs.read_text(encoding="utf-8")
+    assert "panama_N_QUIET" in content
+    assert "hormuz_N_QUIET" not in content
+    assert not (two_region_all_tiers_dir / "results_all_runs_hormuz.csv").exists()

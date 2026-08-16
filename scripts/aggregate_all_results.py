@@ -2,11 +2,20 @@
 
 Run from project root, after the R4/R5/R6/R7 result-generating scripts::
 
-    python scripts/aggregate_all_results.py
+    python scripts/aggregate_all_results.py [--region REGION]
+
+``--region`` defaults to ``hormuz`` (matching every R4-R7 runner script). It
+filters every results directory to only that region's result files, so a
+second region's results on disk never silently blend into this region's
+tables — this script and ``aggregate_ablation_results.py`` were found to be
+the two remaining unfiltered aggregation entry points (2026-08-14, during
+A6), after the four R4-R7 runner scripts had already been fixed; see
+docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 for the full writeup.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import sys
@@ -17,6 +26,8 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+
+from src.benchmark.regions import resolve_region_key  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,10 +58,22 @@ _UNMEASURED_METRICS: tuple[str, ...] = (
 )
 
 
-def load_results(results_dir: Path, pattern: str = "*.json") -> list[dict]:
-    """Load all JSON results matching ``pattern`` under ``results_dir``."""
+def load_results(results_dir: Path, region: str, pattern: str = "*.json") -> list[dict]:
+    """Load ``region``'s JSON results matching ``pattern`` under ``results_dir``.
+
+    Args:
+        results_dir: Directory to glob.
+        region: Canonical region key (already resolved via
+            :func:`~src.benchmark.regions.resolve_region_key`) — only files
+            whose name starts with ``f"{region}_"`` are loaded, so a second
+            region's results on disk never silently blend into this call's
+            output.
+        pattern: Glob pattern, applied before the region filter.
+    """
     results = []
     for json_file in sorted(results_dir.glob(pattern)):
+        if not json_file.stem.startswith(f"{region}_"):
+            continue
         try:
             with open(json_file, encoding="utf-8") as fh:
                 results.append(json.load(fh))
@@ -142,14 +165,22 @@ def summarize_ablations(df: pd.DataFrame) -> pd.DataFrame:
     return summary.round(4)
 
 
-def main() -> None:
+def main(region: str = "hormuz") -> None:
+    """Aggregate ``region``'s Tier 0-2 + ablation results into summary tables.
+
+    Args:
+        region: Canonical region key, alias, or display name (see
+            :func:`src.benchmark.regions.resolve_region_key`). Defaults to
+            ``"hormuz"``, matching every R4-R7 runner script.
+    """
+    region = resolve_region_key(region)
     _RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Loading results from all tiers...")
-    tier0_results = load_results(_TIER0_DIR)
-    tier1_results = load_results(_TIER1_DIR)
-    tier2_results = load_results(_TIER2_DIR)
-    ablation_results = load_results(_ABLATIONS_DIR)
+    logger.info("Loading region=%s results from all tiers...", region)
+    tier0_results = load_results(_TIER0_DIR, region)
+    tier1_results = load_results(_TIER1_DIR, region)
+    tier2_results = load_results(_TIER2_DIR, region)
+    ablation_results = load_results(_ABLATIONS_DIR, region)
     logger.info(
         "Loaded: %d Tier0, %d Tier1, %d Tier2, %d ablations",
         len(tier0_results), len(tier1_results), len(tier2_results), len(ablation_results),
@@ -158,8 +189,9 @@ def main() -> None:
     all_results = tier0_results + tier1_results + tier2_results + ablation_results
     if not all_results:
         logger.warning(
-            "No results found under %s — run the R4-R7 result-generating scripts first.",
-            _RESULTS_ROOT,
+            "No results found for region %r under %s — run the R4-R7 "
+            "result-generating scripts with --region %s first.",
+            region, _RESULTS_ROOT, region,
         )
         return
 
@@ -168,33 +200,48 @@ def main() -> None:
     summary_by_scenario = summarize_by_scenario_type(df_all)
     summary_ablations = summarize_ablations(df_all)
 
-    df_all.to_csv(_RESULTS_ROOT / "results_all_runs.csv", index=False)
-    logger.info("Saved results_all_runs.csv (%d rows)", len(df_all))
+    df_all.to_csv(_RESULTS_ROOT / f"results_all_runs_{region}.csv", index=False)
+    logger.info("Saved results_all_runs_%s.csv (%d rows)", region, len(df_all))
 
-    summary_by_baseline.to_csv(_RESULTS_ROOT / "results_by_baseline.csv")
-    logger.info("Saved results_by_baseline.csv")
+    summary_by_baseline.to_csv(_RESULTS_ROOT / f"results_by_baseline_{region}.csv")
+    logger.info("Saved results_by_baseline_%s.csv", region)
 
-    summary_by_scenario.to_csv(_RESULTS_ROOT / "results_by_scenario.csv")
-    logger.info("Saved results_by_scenario.csv")
+    summary_by_scenario.to_csv(_RESULTS_ROOT / f"results_by_scenario_{region}.csv")
+    logger.info("Saved results_by_scenario_%s.csv", region)
 
-    summary_ablations.to_csv(_RESULTS_ROOT / "ablation_findings.csv")
-    logger.info("Saved ablation_findings.csv")
+    summary_ablations.to_csv(_RESULTS_ROOT / f"ablation_findings_{region}.csv")
+    logger.info("Saved ablation_findings_%s.csv", region)
 
     print("\n" + "=" * 120)
-    print("BASELINE SUMMARY (mean +/- std over seeds/scenarios, Tiers 0-2 only)")
+    print(f"BASELINE SUMMARY (region={region}, mean +/- std over seeds/scenarios, Tiers 0-2 only)")
     print("=" * 120)
     print(summary_by_baseline.to_string())
 
     print("\n" + "=" * 120)
-    print("BEST-F1 BY SCENARIO TYPE (mean over seeds)")
+    print(f"BEST-F1 BY SCENARIO TYPE (region={region}, mean over seeds)")
     print("=" * 120)
     print(summary_by_scenario.to_string())
 
     print("\n" + "=" * 120)
-    print("ABLATION SUMMARY (A0-A7, seed=42 only)")
+    print(f"ABLATION SUMMARY (region={region}, A0-A7, seed=42 only)")
     print("=" * 120)
     print(summary_ablations.to_string())
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Aggregate all baseline (Tier 0-2) and ablation (A0-A7) "
+        "results into comprehensive tables for a region.",
+    )
+    parser.add_argument(
+        "--region",
+        default="hormuz",
+        help="Region key, alias, or display name to aggregate (default: hormuz). "
+        "Only result files for this region are read, so runs never silently "
+        "mix regions.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    main()
+    main(_parse_args().region)

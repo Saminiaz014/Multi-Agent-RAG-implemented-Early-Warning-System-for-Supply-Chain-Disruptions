@@ -37,7 +37,8 @@ results/baselines/tier1/
 results/baselines/tier2/
 results/baselines/ablations/
 results/*.csv
-results/benchmark_summary.md
+results/benchmark_summary*.md
+results/_archive/
 
 # ChromaDB persistence (binary store stays ignored; the JSON snapshot
 # live_extracted_backup.json IS committed — it is the portable seed that

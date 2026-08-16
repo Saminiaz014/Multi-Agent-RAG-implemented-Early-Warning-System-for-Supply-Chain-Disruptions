@@ -929,3 +929,46 @@ identically before and after.
     derivation in gap 18 possible at all), not a bug — but it means cross-region
     comparisons of baseline noise character are not comparisons of independent draws, and
     should not be presented as such.
+
+20. **`FIXED` — the aggregation layer (downstream of gap 15's per-run scripts) still
+    globbed every region's results together, and mislabelled the blend as Hormuz-only.**
+    Gap 15 fixed region filtering in the four *run*-time scripts
+    (`run_tier{0,1,2}_baselines.py`, `run_ablations.py`), but `scripts/aggregate_all_results.py`
+    and `scripts/aggregate_ablation_results.py` were never touched in that pass: both still
+    globbed `*.json` unconditionally across `results/baselines/{tier0,tier1,tier2,ablations}/`,
+    so once a second region's result files existed on disk (bab_el_mandeb, from resuming the
+    multi-region rollout), every subsequent aggregation run silently pooled both regions'
+    metrics into one mean. The printed header made this invisible rather than visible: it
+    read `"ABLATION SUMMARY (mean over 4 scenarios, seed=42)"` — a hardcoded scenario count
+    that stayed accurate-*looking* even as the actual scenario count doubled, with no region
+    name anywhere in the output to contradict it. `scripts/generate_results_summary.py`,
+    a further downstream consumer of the two aggregators' CSVs, inherited the same
+    contamination risk one layer removed (found and fixed 2026-08-16, one pass after the
+    other two).
+
+    **The fix (same shape as gap 15):** all three scripts now take a `--region` CLI
+    argument (default `"hormuz"`, resolved through `resolve_region_key`, unrecognized
+    region raises `ValueError` before any file is read), filter every glob/load to that
+    region's `{region}_`-prefixed files only, and print `region={region}` in every header
+    instead of a hardcoded scenario count. Every output CSV/markdown filename is now
+    region-suffixed (`ablation_summary_{region}.csv`, `results_all_runs_{region}.csv`,
+    `results_by_baseline_{region}.csv`, `results_by_scenario_{region}.csv`,
+    `ablation_findings_{region}.csv`, `benchmark_summary_{region}.md`) rather than a bare
+    name shared across regions, so two regions' aggregated output can never overwrite or
+    silently blend into each other on disk either.
+
+    **Regression-gated the same way as gap 15:** re-running `aggregate_ablation_results.py
+    --region hormuz` after the fix reproduced `results/ablation_findings.csv`'s pre-fix
+    values byte-for-byte; re-running `aggregate_all_results.py --region hormuz` reproduced
+    `results/results_by_baseline.csv` identically except for the `ewma` row, matching gap
+    15's own already-documented pre-existing floating-point tie-break (unrelated to this
+    change, not a new regression). The pre-fix, now-contaminated
+    `results/baselines/ablations/ablation_summary.csv` was deleted rather than kept
+    silently wrong; the stale pre-multi-region `results/results_all_runs.csv`,
+    `results_by_baseline.csv`, `results_by_scenario.csv`, `ablation_findings.csv`, and
+    `benchmark_summary.md` (dated 2026-08-06, predating every region but Hormuz) were moved
+    to `results/_archive/pre_region_fix_2026-08-06/` rather than deleted outright, since
+    `docs/presentation/EVAL01_presentation_prompt.md` cites their exact unsuffixed paths —
+    see that file for the still-valid, region-agnostic-at-the-time numbers it quotes from
+    them. Committed `results/baselines/tier0/` output (gap 15's own regression-gate
+    subject) was not touched by this pass and was not re-verified here.
