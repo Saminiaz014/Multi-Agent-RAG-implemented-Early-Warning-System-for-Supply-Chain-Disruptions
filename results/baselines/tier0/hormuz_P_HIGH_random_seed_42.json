@@ -11,21 +11,21 @@
     "D13_affiliation_f1": NaN,
     "D14_pa_f1": NaN,
     "D15_pa_k_0_2": NaN,
-    "D4_auc_roc": NaN,
-    "D3_auc_pr": 0.5,
-    "D5_f1_tau": 0.0,
-    "D7_precision_tau": 0.0,
-    "D8_recall_tau": 0.0,
-    "D9_fpr_tau": 0.47619047619047616,
-    "D10_macro_f1": 0.34375,
-    "D6_best_f1": 0.0
+    "D4_auc_roc": 0.36511375947995667,
+    "D3_auc_pr": 0.11370128848753376,
+    "D5_f1_tau": 0.08,
+    "D7_precision_tau": 0.08333333333333333,
+    "D8_recall_tau": 0.07692307692307693,
+    "D9_fpr_tau": 0.15492957746478872,
+    "D10_macro_f1": 0.45958041958041956,
+    "D6_best_f1": 0.2765957446808511
   },
   "metadata": {
     "scenario_id": "hormuz_P_HIGH",
     "baseline_name": "random",
     "seed": 42,
     "method": "uniform random in [0, 1]",
-    "threshold": 0.5,
+    "threshold": 0.75,
     "val_window": [
       201,
       281

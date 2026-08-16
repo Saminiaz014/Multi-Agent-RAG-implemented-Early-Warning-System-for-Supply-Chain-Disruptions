@@ -1,0 +1,39 @@
+{
+  "scenario_id": "malacca_P_HIGH",
+  "baseline_name": "random",
+  "seed": 789,
+  "region": "malacca",
+  "metrics": {
+    "D1_vus_pr": NaN,
+    "D2_vus_roc": NaN,
+    "D11_event_f1": NaN,
+    "D12_range_f1": NaN,
+    "D13_affiliation_f1": NaN,
+    "D14_pa_f1": NaN,
+    "D15_pa_k_0_2": NaN,
+    "D4_auc_roc": 0.5732838589981447,
+    "D3_auc_pr": 0.12101430260684828,
+    "D5_f1_tau": 0.24,
+    "D7_precision_tau": 0.16666666666666666,
+    "D8_recall_tau": 0.42857142857142855,
+    "D9_fpr_tau": 0.19480519480519481,
+    "D10_macro_f1": 0.5535664335664335,
+    "D6_best_f1": 0.26666666666666666
+  },
+  "metadata": {
+    "scenario_id": "malacca_P_HIGH",
+    "baseline_name": "random",
+    "seed": 789,
+    "method": "uniform random in [0, 1]",
+    "threshold": 0.78,
+    "val_window": [
+      201,
+      281
+    ],
+    "test_window": [
+      281,
+      365
+    ],
+    "region": "malacca"
+  }
+}

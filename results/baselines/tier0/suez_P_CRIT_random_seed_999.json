@@ -1,0 +1,39 @@
+{
+  "scenario_id": "suez_P_CRIT",
+  "baseline_name": "random",
+  "seed": 999,
+  "region": "suez",
+  "metrics": {
+    "D1_vus_pr": NaN,
+    "D2_vus_roc": NaN,
+    "D11_event_f1": NaN,
+    "D12_range_f1": NaN,
+    "D13_affiliation_f1": NaN,
+    "D14_pa_f1": NaN,
+    "D15_pa_k_0_2": NaN,
+    "D4_auc_roc": 0.46794871794871795,
+    "D3_auc_pr": 0.07003486965089924,
+    "D5_f1_tau": 0.05714285714285714,
+    "D7_precision_tau": 0.034482758620689655,
+    "D8_recall_tau": 0.16666666666666666,
+    "D9_fpr_tau": 0.358974358974359,
+    "D10_macro_f1": 0.4045112781954887,
+    "D6_best_f1": 0.18181818181818182
+  },
+  "metadata": {
+    "scenario_id": "suez_P_CRIT",
+    "baseline_name": "random",
+    "seed": 999,
+    "method": "uniform random in [0, 1]",
+    "threshold": 0.61,
+    "val_window": [
+      201,
+      281
+    ],
+    "test_window": [
+      281,
+      365
+    ],
+    "region": "suez"
+  }
+}

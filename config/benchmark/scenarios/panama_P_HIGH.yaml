@@ -8,12 +8,15 @@
 # validation output for the same check re-run against the actual written
 # files.
 #
-# Event timing mirrors the same proportional-scaling method used for
-# bab_el_mandeb_P_HIGH.yaml: Hormuz's own established P_CRIT-to-P_HIGH
-# ratios (onset 120/240=0.5, ramp 7/12=0.583, duration 25/60=0.417) applied
-# to panama_P_CRIT.yaml's own (evidence-grounded) timing, since no
+# Ramp/duration timing mirrors the same proportional-scaling method used
+# for bab_el_mandeb_P_HIGH.yaml: Hormuz's own established P_CRIT-to-P_HIGH
+# ratios (ramp 7/12=0.583, duration 25/60=0.417) applied to
+# panama_P_CRIT.yaml's own (evidence-grounded) ramp/duration, since no
 # independent P_HIGH-equivalent drought event exists in the evidence file to
-# derive a Panama-specific ratio from. Each domain's effect target and
+# derive a Panama-specific ratio from. (Onset was originally scaled the same
+# way, 150*0.5=75 — that "onset = P_CRIT onset * 0.5" convention is removed,
+# A6-FIX 2026-08-16, since it placed every region's P_HIGH event before the
+# val window; see the event block below.) Each domain's effect target and
 # lead_days are P_CRIT's own value scaled by that SAME domain's Hormuz ratio
 # — disaster (Panama's dominant domain, no direct Hormuz analogue since
 # Hormuz's own disaster stays silent) reuses geopolitical's ratio
@@ -25,7 +28,12 @@ class: P-HIGH
 seed: 42
 days: 365
 event:
-  onset_day: 75
+  # onset_day moved 75->240 (A6-FIX, 2026-08-16): the old onset placed this
+  # 83-day event entirely before the val window (201-280). onset_day is
+  # arbitrary (unlike duration_days/ramp_days/domain targets, which are
+  # evidence-anchored); 240 places the window at [240,322], straddling the
+  # val/test boundary (day 281) with positives on both sides.
+  onset_day: 240
   ramp_days: 52
   duration_days: 83
   peak_band: high

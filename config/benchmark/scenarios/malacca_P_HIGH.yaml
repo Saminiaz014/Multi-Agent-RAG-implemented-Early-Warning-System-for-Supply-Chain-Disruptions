@@ -21,26 +21,38 @@
 # revision (0.50 -> 0.35, see that file's header) — re-scaled from the new
 # P_CRIT value, not the retired one: 0.35*0.45=0.1575 -> 0.16.
 #
-# RAMP/DURATION/ONSET — scaled via the SAME Hormuz-ratio timing convention
-# every prior region's P_HIGH already uses (onset 120/240=0.5, ramp
-# 7/12=0.583, duration 25/60=0.417), applied to malacca_P_CRIT's own timing
-# (240/15/30): onset=240*0.5=120, ramp=15*0.583=8.75->9,
-# duration=30*0.417=12.5->13. This is DELIBERATELY NOT 2019's own faster
-# documented onset (3-5 days) — per this prompt's explicit instruction,
-# P_HIGH varies from P_CRIT in MAGNITUDE only, using the mechanical
-# ramp-ratio scaling already applied to every other region, so severity and
-# onset shape are never confounded with each other; 2019's genuinely
-# faster documented onset is real evidence, noted here, but deliberately
-# unused for P_HIGH's shape so that a P_CRIT-vs-P_HIGH comparison isolates
-# magnitude as the only varying dimension (the same isolation every other
-# region's P_HIGH already preserves).
+# RAMP/DURATION — scaled via the SAME Hormuz-ratio timing convention every
+# prior region's P_HIGH already uses (ramp 7/12=0.583, duration 25/60=0.417),
+# applied to malacca_P_CRIT's own ramp/duration (15/30):
+# ramp=15*0.583=8.75->9, duration=30*0.417=12.5->13. This is DELIBERATELY NOT
+# 2019's own faster documented onset (3-5 days) — per this prompt's explicit
+# instruction, P_HIGH varies from P_CRIT in MAGNITUDE only, using the
+# mechanical ramp-ratio scaling already applied to every other region, so
+# severity and onset shape are never confounded with each other; 2019's
+# genuinely faster documented onset is real evidence, noted here, but
+# deliberately unused for P_HIGH's shape so that a P_CRIT-vs-P_HIGH
+# comparison isolates magnitude as the only varying dimension (the same
+# isolation every other region's P_HIGH already preserves).
+#
+# ONSET — the "onset = P_CRIT onset * 0.5" convention referenced above for
+# ramp/duration originally set onset_day the same way (240*0.5=120); removed
+# (A6-FIX, 2026-08-16) — that convention placed every region's P_HIGH event
+# entirely before the val window (201-280), so P_HIGH was never evaluated
+# anywhere. See the event block below for the corrected, unrelated-to-P_CRIT
+# onset choice.
 scenario_id: malacca_P_HIGH
 region: malacca
 class: P-HIGH
 seed: 42
 days: 365
 event:
-  onset_day: 120
+  # onset_day moved 120->275 (A6-FIX, 2026-08-16): the old onset (derived
+  # via the now-removed onset=P_CRIT_onset*0.5 convention, see header) placed
+  # this event entirely before the val window (201-280). onset_day is
+  # arbitrary (unlike duration_days/ramp_days/domain targets, which are
+  # evidence-anchored); 275 places the window at [275,287], straddling the
+  # val/test boundary (day 281) with positives on both sides.
+  onset_day: 275
   ramp_days: 9
   duration_days: 13
   peak_band: high

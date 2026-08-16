@@ -7,7 +7,14 @@ class: P-HIGH
 seed: 42
 days: 365
 event:
-  onset_day: 120
+  # onset_day moved 120->269 (A6-FIX, 2026-08-16): the old onset placed
+  # this scenario's entire 25-day event ([120,144]) before the val window
+  # (201-280) even starts, so P_HIGH was never evaluated in val or test for
+  # any region. onset_day is an arbitrary synthetic-calendar position (unlike
+  # duration_days/ramp_days/domain targets, which are evidence-anchored);
+  # 269 places the window at [269,293], straddling the val/test boundary
+  # (day 281) with positives on both sides.
+  onset_day: 269
   ramp_days: 7
   duration_days: 25
   peak_band: high

@@ -11,21 +11,21 @@
     "D13_affiliation_f1": NaN,
     "D14_pa_f1": NaN,
     "D15_pa_k_0_2": NaN,
-    "D4_auc_roc": NaN,
-    "D3_auc_pr": 0.5,
-    "D5_f1_tau": 0.0,
-    "D7_precision_tau": 0.0,
-    "D8_recall_tau": 0.0,
+    "D4_auc_roc": 0.5,
+    "D3_auc_pr": 0.75,
+    "D5_f1_tau": 0.6666666666666666,
+    "D7_precision_tau": 0.5,
+    "D8_recall_tau": 1.0,
     "D9_fpr_tau": 1.0,
-    "D10_macro_f1": 0.0,
-    "D6_best_f1": 0.0
+    "D10_macro_f1": 0.3333333333333333,
+    "D6_best_f1": 0.6666666666666666
   },
   "metadata": {
     "scenario_id": "panama_P_HIGH",
     "baseline_name": "always_alarm",
     "seed": 789,
     "method": "constant 1.0 (always alarming)",
-    "threshold": 0.5,
+    "threshold": 0.01,
     "val_window": [
       201,
       281

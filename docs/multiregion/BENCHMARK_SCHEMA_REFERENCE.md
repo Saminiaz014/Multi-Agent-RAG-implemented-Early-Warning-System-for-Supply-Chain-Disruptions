@@ -1031,3 +1031,88 @@ identically before and after.
     been evaluated yet (scenario YAMLs and parquet grids exist; no baseline/ablation runs
     have been done for them as of this pass) and will pick up the fix automatically whenever
     they are.
+
+22. **`FIXED` — the "P_HIGH onset = P_CRIT onset × 0.5" convention placed every region's
+    P_HIGH event entirely before the val window, so P_HIGH was never evaluated anywhere,
+    including Hormuz.** Every R4-R8 script scores against a pre-declared split (val =
+    days 201-280, test = days 281-364). Every `*_P_HIGH.yaml`'s `onset_day` was derived by
+    halving that region's own `P_CRIT` onset (`120 = 240*0.5` for hormuz/bab_el_mandeb/suez/
+    malacca, whose `P_CRIT` onset is 240; `75 = 150*0.5` for panama, whose `P_CRIT` onset is
+    150) — for every region, that halved onset placed the entire P_HIGH event window before
+    day 201, so it had zero positive days in *either* window, not just test. Found
+    2026-08-16 while running `suez` through the gap-21-fixed pipeline: unlike `panama`
+    (where only the geopolitical-dependent A2-A7 configs were degenerate, gap 21), *every*
+    suez baseline and ablation config — including A0/A1, which don't touch a missing
+    domain — came back with the identical `D3_auc_pr=0.5`/`D6_best_f1=0.0` signature. That
+    ruled out gap 21's domain-scoping bug as the cause and pointed at the data itself;
+    tracing `suez_P_CRIT`'s own positive-day span found the underlying defect, which then
+    motivated auditing all 20 scenarios at once rather than patching suez alone.
+
+    **Full audit (`y_disruption` positive-day span / count in val / count in test, all five
+    regions × four scenario classes) found 7 of the 10 positive scenarios violated the
+    invariant** — every P_HIGH (5/5) plus two P_CRIT cases:
+    - `hormuz_P_HIGH`, `bab_el_mandeb_P_HIGH`: span `[120,144]`, val=0, test=0.
+    - `malacca_P_HIGH`: span `[120,132]`, val=0, test=0.
+    - `panama_P_HIGH`: span `[75,157]`, val=0, test=0.
+    - `suez_P_HIGH`: span `[120,124]`, val=0, test=0.
+    - `malacca_P_CRIT`: span `[240,269]`, val=30, **test=0** — a second, independent defect:
+      this one wasn't produced by the P_HIGH-onset convention (it's a P_CRIT file), it's
+      simply a 30-day event ending 12 days before the test window starts.
+    - `suez_P_CRIT`: span `[240,250]`, val=11, **test=0** — same shape as malacca's case, an
+      11-day event ending 31 days before the test window starts.
+
+    `hormuz_P_CRIT`, `bab_el_mandeb_P_CRIT`, and `panama_P_CRIT` already satisfied the
+    invariant (each straddles day 281 with positive days on both sides) and were **not**
+    touched. **This means the already-committed `results/baselines/tier0/hormuz_P_HIGH_*.json`
+    files — checked into git since before this pass, part of the "committed, must stay
+    reproducible" reference set gap 15/18/21 all regression-gate against — were themselves
+    structurally void**: every P_HIGH metric in `results/results_by_scenario_hormuz.csv` was
+    exactly `0.0` for `D6_best_f1` across all 10 baselines including `always_alarm` (which
+    would score nonzero trivially if any positive test day existed), confirming zero signal
+    rather than merely poor detection.
+
+    **The fix:** moved `onset_day` only, in `hormuz_P_HIGH.yaml`, `bab_el_mandeb_P_HIGH.yaml`,
+    `malacca_P_HIGH.yaml`, `panama_P_HIGH.yaml`, `suez_P_HIGH.yaml`, `malacca_P_CRIT.yaml`, and
+    `suez_P_CRIT.yaml` — `duration_days`, `ramp_days`, and every domain target are unchanged
+    (evidence-anchored, per each file's own header). `onset_day` is an arbitrary synthetic-
+    calendar position with no evidentiary anchor of its own (unlike duration/ramp/targets),
+    so moving it doesn't touch anything the header docstrings ground in real-world evidence.
+    Each new onset places its window straddling day 281 with positive days on both sides:
+
+    | File | old onset → new onset | new span | val | test |
+    |---|---|---|---|---|
+    | `hormuz_P_HIGH.yaml` | 120 → 269 | `[269,293]` | 12 | 13 |
+    | `bab_el_mandeb_P_HIGH.yaml` | 120 → 269 | `[269,293]` | 12 | 13 |
+    | `malacca_P_HIGH.yaml` | 120 → 275 | `[275,287]` | 6 | 7 |
+    | `panama_P_HIGH.yaml` | 75 → 240 | `[240,322]` | 41 | 42 |
+    | `suez_P_HIGH.yaml` | 120 → 279 | `[279,283]` | 2 | 3 |
+    | `malacca_P_CRIT.yaml` | 240 → 266 | `[266,295]` | 15 | 15 |
+    | `suez_P_CRIT.yaml` | 240 → 276 | `[276,286]` | 5 | 6 |
+
+    The "onset = P_CRIT onset × 0.5" convention text was removed from every P_HIGH file's
+    header (it's what caused this, per the finding above); the ramp/duration scaling
+    convention documented alongside it is unchanged and still applies. `tests/test_scenario_timing_invariant.py`
+    (new, 10 parametrized cases — one per positive scenario) now materializes every positive
+    scenario directly (not from a stale parquet) and asserts nonzero `y_disruption` positive
+    days in both windows, so this class of bug can't silently regress again. 361 → 371 tests.
+
+    **Regression-gated per region, in order (hormuz, bab_el_mandeb, panama, suez, malacca),
+    split by scenario class:** for every region already evaluated before this fix (hormuz,
+    bab_el_mandeb, panama, suez), `P_CRIT`/`N_QUIET`/`N_DECOY` results are bit-for-bit
+    identical to their pre-fix values across all four tiers (tier0/1/2/ablations) —
+    confirmed by diffing every result file's `metrics` block, not just aggregated means.
+    `P_HIGH` changed everywhere, as expected. Hormuz's `tier0` was re-checked for drift after
+    *each* subsequent region's re-run (bab_el_mandeb, panama, suez, malacca) and stayed
+    bit-identical throughout — no cross-region leakage was introduced alongside this fix.
+    Malacca was evaluated for the first time in this pass (previously only its scenario
+    parquet grid existed, no baseline/ablation runs).
+
+    **Ablation domain-set degeneracy (gap 21) after this fix, per region:** hormuz,
+    bab_el_mandeb, panama, and suez all show 4/8 distinct configs (A0/A1/A2/A3 distinct;
+    A4-A7 all collapse onto A3's domain set, the pre-existing by-design overlap, not a
+    region-specific artifact). Malacca shows **3/8 distinct**: A1 collapses onto A0 (no
+    `market` domain active in malacca, so A1's `{shipping, market}` scopes down to just
+    `{shipping}`, identical to A0) — confirmed in the actual numbers, not just the domain
+    sets: malacca's A0 and A1 rows in `results/ablation_findings_malacca.csv` are
+    identical (`D3_auc_pr=0.2984`, `D6_best_f1=0.1158`, `D8_recall_tau=0.0857`,
+    `D9_fpr_tau=0.4537` for both).

@@ -59,7 +59,13 @@ class: P-CRIT
 seed: 42
 days: 365
 event:
-  onset_day: 240
+  # onset_day moved 240->276 (A6-FIX, 2026-08-16): the old onset placed this
+  # 11-day event entirely inside the val window (201-280), with zero days in
+  # test (281-364). onset_day is arbitrary (unlike duration_days/ramp_days/
+  # every domain target above, which are evidence-anchored per this file's
+  # header); 276 places the window at [276,286], straddling the val/test
+  # boundary (day 281) with positives on both sides.
+  onset_day: 276
   ramp_days: 1
   duration_days: 11
   peak_band: critical

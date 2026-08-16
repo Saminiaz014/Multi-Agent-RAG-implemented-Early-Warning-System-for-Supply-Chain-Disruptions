@@ -13,10 +13,13 @@
 # numbers, both in memory (`crit.signals == snapshot`) and by re-reading
 # the actual written files (see this prompt's validation output).
 #
-# Event timing: Hormuz's own established P_CRIT-to-P_HIGH ratios (onset
-# 120/240=0.5, ramp 7/12=0.583, duration 25/60=0.417) applied to
-# suez_P_CRIT.yaml's own timing (240/1/11) -- onset 240*0.5=120,
-# duration 11*0.417=4.58 rounded to 5. ramp_days is NOT scaled down from
+# Ramp/duration timing: Hormuz's own established P_CRIT-to-P_HIGH ratios
+# (ramp 7/12=0.583, duration 25/60=0.417) applied to suez_P_CRIT.yaml's own
+# ramp/duration (1/11) -- duration 11*0.417=4.58 rounded to 5. (Onset was
+# originally scaled the same way, 240*0.5=120 -- that "onset = P_CRIT onset
+# * 0.5" convention is removed, A6-FIX 2026-08-16, since it placed every
+# region's P_HIGH event before the val window; see the event block below.)
+# ramp_days is NOT scaled down from
 # P_CRIT's already-minimal 1 (0.583*1=0.583 has no meaningful day-level
 # floor below 1) -- both P_CRIT and P_HIGH keep the same near-instantaneous
 # onset shape, since that shape (not its magnitude) is what defines this
@@ -31,7 +34,12 @@ class: P-HIGH
 seed: 42
 days: 365
 event:
-  onset_day: 120
+  # onset_day moved 120->279 (A6-FIX, 2026-08-16): the old onset placed this
+  # 5-day event entirely before the val window (201-280). onset_day is
+  # arbitrary (unlike duration_days/ramp_days/domain targets, which are
+  # evidence-anchored); 279 places the window at [279,283], straddling the
+  # val/test boundary (day 281) with positives on both sides.
+  onset_day: 279
   ramp_days: 1
   duration_days: 5
   peak_band: high

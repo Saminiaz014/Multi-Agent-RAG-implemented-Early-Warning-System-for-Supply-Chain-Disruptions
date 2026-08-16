@@ -11,21 +11,21 @@
     "D13_affiliation_f1": NaN,
     "D14_pa_f1": NaN,
     "D15_pa_k_0_2": NaN,
-    "D4_auc_roc": NaN,
-    "D3_auc_pr": 0.5,
-    "D5_f1_tau": 0.0,
-    "D7_precision_tau": 0.0,
-    "D8_recall_tau": 0.0,
-    "D9_fpr_tau": 0.42857142857142855,
-    "D10_macro_f1": 0.36363636363636365,
-    "D6_best_f1": 0.0
+    "D4_auc_roc": 0.46045503791982667,
+    "D3_auc_pr": 0.1393601474694066,
+    "D5_f1_tau": 0.18181818181818182,
+    "D7_precision_tau": 0.12903225806451613,
+    "D8_recall_tau": 0.3076923076923077,
+    "D9_fpr_tau": 0.38028169014084506,
+    "D10_macro_f1": 0.4457478005865103,
+    "D6_best_f1": 0.2765957446808511
   },
   "metadata": {
     "scenario_id": "bab_el_mandeb_P_HIGH",
     "baseline_name": "random",
     "seed": 999,
     "method": "uniform random in [0, 1]",
-    "threshold": 0.5,
+    "threshold": 0.6,
     "val_window": [
       201,
       281
