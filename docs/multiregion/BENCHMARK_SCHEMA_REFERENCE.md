@@ -972,3 +972,62 @@ identically before and after.
     see that file for the still-valid, region-agnostic-at-the-time numbers it quotes from
     them. Committed `results/baselines/tier0/` output (gap 15's own regression-gate
     subject) was not touched by this pass and was not re-verified here.
+
+21. **`FIXED` — A2-A7 hardcode domains not every region has active, and scoring an
+    inactive domain silently produced `NaN`/degenerate-`0.0` metrics instead of an error.**
+    `ABLATIONS` (`src/baselines/ablations.py`) is a single, region-agnostic dict: A2 hardcodes
+    `geopolitical`; A3-A7 hardcode all six `KNOWN_DOMAINS` (including `geopolitical` and
+    `disaster`). Only Hormuz has all six domains active — every other region is missing at
+    least one (`bab_el_mandeb`/`suez`: no `disaster`; `malacca`: no `market`; `panama`: no
+    `geopolitical`). `materialize_scenario` still writes a column for an inactive domain, it
+    just never fills it — `DomainScorer.score()`'s `_fill_missing` (`ffill().bfill()`) can't
+    fill an all-`NaN` column, so that domain's score stays `NaN` for all 365 days, and one
+    `NaN` domain score poisons the whole-day weighted composite for every day it's included
+    in. Found running A2-A7 for `panama` (2026-08-16): `D3_auc_pr` was `NaN` and every
+    threshold-based metric (`D6_best_f1`, `D9_fpr_tau`, ...) had collapsed to a plausible-
+    looking `0.0` for every config past A1 — no exception raised, no warning printed.
+    Checked `bab_el_mandeb`'s already-generated (uncommitted — ablations stay gitignored,
+    see gap 15) results and found the identical pattern there, from before this fix existed.
+
+    **The fix:** `scope_to_domains(config, active_domains)` (new, in `ablations.py`) filters
+    a config's `agents`/`weights` down to the evaluating region's `Region.active_domains`
+    before `AblationRunner` ever sees it, renormalizing weights over the survivors via
+    `AblationConfig.__post_init__`'s existing renormalization path. `run_ablations.py` scopes
+    all eight configs once per region up front. For Hormuz (all six domains active) this is
+    proven to be a complete no-op: re-running `--region hormuz` post-fix reproduced every one
+    of the 32 result files' `metrics` and non-`degenerate_of` `metadata` fields identically to
+    the pre-fix run.
+
+    **A new wrinkle this creates: domain-scoping can make two nominally different configs
+    collapse onto the same surviving domain set for a given region.** Each result's
+    `metadata["degenerate_of"]` now names the earliest other config (in A0-A7 order) with an
+    identical scoped domain set, or `null` if it's still distinct. Two flavors of this showed
+    up, and they mean different things:
+    - **Pre-existing, present for every region including Hormuz, not a scoping artifact:**
+      A4/A5/A6/A7 always share A3's domain set (all six domains, by original design) — they
+      remain scientifically distinct experiments despite the shared domain set, since they
+      differ in *how* those domains are weighted (equal / hand-tuned / Optuna-tuned) and
+      whether the agreement bonus applies, not in which domains are scored. `degenerate_of`
+      is a domain-set-equality signal only; it does not mean "produces identical numbers,"
+      and A4-A7's numbers do in fact differ from A3's and each other's (see the per-region
+      CSVs). Every region shows exactly this: **4/8 configs distinct** (A0, A1, A2, A3), with
+      A4-A7 all pointing at A3.
+    - **Region-specific, a genuine consequence of a missing domain:** this pass didn't
+      surface an additional collapse beyond the pre-existing A3-A7 one for `hormuz`,
+      `bab_el_mandeb`, or `panama` (each still 4/8 distinct) — A0/A1/A2/A3 stayed pairwise
+      distinct for all three, since each region was only missing one domain and none of
+      A0-A2's domain lists happened to fully coincide once that one domain was dropped. A
+      region missing two-or-more domains, or missing one that two different low-numbered
+      configs share (e.g. a region with no `market` would drop A1 from `{shipping, market}`
+      to `{shipping}`, colliding with A0 — confirmed by dry-run against `malacca`'s spec,
+      not yet run through the full pipeline as of this pass), would show fewer than 4
+      distinct low-numbered configs. Check `degenerate_of` on A0-A3 specifically (not
+      A4-A7) to see whether a given region hit this.
+
+    **Regression-gated:** `hormuz` A0-A7 metrics byte-identical pre/post-fix (see above);
+    `results_by_baseline_hormuz.csv`/`ablation_findings_hormuz.csv` byte-identical
+    before and after re-running `bab_el_mandeb` and `panama` under the fix. `bab_el_mandeb`
+    and `panama` were re-run and re-aggregated under the fix; `malacca` and `suez` have not
+    been evaluated yet (scenario YAMLs and parquet grids exist; no baseline/ablation runs
+    have been done for them as of this pass) and will pick up the fix automatically whenever
+    they are.

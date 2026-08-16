@@ -139,3 +139,44 @@ ABLATIONS: dict[str, AblationConfig] = {
         description="A6 but skip RAG (explanation only; detection score is identical to A6)",
     ),
 }
+
+
+def scope_to_domains(config: AblationConfig, active_domains: list[str]) -> AblationConfig:
+    """Restrict ``config`` to domains actually active in a region.
+
+    ``ABLATIONS`` is a fixed, region-agnostic dict — A2 hardcodes
+    ``geopolitical`` and A3-A7 hardcode all six :data:`KNOWN_DOMAINS`, but
+    only Hormuz has all six domains active (every other region is missing
+    at least one, per ``Region.active_domains``). Scoring a domain a region
+    never populates isn't a graceful no-op: :class:`~src.baselines.domain_scorers.DomainScorer`
+    reads an all-``NaN`` column for it (``materialize_scenario`` still
+    writes the column, just never fills it for inactive domains), and that
+    ``NaN`` poisons the weighted composite for every day, collapsing
+    ``D3_auc_pr`` to ``NaN`` and every threshold-based metric to a
+    degenerate ``0.0`` — silently, with no error raised (found running A2-A7
+    for bab_el_mandeb and panama, 2026-08-16; see
+    docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 21).
+
+    Args:
+        config: A declared ``ABLATIONS`` entry.
+        active_domains: The evaluating region's ``Region.active_domains``.
+
+    Returns:
+        A new :class:`AblationConfig` with ``agents``/``weights`` filtered
+        to ``active_domains`` and weights renormalized over the survivors
+        (via ``__post_init__``). For Hormuz (all six domains active) this
+        is a no-op — every field is unchanged. Every region observed so
+        far has ``shipping`` active, so ``agents`` never empties out; this
+        function does not special-case a region where it would.
+    """
+    surviving_agents = [a for a in config.agents if a in active_domains]
+    surviving_weights = {a: w for a, w in config.weights.items() if a in active_domains}
+    return AblationConfig(
+        config_id=config.config_id,
+        name=config.name,
+        agents=surviving_agents,
+        weights=surviving_weights,
+        use_agreement_bonus=config.use_agreement_bonus,
+        use_rag=config.use_rag,
+        description=config.description,
+    )

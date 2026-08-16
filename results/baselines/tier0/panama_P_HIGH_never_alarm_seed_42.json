@@ -1,0 +1,39 @@
+{
+  "scenario_id": "panama_P_HIGH",
+  "baseline_name": "never_alarm",
+  "seed": 42,
+  "region": "panama",
+  "metrics": {
+    "D1_vus_pr": NaN,
+    "D2_vus_roc": NaN,
+    "D11_event_f1": NaN,
+    "D12_range_f1": NaN,
+    "D13_affiliation_f1": NaN,
+    "D14_pa_f1": NaN,
+    "D15_pa_k_0_2": NaN,
+    "D4_auc_roc": NaN,
+    "D3_auc_pr": 0.5,
+    "D5_f1_tau": 0.0,
+    "D7_precision_tau": 0.0,
+    "D8_recall_tau": 0.0,
+    "D9_fpr_tau": 0.0,
+    "D10_macro_f1": 1.0,
+    "D6_best_f1": 0.0
+  },
+  "metadata": {
+    "scenario_id": "panama_P_HIGH",
+    "baseline_name": "never_alarm",
+    "seed": 42,
+    "method": "constant 0.0 (never alarming)",
+    "threshold": 0.5,
+    "val_window": [
+      201,
+      281
+    ],
+    "test_window": [
+      281,
+      365
+    ],
+    "region": "panama"
+  }
+}

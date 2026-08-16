@@ -31,9 +31,9 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 import pandas as pd  # noqa: E402
 
 from src.baselines.ablation_runner import AblationRunner  # noqa: E402
-from src.baselines.ablations import ABLATIONS  # noqa: E402
+from src.baselines.ablations import ABLATIONS, AblationConfig, scope_to_domains  # noqa: E402
 from src.baselines.baseline_evaluator import BaselineEvaluator  # noqa: E402
-from src.benchmark.regions import resolve_region_key  # noqa: E402
+from src.benchmark.regions import load_region, resolve_region_key  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,18 +51,71 @@ _TEST_WINDOW = (281, 365)  # [start, end) — 84 days
 _SEED = 42  # single seed for speed, per rule 6
 
 
+def _compute_degeneracy(scoped_configs: dict[str, AblationConfig]) -> dict[str, str | None]:
+    """Flag configs whose domain-scoped agent set duplicates an earlier config's.
+
+    A region missing a domain that some ``ABLATIONS`` entries share (e.g.
+    every non-Hormuz region is missing at least one of geopolitical/disaster)
+    can collapse two nominally different configs onto the same surviving
+    domain set once :func:`~src.baselines.ablations.scope_to_domains` runs —
+    e.g. malacca has no ``market``, so A1 (``shipping``, ``market``) scopes
+    down to just ``shipping``, identical to A0.
+
+    Args:
+        scoped_configs: ``{config_id: scoped AblationConfig}``, in
+            ``ABLATIONS``' declared order (A0 first).
+
+    Returns:
+        ``{config_id: earlier_config_id_with_same_domain_set_or_None}``.
+        The first config to reach a given domain set is never flagged
+        (``None``); later ones pointing at it are.
+    """
+    seen: dict[frozenset[str], str] = {}
+    degeneracy: dict[str, str | None] = {}
+    for config_id, config in scoped_configs.items():
+        domain_set = frozenset(config.agents)
+        degeneracy[config_id] = seen.get(domain_set)
+        seen.setdefault(domain_set, config_id)
+    return degeneracy
+
+
 def run_ablations(region: str = "hormuz") -> None:
     """Run A0-A7 on every ``region`` scenario at seed=42.
+
+    Each of the eight ``ABLATIONS`` configs is scoped to ``region``'s
+    ``active_domains`` before running (see
+    :func:`~src.baselines.ablations.scope_to_domains`) — A2-A7 hardcode
+    domains (geopolitical, disaster, ...) that not every region has active,
+    and scoring an inactive domain silently poisons the composite score
+    with ``NaN`` rather than erroring. Scoping can make two configs
+    degenerate into the same surviving domain set for a given region; each
+    result's ``metadata["degenerate_of"]`` names the earlier config it
+    collapsed onto (``None`` if it's still distinct). See
+    docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 21.
 
     Args:
         region: Canonical region key, alias, or display name (see
             :func:`src.benchmark.regions.resolve_region_key`). Defaults to
             ``"hormuz"`` — every prior call site (no argument) reproduces
-            identical behavior, since every parquet file in
-            ``scenarios_generated/`` today is Hormuz's.
+            identical behavior, since Hormuz has all six domains active, so
+            domain-scoping is a no-op for it.
     """
     region = resolve_region_key(region)
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    active_domains = load_region(region).active_domains
+    scoped_configs = {
+        config_id: scope_to_domains(config, active_domains)
+        for config_id, config in ABLATIONS.items()
+    }
+    degeneracy = _compute_degeneracy(scoped_configs)
+    n_distinct = sum(1 for d in degeneracy.values() if d is None)
+    logger.info(
+        "region=%s | active_domains=%s | %d/%d ablation configs remain distinct "
+        "after domain-scoping: %s",
+        region, active_domains, n_distinct, len(scoped_configs),
+        {cid: (d or "distinct") for cid, d in degeneracy.items()},
+    )
 
     parquet_files = sorted(
         p for p in _SCENARIOS_DIR.glob(f"*_seed_{_SEED}.parquet")
@@ -85,7 +138,7 @@ def run_ablations(region: str = "hormuz") -> None:
         df = pd.read_parquet(parquet_file)
         y_true = df["y_disruption"].to_numpy()
 
-        for config_id, config in ABLATIONS.items():
+        for config_id, config in scoped_configs.items():
             runner = AblationRunner(config)
             try:
                 anomaly_scores, metadata = runner.run(df, scenario_id, seed)
@@ -104,6 +157,7 @@ def run_ablations(region: str = "hormuz") -> None:
                 metadata["val_window"] = list(_VAL_WINDOW)
                 metadata["test_window"] = list(_TEST_WINDOW)
                 metadata["region"] = region
+                metadata["degenerate_of"] = degeneracy[config_id]
 
                 result = {
                     "scenario_id": scenario_id,
