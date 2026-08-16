@@ -7,7 +7,11 @@ region-suffixed CSVs under `results/`) or from
 `docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md`'s already-recorded gaps 18–22. The
 one exception, noted where it appears, is the `results_all_runs_{region}.csv`
 per-scenario filtering used in §1c/§3 item 4 — reading and filtering an existing
-CSV, not re-running anything.
+CSV, not re-running anything. **Re-aggregation-only update:** `§1b`/`§1c`/`§1d`/`§1e`
+were revised after adding `scripts/aggregate_ablation_results.py --positives-only`
+(re-aggregates the same, already-generated ablation result JSONs excluding
+`N_QUIET`/`N_DECOY`; no baseline/ablation/scenario was re-run or re-tuned to
+produce the positives-only figures).
 
 ---
 
@@ -63,54 +67,92 @@ Source: `docs/multiregion/A6_PREDICTIONS.md`, written and committed before any
 bab_el_mandeb/panama/suez/malacca result existed. **Methodology used to measure
 "multi-agent gain" throughout this section:** ablation A0 (`shipping_only`, the
 single-domain floor) vs. A6 (`6_+bonus` — all of that region's active domains,
-Optuna-tuned, with the agreement bonus), read from `results/ablation_findings_{region}.csv`.
-This is the one comparison in the generated data that isolates exactly the
-"aggregating multiple domains" variable the predictions document's own
-falsification language (§1: "fused-system FPR/TPR/F1 improvement over the best
-single domain baseline") describes, without conflating it with which detection
-algorithm is used. Two axes are reported because they disagree with each other (see
-§1c) — reducing "gain" to one number would hide that disagreement, not simplify it.
+Optuna-tuned, with the agreement bonus). Two axes are reported because they
+disagree with each other (see §1c) — reducing "gain" to one number would hide
+that disagreement, not simplify it.
 
-| region | A0 FPR (D9) | A6 FPR (D9) | ΔFPR (A0−A6, + = improvement) | A0 F1 (D6) | A6 F1 (D6) | ΔF1 (A6−A0, + = improvement) |
-|---|---|---|---|---|---|---|
-| hormuz | 0.7262 | 0.3374 | **+0.3888** | 0.2444 | 0.1663 | **−0.0781** |
-| bab_el_mandeb | 0.7262 | 0.3798 | +0.3464 | 0.2337 | 0.1756 | −0.0581 |
-| panama | 0.7202 | 0.5179 | +0.2023 | 0.3922 | 0.3922 | +0.0000 |
-| suez | 0.6274 | 0.2964 | +0.3310 | 0.0485 | 0.2500 | **+0.2015** |
-| malacca | 0.4537 | 0.3003 | +0.1534 | 0.1158 | 0.2619 | +0.1461 |
+**Blended vs. positives-only, and why the two differ.** `results/ablation_findings_{region}.csv`
+(used in the original A7 pass) means over all 4 scenarios per config. A5–A7's
+per-domain weights are Optuna-tuned *per scenario*; `N_QUIET`/`N_DECOY` have zero
+positive days in the validation window by design (negative controls), which
+always hits `tune_weights_optuna`'s own documented equal-weights fallback ("Falls
+back to equal weights if no trial beat an all-zero F1" —
+`src/baselines/ablation_runner.py`). So the blended mean for A5/A6/A7 averages two
+genuinely-tuned scenario results (`P_CRIT`, `P_HIGH`) with two fallback-weight
+results (`N_QUIET`, `N_DECOY`) into one number. **`scripts/aggregate_ablation_results.py --positives-only`**
+(new; excludes `N_QUIET`/`N_DECOY` from the mean, default behavior unchanged) was
+added to separate these. **The fallback rows are the same equal-weights
+configuration regardless of `ablation_config`** (A5/A6/A7 all fall back to
+identical equal weights per region — confirmed directly in the result JSONs'
+`metadata.weights`), so blending them in doesn't inject a directional bias toward
+any one config; it **dilutes** the tuned-weights effect size toward the
+(config-independent) fallback's own FPR/F1 values, rather than skewing the
+comparison between configs. All tuning-related claims below now cite the
+positives-only figures as authoritative; the blended figures are kept alongside
+for reference to the original A7 pass.
+
+| region | A0 FPR pos-only | A6 FPR pos-only | ΔFPR pos-only | A0 F1 pos-only | A6 F1 pos-only | ΔF1 pos-only | ΔFPR blended | ΔF1 blended |
+|---|---|---|---|---|---|---|---|---|
+| hormuz | 1.0000 | 0.1987 | **+0.8013** | 0.4889 | 0.3326 | **−0.1563** | +0.3888 | −0.0781 |
+| bab_el_mandeb | 1.0000 | 0.2359 | +0.7641 | 0.4674 | 0.3511 | −0.1163 | +0.3464 | −0.0581 |
+| panama | 0.9881 | 0.5119 | +0.4762 | 0.7843 | 0.7843 | +0.0000 | +0.2023 | +0.0000 |
+| suez | 0.8025 | 0.0691 | +0.7334 | 0.0970 | 0.5000 | **+0.4030** | +0.3310 | +0.2015 |
+| malacca | 0.4549 | 0.0767 | +0.3782 | 0.2315 | 0.5238 | +0.2923 | +0.1534 | +0.1461 |
+
+Source: `results/baselines/ablations/ablation_summary_{region}_positives_only.csv`
+(new) and `ablation_summary_{region}.csv` (blended, unchanged filename/behavior).
+**Every ranking is identical between positives-only and blended, on both axes** —
+ΔFPR: hormuz > bab_el_mandeb > suez > panama > malacca, both ways; ΔF1: suez >
+malacca > panama > bab_el_mandeb > hormuz, both ways. Magnitudes are larger
+under positives-only (consistent with dilution, not bias): e.g. hormuz's ΔFPR
+grows from +0.39 (blended) to +0.80 (positives-only) because removing the two
+fallback-weight scenarios — which showed a smaller FPR swing than the tuned ones
+— stops pulling the mean toward their smaller effect. **Because no ranking
+changes, no verdict in this section changes either** — see each subsection below.
 
 ### §1 Complementarity ranking
 
 **Predicted:** Panama > Bab el-Mandeb ≳ Hormuz > Malacca > Suez (highest to lowest
 complementarity, expected to track gain size).
 
-**Measured:**
-- ΔFPR ranking (largest gain to smallest): hormuz (0.389) > bab_el_mandeb (0.346) >
-  suez (0.331) > panama (0.202) > malacca (0.153).
-- ΔF1 ranking (largest gain to smallest): suez (+0.202) > malacca (+0.146) > panama
-  (0.000) > bab_el_mandeb (−0.058) > hormuz (−0.078).
+**Measured (positives-only, tuned weights — authoritative; blended in
+parentheses):**
+- ΔFPR ranking (largest gain to smallest): hormuz (0.801 / 0.389) > bab_el_mandeb
+  (0.764 / 0.346) > suez (0.733 / 0.331) > panama (0.476 / 0.202) > malacca
+  (0.378 / 0.153).
+- ΔF1 ranking (largest gain to smallest): suez (+0.403 / +0.202) > malacca (+0.292
+  / +0.146) > panama (0.000 / 0.000) > bab_el_mandeb (−0.116 / −0.058) > hormuz
+  (−0.156 / −0.078).
 
-**Verdict: FAILED**, on the prediction document's own named falsification triggers.
-Section 1's falsification condition was: *"falsified if... Suez shows a larger gain
-than Hormuz or Bab el-Mandeb, or if Malacca's gain exceeds Panama's."* On ΔF1, Suez's
-gain (+0.2015) is larger than both Hormuz's (−0.0781) and Bab el-Mandeb's (−0.0581) —
-the first named trigger fires exactly as written. Malacca's ΔF1 gain (+0.1461)
-exceeds Panama's (0.0000) — the second named trigger also fires exactly as written.
+**Verdict: FAILED, unchanged from the blended-figures check** — both rankings are
+identical under positives-only, so the same named falsification triggers fire the
+same way. Section 1's falsification condition was: *"falsified if... Suez shows a
+larger gain than Hormuz or Bab el-Mandeb, or if Malacca's gain exceeds Panama's."*
+On ΔF1, Suez's positives-only gain (+0.403) is larger than both Hormuz's (−0.156)
+and Bab el-Mandeb's (−0.116) — the first named trigger fires, more decisively than
+under the blended figures. Malacca's positives-only ΔF1 gain (+0.292) exceeds
+Panama's (0.000) — the second named trigger also fires, again more decisively.
 Panama, predicted highest-complementarity, shows the *smallest* F1 gain of any
 region with a positive floor to fall from (Panama's already-high 0.90+ Best-F1 on
 P_CRIT — see §1a — likely leaves less room for fusion to add F1 headroom at all,
-a ceiling effect the prediction did not anticipate). This is reported as a failed
-prediction, not reframed after the fact.
+a ceiling effect the prediction did not anticipate) — this holds identically under
+tuned-weights-only figures. This is reported as a failed prediction, not reframed
+after the fact, and not softened by using the more favorable (tuned-only) figures.
 
 ### §2 Per-region predicted direction of gain
 
-| region | prediction | measured (ΔFPR / ΔF1) | verdict |
-|---|---|---|---|
-| hormuz | small gain, ~12% (stable re-run of an existing figure) | +0.3888 / −0.0781 | **Could not verify baseline.** No file in this repository sources a "~12%" hormuz fusion-FPR figure to compare against (searched the full repo for "12%" and "FPR improvement" — the only hits are `A6_PREDICTIONS.md` itself). Under the consistent A0-vs-A6 methodology applied to every region here, hormuz's own ΔFPR is a 53.5% *relative* reduction (0.3888/0.7262) and ΔF1 is a 32% *relative worsening* — either reading is a material difference from "~12%" under any interpretation, so this prediction is reported as **falsified**, with the caveat that the original "~12%" methodology is unsourced and may not be the same comparison.
-| suez | weak gain, comparable to or smaller than Hormuz's | ΔFPR 0.331 (3rd of 5, below hormuz's 0.389) but ΔF1 +0.2015 (**largest of all five regions**) | **FAILED** on F1, matching the prediction's own named trigger ("falsified if Suez shows a strong fusion gain despite this domain-sparse, no-lead structure"). Ambiguous-to-passing on FPR alone.
-| bab_el_mandeb | moderate gain, at or slightly above Hormuz's | ΔFPR 0.346 (slightly *below* hormuz's 0.389); ΔF1 −0.058 (slightly *less negative* than hormuz's −0.078, i.e. marginally "above" in the sense both are negative) | **Marginally failed on FPR, technically not-failed on F1** (both regions show fusion *hurting* F1, so "at or above" holds trivially in a direction the prediction did not intend). Not a clean pass either way — reported as-is rather than rounded to a verdict.
-| panama | largest gain of the five regions | ΔFPR 4th of 5 (0.202); ΔF1 exactly 0.0000, middle of the pack | **FAILED**, matching the prediction's own named trigger exactly ("falsified if Panama's gain is not the largest").
-| malacca | small gain, second-smallest after Suez | ΔFPR *smallest* of all five (0.153, i.e. worst, not second-smallest); ΔF1 **second-largest** of all five (+0.1461) | **FAILED** on F1, matching the prediction's own named trigger ("falsified if Malacca's gain is comparable to Panama's or Bab el-Mandeb's") — it is not merely comparable, it exceeds both.
+Positives-only (tuned weights) figures, authoritative for this comparison; blended
+figures shown for reference. No verdict changes from the blended-figures check —
+every ranking relationship is preserved, and in every case where the blended
+verdict was already FAILED, the positives-only gap is larger, not smaller.
+
+| region | prediction | measured pos-only (ΔFPR / ΔF1) | measured blended (ΔFPR / ΔF1) | verdict |
+|---|---|---|---|---|
+| hormuz | small gain, ~12% (stable re-run of an existing figure) | +0.8013 / −0.1563 | +0.3888 / −0.0781 | **Could not verify baseline.** No file in this repository sources a "~12%" hormuz fusion-FPR figure to compare against (searched the full repo for "12%" and "FPR improvement" — the only hits are `A6_PREDICTIONS.md` itself). Under the consistent A0-vs-A6 methodology, hormuz's tuned-weights-only ΔFPR is an 80.1% *relative* reduction (0.8013/1.0000) and ΔF1 is a 32.0% *relative worsening* (−0.1563/0.4889) — an even larger deviation from "~12%" than the blended figures already showed. Reported as **falsified**, unchanged, with the same caveat that the original "~12%" methodology is unsourced.
+| suez | weak gain, comparable to or smaller than Hormuz's | +0.7334 / +0.4030 | +0.3310 / +0.2015 | **FAILED** on F1, matching the prediction's own named trigger ("falsified if Suez shows a strong fusion gain despite this domain-sparse, no-lead structure") — more decisively than under blended figures (+0.403 vs. hormuz's −0.156, a wider gap than the blended +0.202 vs. −0.078). Verdict unchanged.
+| bab_el_mandeb | moderate gain, at or slightly above Hormuz's | +0.7641 / −0.1163 | +0.3464 / −0.0581 | **Marginally failed on FPR, technically not-failed on F1** — unchanged. ΔFPR (0.764) is still slightly *below* hormuz's (0.801); ΔF1 (−0.116) is still slightly *less negative* than hormuz's (−0.156), so "at or above" still holds only in the direction the prediction did not intend (both regions still show fusion hurting F1). Not a clean pass either way, same as under blended figures.
+| panama | largest gain of the five regions | +0.4762 / +0.0000 | +0.2023 / +0.0000 | **FAILED**, matching the prediction's own named trigger exactly ("falsified if Panama's gain is not the largest") — unchanged; ΔFPR is still 4th of 5, ΔF1 is still exactly 0.0000 (no dilution effect here since A0 and A6 land on identical F1 under both blended and positives-only aggregation for panama specifically).
+| malacca | small gain, second-smallest after Suez | +0.3782 / +0.2923 | +0.1534 / +0.1461 | **FAILED** on F1, matching the prediction's own named trigger ("falsified if Malacca's gain is comparable to Panama's or Bab el-Mandeb's") — unchanged and more decisive: positives-only ΔF1 (+0.292) is double the blended figure and remains the second-largest of all five, still exceeding both Panama's and Bab el-Mandeb's.
 
 ### §3 Lead-time ranking
 
@@ -143,7 +185,13 @@ marked held or failed here. It remains an open prediction for future work (see
 **Verdict: FAILED**, on every named component. Hormuz is lowest, not Malacca.
 Malacca, bab_el_mandeb, panama, and suez are in a four-way *exact tie*, not "three
 clustered, one worst" — Suez is not distinctly worst, and Malacca is not distinctly
-best.
+best. **Unaffected by the positives-only rework** — this comparison was already
+`N_DECOY`-specific (filtered directly from `results_all_runs_{region}.csv`, not
+from the blended `ablation_findings_{region}.csv`), so it carries no blending to
+correct. It stands as the one place in this document where the equal-weights
+fallback isn't diluting a tuned-weights signal — it *is* the signal being
+measured (see the traced-cause paragraph below), and `--positives-only` would
+exclude this scenario entirely rather than clarify it.
 
 **Traced cause, not retrofitted reasoning — a mechanical artifact of the tuning
 procedure, not evidence against the underlying decoy-design argument.** N_DECOY's
@@ -195,14 +243,25 @@ alarms broadly enough to cost some true positives along with false ones. This is
 the opposite of what "more domains, more complementarity, more gain" would predict,
 and it is reported as such rather than reinterpreted to fit.
 
+**Re-checked against positives-only (tuned weights only) figures: this conclusion
+is unchanged.** Both gain-axis rankings are identical under positives-only (§1b),
+so the inverse relationship between the two axes, the domain-sparse/domain-rich
+split, and the "not a single scalar" conclusion all hold exactly as stated above.
+The blending diluted magnitudes, not the qualitative picture.
+
 ---
 
 ## 1d. Ablation table
 
-Source: `results/ablation_findings_{region}.csv`, mean over 4 scenarios, seed=42.
+Source: `results/ablation_findings_{region}.csv`, mean over 4 scenarios (blended —
+P_CRIT/P_HIGH tuned, N_QUIET/N_DECOY equal-weights fallback; see §1b), seed=42.
 Degeneracy labels per `docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md` §6 gap 21/22
 (`scripts/run_ablations.py`'s `_compute_degeneracy`, recorded in each result's
-`metadata.degenerate_of`).
+`metadata.degenerate_of`). **Positives-only companion tables** (tuned weights
+only, mean over P_CRIT/P_HIGH): `results/baselines/ablations/ablation_summary_{region}_positives_only.csv`
+— the condensed A0-vs-A6 comparison is in §1b; full A0–A7 positives-only tables
+are not reproduced a second time here to avoid duplicating §1b's numbers under a
+different heading.
 
 **hormuz** (`region.active_domains`: 6 — shipping, market, geopolitical, routing,
 news, disaster) — **4/8 distinct configs**:
@@ -283,6 +342,48 @@ A4–A7's degeneracy onto A3 (all five/six active domains, differing only in
 weighting/bonus strategy) is present in **every** region including hormuz, and is a
 pre-existing property of the `ABLATIONS` design (A3–A7 always declare the same
 domain list), not a scoping artifact introduced by gap 21's fix.
+
+---
+
+## 1e. Optuna weight recovery vs. hand-authored dominant domain
+
+**Checked directly against A5's tuned weights (`results/baselines/ablations/{region}_{P_CRIT,P_HIGH}_A5_seed_42.json`,
+`metadata.weights`) and each region's `DOMINANT`/`STRONG` classification from
+`config/benchmark/{region}.yaml` (reproduced in `EVIDENCE_PROVENANCE.md`). The
+result is a mixed picture, not a uniform recovery — reported as measured, not
+rounded up to match the premise that Optuna independently finds the hand-authored
+dominant domain.**
+
+| region | scenario | region's own highest classification | Optuna's highest-weighted domain (weight) | match? |
+|---|---|---|---|---|
+| hormuz | P_CRIT | *(not classified in-file — no ground truth)* | market (0.3097) | N/A |
+| hormuz | P_HIGH | *(not classified)* | market (0.2931) | N/A |
+| bab_el_mandeb | P_CRIT | DOMINANT: geopolitical, routing | **routing (0.5413)** | **partial** — routing recovered; geopolitical is the *lowest*-weighted domain (0.0650) |
+| bab_el_mandeb | P_HIGH | DOMINANT: geopolitical, routing | market (0.3634) | **no** — neither DOMINANT domain is highest; geopolitical again lowest (0.0481) |
+| panama | P_CRIT | DOMINANT: disaster | market (0.3357) | **no** — disaster is the *lowest*-weighted domain (0.0580) |
+| panama | P_HIGH | DOMINANT: disaster | **disaster (0.8430)** | **yes, strongly** — disaster takes 84% of total weight |
+| suez | P_CRIT | DOMINANT (region-level): shipping | market (0.4457) | **no** — shipping is the lowest-weighted domain (0.0121) |
+| suez | P_HIGH | DOMINANT (region-level): shipping | routing (0.2827, ≈tied with market 0.2823) | **no** — shipping stays low (0.0488); the near-top domain (routing) is DOMINANT only for suez's *other*, unmodeled event, not for the shipping-driven scenario actually evaluated here |
+| malacca | P_CRIT | STRONG (highest tier this region uses): disaster | **disaster (0.3442)** | **yes** |
+| malacca | P_HIGH | STRONG: disaster | **disaster (0.4460)** | **yes, strongly** |
+
+**Summary: 2 of 5 regions show a clean recovery in at least one scenario (malacca,
+both scenarios; panama, P_HIGH only), 1 shows a partial recovery (bab_el_mandeb —
+one of its two DOMINANT domains, in one of two scenarios), 1 shows no recovery in
+either scenario (suez — its own DOMINANT domain, shipping, is the single
+lowest-weighted domain both times), and 1 has no region-level classification to
+check against (hormuz).** This does not support a general claim that "Optuna's
+learned weights independently recovered each region's hand-authored dominant
+domain" — that holds cleanly for malacca alone. The clearest counter-case is suez:
+the domain the region file calls DOMINANT for the *modeled* event (shipping) is
+the domain the tuner weights least, in both scenarios, while weight concentrates
+on market and news instead — domains whose scenario-level evidence tag is
+`extrapolated`, not `documented` (see `EVIDENCE_PROVENANCE.md`). A plausible,
+unverified explanation (not confirmed here, since re-running is out of scope for
+this pass) is that the domain scorer's rolling z-score rewards whichever signal
+produces the cleanest separation in *this specific 4×5 synthetic grid*, which need
+not be the domain judged most evidentially important when the scenario was
+authored — but that is offered as a hypothesis for future work, not a finding.
 
 ---
 
