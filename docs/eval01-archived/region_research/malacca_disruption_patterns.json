@@ -1,0 +1,202 @@
+{
+  "region": "malacca",
+  "compiled": "2026-08-12",
+  "_meta": {
+    "purpose": "Real-world precedent for grounding EVAL01 scenario parameters (config/benchmark/malacca.yaml + scenario YAMLs, once written) for the Strait of Malacca/Singapore chokepoint, matching the structure and honesty conventions of data/routing_research/hormuz_rerouting_patterns.json.",
+    "labeling": "Each numeric value carries an evidence tag: 'documented' (a cited source states the number) or 'extrapolated' (derived/interpolated — the derivation is recorded in that event's 'notes'). A null value is a correct result when no credible source was found; it is explained, not guessed.",
+    "key_finding": "Malacca carries TWO structurally distinct, independently-tracked signal families, deliberately kept separate below: (1) HAZE — an acute-onset ATMOSPHERIC hazard (Indonesian peatland/forest-fire smoke), seasonal (dry-season / Southwest-Monsoon correlated, roughly June-October), that degrades visibility and throughput WITHOUT ever closing the strait — there is no full-closure precedent in any source found in this pass. This is structurally distinct from Panama's SLOW-ONSET HYDROLOGICAL drought (data/region_research/panama_disruption_patterns.json): haze episodes ramp from first detectable air-quality degradation to acute/hazardous peak in days to a couple of weeks, not months. (2) PIRACY/ARMED ROBBERY — a CHRONIC, low-grade background signal that persists in every year examined (not an on/off event), with periodic escalations layered on top. Because piracy incidents do not move the shipping/transit-volume signal the way a closure or drought does (vessels are individually targeted, not deterred from transiting at all), a piracy spike is a textbook candidate for an N_DECOY scenario: one signal moves (security-incident reporting) with no corroborating move in shipping/market/routing.",
+    "units_convention": "Per docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md: the EVAL01 pipeline's 'shipping' signal is a raw vessel-transit count/day; 'market' is an unbounded, roughly z-score-like index; 'geopolitical'/'routing'/'news'/'disaster' are 0-1 normalized scores. Values below are recorded in their real-world documented units; mapping to the pipeline's internal convention is scenario-authoring work for a later prompt."
+  },
+  "events": [
+    {
+      "name": "2015 Southeast Asian haze",
+      "start": "2015-06-28",
+      "end": "2015-10-29",
+      "signal_effects": {
+        "shipping": {
+          "value": "Batam-Singapore ferry services suspended for approximately 1 hour on 2015-10-23 (Batam Centre-Singapore from 15:40, HarbourFront-Batam Centre from 16:50) due to hazy conditions",
+          "unit": "qualitative operational suspension, duration in hours",
+          "evidence": "documented"
+        },
+        "market": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "No freight-rate or trade-value figure specific to this haze episode was located in this pass."},
+        "geopolitical": {
+          "value": "Regional diplomatic friction between Singapore and Indonesia over transboundary haze (contemporary press described 'Singapore anger'); Indonesia declared a state of emergency in Riau province",
+          "unit": "qualitative — no quantified index located",
+          "evidence": "documented"
+        },
+        "disaster": {
+          "value": {
+            "psi_24hr_unhealthy_threshold_crossed": "2015-09-10 (PSI 92-104)",
+            "psi_24hr_peak": 322,
+            "psi_3hr_peak": 341,
+            "psi_peak_date": "2015-09-25",
+            "psi_category_at_peak": "Hazardous",
+            "riau_api_peak": ">900 (2015-09-14, Indonesian API scale — not directly comparable to Singapore's PSI methodology)",
+            "burned_area_indonesia_ha": 2600000,
+            "onset_to_peak_days": 15
+          },
+          "unit": "Pollutant Standards Index (PSI, Singapore NEA scale, 24-hr and 3-hr readings); Indonesian API (separate scale); hectares burned",
+          "evidence": "documented"
+        },
+        "routing": {
+          "value": "No full-strait closure precedent found for any haze episode; 2010 precedent (not this specific 2015 episode) shows Malaysia issuing a navigational hazard warning when visibility fell below 2 nautical miles",
+          "unit": "qualitative — advisory/warning issued, not a measured reroute percentage",
+          "evidence": "documented",
+          "explanation": "The 2 nm visibility warning is sourced to a 2010 haze event, not verified specifically for 2015 in this pass — recorded here as the closest documented navigational-response precedent for this hazard type, not as a 2015-specific measurement."
+        },
+        "news": {
+          "value": null,
+          "unit": "n/a",
+          "evidence": "extrapolated",
+          "explanation": "No news-volume/sentiment index found. Flight cancellations (multiple at Kualanamu International Airport, North Sumatra: 4 cancelled, 4 delayed) and school closures in Singapore are documented qualitative severity indicators that could proxy a news-volume ramp, but are not themselves a news signal."
+        }
+      },
+      "sources": [
+        {"outlet": "Wikipedia (2015 Southeast Asian haze, cross-referencing contemporary reporting)", "url": "https://en.wikipedia.org/wiki/2015_Southeast_Asian_haze", "accessed": "2026-08-12"},
+        {"outlet": "IOPscience", "url": "https://iopscience.iop.org/article/10.1088/1748-9326/aa5cf6", "accessed": "2026-08-12"},
+        {"outlet": "CNBC", "url": "https://www.cnbc.com/2015/09/14/singapore-haze-air-quality-worsens-as-indonesian-forest-fires-persist.html", "accessed": "2026-08-12"},
+        {"outlet": "CNN", "url": "https://www.cnn.com/2015/09/25/asia/singapore-haze-indonesia-schools", "accessed": "2026-08-12"},
+        {"outlet": "BBC", "url": "https://feeds.bbci.co.uk/news/world-asia-34355825", "accessed": "2026-08-12"},
+        {"outlet": "Malay Mail", "url": "https://www.malaymail.com/amp/news/world/2015/09/10/singapores-air-quality-reaches-unhealthy-levels/967357", "accessed": "2026-08-12"},
+        {"outlet": "Boholchronicle / Tempo.co (flight cancellations)", "url": "https://en.tempo.co/read/1249269/haze-endangers-flights-indonesia-closes-8-airports", "accessed": "2026-08-12"}
+      ],
+      "notes": "IMPORTANT CORRECTION recorded for transparency: an early search pass surfaced a PSI figure of 401 described as Singapore's historic record; that figure belongs to the 1997 haze episode, NOT 2015, and is explicitly excluded from the disaster.value figures above to avoid misattributing a different year's record to this event. 2015's own documented peak (322 24-hr / 341 3-hr, both 'Hazardous' category) is used instead. onset_to_peak_days (15) is computed as the gap between the first 'unhealthy' 24-hr PSI crossing (2015-09-10) and the documented peak date (2015-09-25) — this is a single representative window within a much longer (June-October) smoldering/re-flaring haze season, not a claim that the whole season built monotonically toward one peak; day-to-day PSI fluctuated considerably within the season per source commentary."
+    },
+    {
+      "name": "2019 Southeast Asian haze",
+      "start": "2019-06-01",
+      "end": "2019-10-31",
+      "signal_effects": {
+        "shipping": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "No vessel/ferry-suspension figure specific to 2019 was located in this pass (unlike 2015, where a specific Batam-Singapore ferry suspension was documented)."},
+        "market": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "Not located."},
+        "geopolitical": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "Not specifically quantified for 2019 in this pass, though the same Singapore-Indonesia transboundary-haze friction dynamic as 2015 is understood to recur in most haze years."},
+        "disaster": {
+          "value": {
+            "psi_24hr_unhealthy_threshold_crossed": "2019-09-15 (01:00, entering unhealthy range island-wide)",
+            "psi_24hr_reading_range_sep15_8am": [107, 124],
+            "psi_24hr_peak": 145,
+            "psi_peak_date": "2019-09-18",
+            "psi_category_at_peak": "Unhealthy (approaching Very Unhealthy)",
+            "onset_to_peak_days": [3, 5],
+            "visible_worsening_start": "2019-09-13"
+          },
+          "unit": "Pollutant Standards Index (PSI, Singapore NEA scale, 24-hr readings)",
+          "evidence": "documented"
+        },
+        "routing": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "No navigational-restriction figure specific to 2019 was located; see the 2015 event's routing note for the closest general precedent (2010, non-2019-specific)."},
+        "news": {"value": null, "unit": "n/a", "evidence": "extrapolated", "explanation": "Same as 2015 event — no index found."}
+      },
+      "sources": [
+        {"outlet": "Wikipedia (2019 Southeast Asian haze)", "url": "https://en.wikipedia.org/wiki/2019_Southeast_Asian_haze", "accessed": "2026-08-12"},
+        {"outlet": "Mothership.sg", "url": "https://mothership.sg/2019/09/psi-south-singapore-hits-140/", "accessed": "2026-08-12"},
+        {"outlet": "Inquirer.net", "url": "https://newsinfo.inquirer.net/1164920/haze-in-singapore-enters-unhealthy-range-across-island", "accessed": "2026-08-12"},
+        {"outlet": "Asia Times", "url": "https://asiatimes.com/2019/09/choking-and-gasping-in-indonesias-noxious-haze/", "accessed": "2026-08-12"}
+      ],
+      "notes": "STRUCTURALLY IMPORTANT CONTRAST WITH 2015: the 2019 episode's onset-to-peak gradient (3-5 days, from visible worsening 2019-09-13 to peak PSI 145 on 2019-09-18) is markedly SHARPER than 2015's (15 days, first-unhealthy to peak). 2019's peak severity (PSI 145, 'Unhealthy') was also considerably lower than 2015's (PSI 322-341, 'Hazardous') despite both being El Nino-linked dry-season years described by sources as comparably severe fire seasons. This means 'the' haze onset gradient is NOT a fixed constant across episodes — a scenario author drawing a single ramp_days value from this file should treat the two documented episodes as a range (roughly 3-15 days) rather than picking one and presenting it as THE haze signature. The overall season window (2019-06 start, 2019-10-31 end) is sourced only as an approximate range ('June-September 2019' plus Kalimantan's fire season extending 'peaking during September and October' and running into mid-November) — unlike 2015's cleanly-dated Wikipedia range, this window's exact start/end dates are not pinned to a single specific-day source and should be treated as approximate."
+    },
+    {
+      "name": "2019-2024 chronic piracy/armed-robbery baseline, Straits of Malacca and Singapore (SOMS)",
+      "start": "2019-01-01",
+      "end": "ongoing",
+      "signal_effects": {
+        "shipping": {
+          "value": null,
+          "unit": "n/a",
+          "evidence": "documented",
+          "explanation": "No source found describing piracy/armed-robbery incidents measurably reducing SOMS vessel-transit counts or throughput — incidents are individually-targeted opportunistic boardings, not a deterrent to strait-wide traffic. This null is itself a structural finding, not a gap: it is exactly why a piracy-driven scenario is a strong N_DECOY candidate (see key_finding above and limitations)."
+        },
+        "market": {
+          "value": null,
+          "unit": "n/a",
+          "evidence": "documented",
+          "explanation": "No freight-rate or insurance-premium figure attributable specifically to chronic SOMS petty piracy (as opposed to a war-risk-listed area) was located — the incident severity (mostly CAT 4 'opportunistic'/'hit and run', per ReCAAP classification) is generally too low-grade to move market pricing the way a war-risk-zone listing does."
+        },
+        "geopolitical": {
+          "value": {
+            "recaap_soms_2018": {"value": 76, "note": "one source states this figure; a second source states 7-8 for the same year — see notes"},
+            "recaap_soms_2019": 31,
+            "recaap_soms_2021_singapore_strait_share_of_asia_pct": 61.4,
+            "recaap_soms_2023_h1": 41,
+            "recaap_soms_2024_h1": 22,
+            "recaap_soms_2024_full_year": 62,
+            "recaap_soms_2024_malacca_strait_only": 1,
+            "recaap_soms_2024_singapore_strait_only": 61,
+            "recaap_soms_2025_full_year": 108,
+            "recaap_soms_2025_yoy_change_pct": 74,
+            "recaap_asia_wide_2024": 107,
+            "recaap_asia_wide_2025": 132,
+            "recaap_asia_wide_2025_yoy_change_pct": 23,
+            "recaap_2025_soms_share_of_asia_pct": 82,
+            "imb_icc_singapore_strait_2024": 43,
+            "imb_icc_singapore_strait_2025": 80,
+            "imb_icc_singapore_strait_2025_share_of_global_pct": 58,
+            "imb_icc_q1_2025": 31,
+            "imb_icc_q1_2026": 8
+          },
+          "unit": "incident counts (annual/quarterly, by reporting body and geographic scope — see notes on methodology differences)",
+          "evidence": "documented"
+        },
+        "disaster": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "Not applicable to this signal family."},
+        "routing": {
+          "value": null,
+          "unit": "n/a",
+          "evidence": "documented",
+          "explanation": "No documented rerouting response (e.g. diversion to the Sunda or Lombok Straits) attributable specifically to chronic piracy risk was found — unlike Hormuz (no viable detour exists) or Bab el-Mandeb (a well-documented Cape of Good Hope diversion), Malacca DOES have alternate deep-water straits in principle, but no source in this pass documents operators actually using them because of piracy risk specifically; the much longer detour is understood to be reserved for far more severe scenarios than petty theft."
+        },
+        "news": {
+          "value": "ReCAAP ISC issues periodic public 'Incident Alert' bulletins for the Singapore Strait specifically when incident clusters occur",
+          "unit": "qualitative — bulletin issuance, not a volume/sentiment index",
+          "evidence": "documented"
+        }
+      },
+      "sources": [
+        {"outlet": "SAFETY4SEA", "url": "https://safety4sea.com/recaap-isc-annual-report-a-total-132-incidents-reported-during-2025/", "accessed": "2026-08-12"},
+        {"outlet": "Britannia P&I", "url": "https://britanniapandi.com/2026/01/loss-prevention-update-recaap-annual-report-2025/", "accessed": "2026-08-12"},
+        {"outlet": "ReCAAP ISC Annual Report 2024 (PDF)", "url": "https://www.recaap.org/resources/ck/files/reports/annual/ReCAAP%20ISC%20Annual%20Report%202024%20-%20Final.pdf", "accessed": "2026-08-12"},
+        {"outlet": "ReCAAP ISC Annual Report 2025 (PDF)", "url": "https://www.recaap.org/resources/ck/files/reports/annual/ReCAAP%20ISC%20Annual%20Report%202025.pdf", "accessed": "2026-08-12"},
+        {"outlet": "The Edge Malaysia", "url": "https://theedgemalaysia.com/node/718396", "accessed": "2026-08-12"},
+        {"outlet": "Maritime Executive", "url": "https://maritime-executive.com/article/straits-of-singapore-and-malacca-report-piracy-declines-in-2024", "accessed": "2026-08-12"},
+        {"outlet": "ReCAAP ISC Half-Year Press Release (Jan-Jun 2024, PDF)", "url": "https://www.recaap.org/resources/ck/files/news/2024/Press%20release%20-%20ReCAAP_ISC_Half-Year_Report%20(Jan-Jun%202024)%20-%20final.pdf", "accessed": "2026-08-12"},
+        {"outlet": "Riviera Maritime Media", "url": "https://www.rivieramm.com/news-content-hub/news-content-hub/imb-recorded-137-piracy-incidents-in-2025-87479", "accessed": "2026-08-12"},
+        {"outlet": "ICC Commercial Crime Services", "url": "https://icc-ccs.org/pronounced-spike-in-low-level-crimes-in-singapore-straits/", "accessed": "2026-08-12"},
+        {"outlet": "South China Morning Post", "url": "https://www.scmp.com/news/asia/south-asia/article/3043744/piracy-incidents-along-straits-malacca-and-singapore-surge", "accessed": "2026-08-12"},
+        {"outlet": "Fulcrum (piracy and the pandemic 2020-2022)", "url": "https://fulcrum.sg/piracy-and-the-pandemic-maritime-crime-in-southeast-asia-2020-2022/", "accessed": "2026-08-12"}
+      ],
+      "notes": "SOURCE DISCREPANCY, recorded rather than resolved: two searches in this pass returned conflicting SOMS incident counts for 2018 (76 vs. 7-8) and slightly different 2019 counts (31 vs. 30). This likely reflects different reporting scopes (SOMS-only vs. Asia-wide vs. Singapore-Strait-only) being conflated across secondary sources rather than a single ReCAAP figure being wrong, but this pass did not resolve it by reading the underlying 2018/2019 ReCAAP annual PDFs directly — a scenario author needing an exact 2018/2019 SOMS baseline should re-verify against the primary ReCAAP annual report PDF for that year before using either figure. Separately, ReCAAP (regional, Asia-focused, includes both Malacca and Singapore Straits, plus 'armed robbery against ships' as a distinct sub-category) and IMB/ICC (global body, figures cited here specifically for 'Singapore Strait') consistently report DIFFERENT totals for the same calendar years (e.g. 2024: ReCAAP SOMS 62 vs. IMB Singapore-Strait-only 43; 2025: ReCAAP SOMS 108 vs. IMB 80) — both are legitimate, differently-scoped primary sources, not an error in one; a scenario author should pick one source and stay consistent with it rather than mixing figures from both. The clearest, most consistent recent-year picture: SOMS piracy is chronic across every year examined (never zero), rose sharply in H2 2024 (particularly around Pulau Cula, Indonesia — see the escalation event below) and continued rising through 2025, then showed a sharp Q1 2026 pullback (8 incidents vs. 31 in Q1 2025 per IMB) attributed in sources to intensified regional patrols/arrests."
+    },
+    {
+      "name": "Late-2024 Pulau Cula piracy escalation",
+      "start": "2024-10-01",
+      "end": "2024-12-15",
+      "signal_effects": {
+        "shipping": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "Same structural point as the chronic baseline event — no transit-volume effect documented."},
+        "market": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "Not located."},
+        "geopolitical": {
+          "value": {
+            "pulau_cula_incidents_2023_full_year": 27,
+            "pulau_cula_incidents_2024_full_year": 45,
+            "incidents_within_one_week_nov_2024": 8,
+            "incidents_nov13_14_2024_near_pulau_cula": 5,
+            "incident_category": "86% of SOMS attacks classified CAT 4 (opportunistic, hit-and-run); 9 SOMS attacks were higher-risk CAT 2/CAT 3 (armed attacker)"
+          },
+          "unit": "incident counts; ReCAAP severity category",
+          "evidence": "documented"
+        },
+        "disaster": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "Not applicable."},
+        "routing": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "No rerouting response documented for this specific spike."},
+        "news": {
+          "value": "ReCAAP ISC issued dedicated 'Incident Alert' bulletins for Singapore Strait sea-robbery incidents in 2024 (e.g. IA 01-2024, IA 03-2024)",
+          "unit": "qualitative — bulletin issuance",
+          "evidence": "documented"
+        }
+      },
+      "sources": [
+        {"outlet": "ReCAAP ISC Incident Alert 01-2024 (PDF)", "url": "https://www.recaap.org/resources/ck/files/alerts/2024/ReCAAP%20ISC%20IA%2001-2024%20Sea%20robbery%20Incidents%20in%20the%20Singapore%20Strait%2014%20Sep%2024).pdf", "accessed": "2026-08-12"},
+        {"outlet": "ReCAAP ISC Incident Alert 03-2024 (PDF)", "url": "https://www.recaap.org/resources/ck/files/alerts/2024/ReCAAP%20ISC%20IA%2003-2024%20Sea%20robbery%20Incidents%20in%20the%20Singapore%20Strait%20-%2014%20Nov%202024.pdf", "accessed": "2026-08-12"},
+        {"outlet": "Maritime Mutual", "url": "https://maritime-mutual.com/risk-bulletins/straits-of-malacca-and-singapore-piracy-armed-robbery-attacks-continue-into-2025/", "accessed": "2026-08-12"}
+      ],
+      "notes": "This is the clearest 'marked escalation' instance located in this pass — a near-doubling of incidents at a single geographic cluster (Pulau Cula, Indonesia, on the Singapore Strait's southern side) year-over-year (27 in 2023 to 45 in 2024), with a sharp within-month spike in November 2024 (8 incidents in one week, 5 of them within 2 days). If used to author a scenario event, the geographic specificity (Pulau Cula, not the whole strait) is itself a documented feature worth preserving rather than smoothing into a strait-wide uniform effect."
+    }
+  ],
+  "limitations": "(1) RESOLVED 2026-08-12 (was previously an open ambiguity): the chronic-piracy signal family's mapping onto the EVAL01 pipeline's six domains is now decided — piracy maps PRIMARILY to geopolitical (it fits that composite's stability sub-component) WITH news as a secondary channel (incidents surface through ReCAAP Incident Alert bulletins and press coverage), and explicitly NOT to shipping (this file's own event-3 'shipping' field documents that piracy does not measurably move transit-volume/throughput). This decision is recorded in config/benchmark/malacca.yaml's active_domains comment as the authoritative reference; do not re-litigate it per-scenario in a later prompt without updating both places. (2) Pre-2023 SOMS incident-count figures are genuinely disputed across the sources found in this pass (see the chronic-baseline event's notes) and were not resolved by reading primary ReCAAP annual PDFs directly — treat any single pre-2023 year's exact count as provisional. (3) No market/freight/insurance figure specific to chronic low-level SOMS piracy (as distinct from a war-risk-zone designation, which piracy-only incidents do not typically trigger) was located. (4) No news-sentiment/volume index was found for either haze episode or for the piracy signal family; every 'news' field above is either null or a qualitative, non-numeric note. (5) The haze episodes' routing/navigational-restriction evidence is thin and partly non-contemporaneous (the clearest '<2 nautical miles, hazard warning issued' precedent is dated 2010, not 2015 or 2019 specifically) — this file explicitly does NOT claim a full-closure precedent exists for haze, consistent with the task's expectation that none should be invented. (6) This file did not attempt to source a natural-disaster baseline unrelated to haze (e.g. seismic activity near Malacca) — haze is the only disaster-domain driver documented here because it is the only one asked for and found. (7) ADDED 2026-08-12: a targeted follow-up search for documented vessel diversion to the Sunda or Lombok Straits specifically due to piracy or haze found none (consistent with the null routing fields already in this file) — it did surface several very specific-sounding statistics (seasonal Sunda/Lombok traffic-split percentages, an 'incidents/month' routing-review threshold) from secondary/aggregator sources that read as unattributed or synthetic rather than credible primary reporting; these were deliberately excluded from config/benchmark/malacca.yaml rather than cited as documented. (8) No shipping-count baseline (daily/annual vessel transits under normal conditions) exists in this file — it was never asked for in the original research prompt. config/benchmark/malacca.yaml's baseline_transits_per_day (200-220/day) was sourced separately, directly from general Malacca Strait traffic statistics, not from this file. (9) REMOVED 2026-08-12: market was originally included in config/benchmark/malacca.yaml's active_domains on domain-plausibility grounds alone (chronic piracy could plausibly nudge marine insurance costs; haze could plausibly affect freight costs at the margin) despite every 'market' field in every event above being null (see the notes on (3) above). This project's standard rejects plausibility-only inclusion — evidence silence is not evidence support. market was removed from active_domains; this file's market fields remain null and are not being retroactively filled to justify the earlier inclusion."
+}

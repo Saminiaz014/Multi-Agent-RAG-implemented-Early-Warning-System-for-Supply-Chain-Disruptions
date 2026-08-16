@@ -1,0 +1,134 @@
+{
+  "region": "panama",
+  "compiled": "2026-08-12",
+  "_meta": {
+    "purpose": "Real-world precedent for grounding EVAL01 scenario parameters (config/benchmark/panama.yaml + scenario YAMLs, once written) for the Panama Canal chokepoint, matching the structure and honesty conventions of data/routing_research/hormuz_rerouting_patterns.json.",
+    "labeling": "Each numeric value carries an evidence tag: 'documented' (a cited source states the number) or 'extrapolated' (derived/interpolated — the derivation is recorded in that event's 'notes'). A null value is a correct result when no credible source was found; it is explained, not guessed.",
+    "key_finding": "Panama's primary documented disruption driver (2023-2024) is HYDROLOGICAL and SLOW-ONSET — a multi-month drought that gradually tightened a daily transit-slot cap, not a sudden geopolitical or physical-blockage event. This is structurally distinct from every other chokepoint in this benchmark (Hormuz/Bab el-Mandeb = geopolitical/security; Suez 2021 = instantaneous physical blockage) and is precisely why Panama belongs in this benchmark: it exercises the pipeline's ability to detect a slowly-ramping capacity constraint with weeks of lead time, not a step-function shock. A second, structurally OPPOSITE 2026 event is also documented below: a demand-side surge (not a supply-side restriction) caused by spillover from the Hormuz closure, which strained an already-near-capacity canal from the other direction.",
+    "units_convention": "Per docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md: the EVAL01 pipeline's 'shipping' signal is a raw vessel-transit count/day; 'market' is an unbounded, roughly z-score-like index; 'geopolitical'/'routing'/'news'/'disaster' are 0-1 normalized scores. Values below are recorded in their real-world documented units; mapping to the pipeline's internal convention is scenario-authoring work for a later prompt."
+  },
+  "events": [
+    {
+      "name": "2023-2024 Gatun Lake drought and transit-slot restrictions",
+      "start": "2023-07-30",
+      "end": "2024-08-01",
+      "signal_effects": {
+        "shipping": {
+          "value": {
+            "normal_daily_transits": 36,
+            "jul_2023_cap": 32,
+            "sep_oct_2023_cap": [28, 30],
+            "nov_2023_jan_2024_cap": [22, 24],
+            "trough_cap_absolute_floor": 18,
+            "recovery_by": "2024-08 (back to 35-36/day)",
+            "fy2024_total_transits": 9936,
+            "fy2023_total_transits": 12638,
+            "fy_decline_pct": -29
+          },
+          "unit": "vessels/day (transit-slot cap) and total annual transits (FY = Oct-Sep)",
+          "evidence": "documented"
+        },
+        "market": {
+          "value": {
+            "normal_auction_slot_usd": [15000, 140000],
+            "record_nov_2023_auction_usd": 2850000
+          },
+          "unit": "USD per canal booking/auction slot",
+          "evidence": "documented"
+        },
+        "geopolitical": {
+          "value": null,
+          "unit": "n/a",
+          "evidence": "documented",
+          "explanation": "No geopolitical driver applies — this event is purely hydrological/climate-driven (El Nino-linked rainfall deficit). See key_finding above."
+        },
+        "disaster": {
+          "value": {"gatun_lake_normal_ft": 85, "gatun_lake_trough_ft": 79.6, "gatun_lake_trough_date": "2023-08 (initial), further decline into 3Q FY2024", "operating_max_ft": 88, "container_draft_restriction_ft": [44, 50]},
+          "unit": "Gatun Lake elevation in feet above sea level; permitted vessel draft in feet",
+          "evidence": "documented"
+        },
+        "routing": {
+          "value": {
+            "southbound_avg_wait_days_peak_nov_2023": 11.4,
+            "southbound_max_wait_days_peak_nov_2023": 22.8,
+            "max_wait_start_of_month_multiplier": 3,
+            "neopanamax_daily_transits_nov_2023": 7.37,
+            "neopanamax_daily_transits_nov_2022": 9.83,
+            "neopanamax_yoy_decline_pct": -25,
+            "stolt_nielsen_fleet_diverted_to_suez": 166,
+            "stolt_nielsen_diversion_announced": "2023-11",
+            "maersk_land_bridge_intermodal_diversion": "OC1 service dropped its Cartagena port call and used Balboa rail transit to Manzanillo to catch Philadelphia/Charleston sailings, Jan-May 2024",
+            "us_west_coast_plus_transcon_rail_share_of_diverted_cargo_pct": 40,
+            "magellan_strait_added_transit_days": [10, 22]
+          },
+          "unit": "days (queue wait time, no-reservation vessels); vessels/day (Neopanamax locks); vessel count (Stolt-Nielsen fleet diverted); % (rail-diversion share of diverted cargo); days (Magellan Strait detour)",
+          "evidence": "documented",
+          "explanation": "A follow-up targeted search (2026-08-12, A4.5-equivalent pass) specifically for DIVERSION (not congestion) evidence found it: Stolt-Nielsen (166-vessel chemical-tanker fleet) publicly announced in Nov 2023 it was rerouting via the Suez Canal because Panama service had become 'increasingly unreliable,' charging customers for the longer route (TradeWinds/Bloomberg/AJOT, corroborating). Maersk separately used a Balboa-Manzanillo rail 'land bridge' to bypass the canal for part of its OC1 service. These are genuine route DEVIATION (vessels not transiting Panama at all), structurally distinct from the wait-time/queueing figures above (vessels still transiting, just slower) — see this event's notes for why both are recorded and why neither alone is 'the' routing signal for this region."
+        },
+        "news": {
+          "value": null,
+          "unit": "n/a",
+          "evidence": "extrapolated",
+          "explanation": "No news-sentiment/volume index specific to this event was located. The month-by-month transit-cap tightening schedule (shipping field above) is a plausible proxy for the shape of a slow-building news-coverage ramp — climate/drought stories accumulate coverage as restrictions visibly worsen — but this is not itself a measured signal."
+        }
+      },
+      "sources": [
+        {"outlet": "Seatrade Maritime", "url": "https://www.seatrade-maritime.com/containers/panama-canal-transits-drop-29-in-fy2024", "accessed": "2026-08-12"},
+        {"outlet": "Ballast Markets (chokepoint reference)", "url": "https://content.ballastmarkets.com/chokepoints/panama-canal/", "accessed": "2026-08-12"},
+        {"outlet": "U.S. EIA", "url": "https://www.eia.gov/todayinenergy/detail.php?id=60842", "accessed": "2026-08-12"},
+        {"outlet": "U.S. EIA", "url": "https://www.eia.gov/todayinenergy/detail.php?id=62408", "accessed": "2026-08-12"},
+        {"outlet": "FreightWaves", "url": "https://www.freightwaves.com/news/no-reservation-at-panama-canal-prepare-for-a-long-wait", "accessed": "2026-08-12"},
+        {"outlet": "Fresh Fruit Portal", "url": "https://www.freshfruitportal.com/news/2023/12/04/panama-canal-drought-causes-slot-reductions-and-extended-shipping-delays/", "accessed": "2026-08-12"},
+        {"outlet": "TradeWinds", "url": "https://www.tradewindsnews.com/gas/panama-canal-auction-smashes-vessel-transit-record-as-slot-goes-for-2-85m/2-1-1546233", "accessed": "2026-08-12"},
+        {"outlet": "Kuehne+Nagel", "url": "https://mykn.kuehne-nagel.com/news/article/panama-canal-has-plenty-of-water-10-jul-2025", "accessed": "2026-08-12"},
+        {"outlet": "TradeWinds (Stolt-Nielsen reroute)", "url": "https://www.tradewindsnews.com/tankers/stolt-nielsen-re-routes-giant-chemical-tanker-fleet-away-from-unreliable-panama-canal/2-1-1561488", "accessed": "2026-08-12"},
+        {"outlet": "AJOT", "url": "https://www.ajot.com/news/the-panama-canal-is-so-backed-upships-are-rerouting-through-the-suez", "accessed": "2026-08-12"},
+        {"outlet": "Bloomberg", "url": "https://www.bloomberg.com/news/articles/2023-11-27/ship-owner-reroutes-tankers-via-suez-after-panama-canal-snags", "accessed": "2026-08-12"},
+        {"outlet": "SupplyChainBrain", "url": "https://www.supplychainbrain.com/articles/38570-the-panama-canal-is-so-backed-up-ships-are-rerouting-through-the-suez", "accessed": "2026-08-12"},
+        {"outlet": "gCaptain (land bridge)", "url": "https://gcaptain.com/panama-land-bridge-can-it-solve-the-canals-drought-woes/", "accessed": "2026-08-12"},
+        {"outlet": "CNBC (Maersk land bridge)", "url": "https://www.cnbc.com/2024/01/11/panama-canal-drought-moves-maersk-to-start-using-land-bridge-for-cargo.html", "accessed": "2026-08-12"},
+        {"outlet": "Water Diplomat", "url": "https://www.waterdiplomat.org/story/2023/12/international-trade-rerouted-panama-canal-cuts-traffic-due-drought", "accessed": "2026-08-12"}
+      ],
+      "notes": "Sources vary slightly (32-38 vessels/day) on the exact starting daily-transit figure and the exact per-step cap at each date, likely reflecting different sources counting Panamax-only vs. combined Panamax+Neopanamax locks, and slightly different snapshot dates within the same month. The ranges recorded above reflect that spread rather than picking one source arbitrarily; treat the general shape (36-38 -> ~32 -> ~28-30 -> 22-24 -> recovery) as the documented finding, and any single-day exact figure as approximate. Recovery was gradual, not a step function: restrictions eased starting 2024-01-16 and capacity was not fully restored to ~36/day until August 2024 — roughly 7 months of graduated recovery following ~4 months of tightening, i.e. the recovery tail is longer than the onset ramp, unlike a typical geopolitical-event decay curve. CONGESTION VS. DIVERSION (resolved 2026-08-12): the routing field mixes two structurally different signals on purpose. Wait-time/Neopanamax-transit figures measure congestion AT the canal (vessels still transiting, just slower) — a route-deviation model over AIS data (this codebase's routing_connector.py/routing_agent) cannot detect that on its own, since the vessel's path doesn't change. The Stolt-Nielsen/Maersk figures measure genuine diversion AWAY from the canal (vessels take a different physical path entirely) — this IS what a route-deviation model can detect. Both are real and documented; neither should be presented as the whole picture. Diversion appears to be a minority behavior relative to the much larger population that queued or paid auction premiums instead (no source found gives a total-fleet diversion percentage), so treat the routing signal as real but modest in scale, not dominant."
+    },
+    {
+      "name": "2026 Hormuz-crisis demand surge and capacity strain",
+      "start": "2026-04",
+      "end": "ongoing",
+      "signal_effects": {
+        "shipping": {
+          "value": "operating close to maximum daily capacity (~36-40 transits/day)",
+          "unit": "vessels/day",
+          "evidence": "documented"
+        },
+        "market": {
+          "value": {"pre_crisis_auction_slot_usd": [135000, 140000], "apr_may_2026_avg_premium_usd": [385000, 425000], "record_slot_usd": 4000000},
+          "unit": "USD per canal auction slot",
+          "evidence": "documented"
+        },
+        "geopolitical": {
+          "value": "surge driven by Asian buyers seeking non-Middle-East-Gulf energy supply routes following the 2026-02-28+ Strait of Hormuz closure",
+          "unit": "qualitative — causal driver",
+          "evidence": "documented"
+        },
+        "disaster": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "Not applicable — this event's driver is a demand shift, not a hazard."},
+        "routing": {
+          "value": {"avg_wait_time_hours": 47, "yoy_wait_increase_pct": 50},
+          "unit": "hours (average waiting time); % year-over-year increase",
+          "evidence": "documented"
+        },
+        "news": {"value": null, "unit": "n/a", "evidence": "extrapolated", "explanation": "No dedicated sentiment/volume index found; not derived here."}
+      },
+      "sources": [
+        {"outlet": "Lloyd's List", "url": "https://www.lloydslist.com/LL1156994/Hormuz-crisis-drives-up-Panama-Canal-delays-and-auction-prices", "accessed": "2026-08-12"},
+        {"outlet": "Lloyd's List", "url": "https://www.lloydslist.com/LL1157411/Hormuz-crisis-still-pumping-up-Panama-Canal-transits-as-El-Nio-threat-looms", "accessed": "2026-08-12"},
+        {"outlet": "Lloyd's List", "url": "https://www.lloydslist.com/LL1157125/Crisis-driven-tanker-demand-propels-Panama-Canal-to-multiyear-high", "accessed": "2026-08-12"},
+        {"outlet": "gCaptain", "url": "https://gcaptain.com/panama-canal-near-capacity-as-hormuz-crisis-drives-surge-in-u-s-energy-exports/", "accessed": "2026-08-12"},
+        {"outlet": "IntelliNews", "url": "https://new.intellinews.com/articles/panama-canal-auction-prices-quadruple-as-hormuz-closure-reshapes-global-energy-flows-438478", "accessed": "2026-08-12"},
+        {"outlet": "Splash247", "url": "https://splash247.com/panama-canal-slot-auctions-hit-record-4m/", "accessed": "2026-08-12"}
+      ],
+      "notes": "STRUCTURALLY OPPOSITE to the 2023-2024 drought event: this is a demand-side surge (more vessels wanting to transit, competing for a capacity that is fundamentally intact) rather than a supply-side restriction (fewer transits permitted due to water scarcity). Auction prices spike in both events, but for opposite underlying reasons — worth flagging if a scenario author is tempted to treat 'high auction price' as a single undifferentiated signal; the shipping/routing signal shapes differ (drought: falling daily-transit count; 2026 surge: transit count near its ceiling, wait time rising instead). This event is also cross-linked to the SAME 2026-02-28 Hormuz closure documented in data/routing_research/hormuz_rerouting_patterns.json and in data/region_research/bab_el_mandeb_disruption_patterns.json's second event — three chokepoints (Hormuz, Bab el-Mandeb, Panama) all show a documented response to the identical trigger date, though the sign and mechanism of Panama's response (demand surge, capacity strain) is opposite to Bab el-Mandeb's (traffic collapse, avoidance). A scheduled Panama lock-maintenance window (March-September 2026) overlaps this event and independently tightens capacity — the two effects are not cleanly separable in the sources found here (see limitations)."
+    }
+  ],
+  "limitations": "(1) No credible source describes a full CLOSURE of the Panama Canal in either documented event — the canal has never stopped operating; only the daily-transit cap and wait times moved. This is a structural fact worth preserving explicitly: Panama's disruption ceiling is 'severely constrained, still open' (~40-50% of a normal-year total in the worst FY), never 'closed' the way Hormuz was in 2026 or Suez was during the six-day Ever Given grounding. (2) The 2026 event's numbers are entangled with a separately-documented, concurrent scheduled lock-maintenance window (March-September 2026); sources found in this pass did not cleanly separate how much of the wait-time/price increase is maintenance-driven vs. Hormuz-demand-driven, so treat the 2026 event's magnitude as an upper-bound combined effect, not a pure Hormuz-attributable figure. (3) No 'news' sentiment/volume index was found for either event; both news fields are marked extrapolated and left without a proxy value (only a qualitative note on what a proxy might look like). (4) A specific market-domain figure independent of auction-slot price (e.g. a freight-rate or trade-value-at-risk figure specific to Panama-transiting cargo) was not located in this pass. (5) CONGESTION VS. DIVERSION (originally an open ambiguity in this file; resolved 2026-08-12 by a targeted follow-up search): an earlier version of this file's 2023-2024 event routing field contained only queueing/wait-time figures, which measure congestion AT the canal, not diversion AWAY from it — a route-deviation model (this codebase's routing_connector.py/routing_agent) cannot detect congestion on its own, since a queued vessel's path hasn't changed. The follow-up search specifically for diversion evidence found it: Stolt-Nielsen's 166-vessel chemical-tanker fleet publicly rerouted via Suez in Nov 2023 (TradeWinds/Bloomberg/AJOT/SupplyChainBrain), and Maersk used a Balboa-Manzanillo rail land bridge to bypass the canal for part of its OC1 service (CNBC/gCaptain) — both now recorded in the 2023-2024 event's 'routing' field above. No source found gives a total-fleet diversion percentage, so this remains real but likely modest in scale relative to the much larger population that queued or paid auction premiums instead rather than physically diverting."
+}

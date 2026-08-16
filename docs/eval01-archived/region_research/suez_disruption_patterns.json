@@ -1,0 +1,97 @@
+{
+  "region": "suez",
+  "compiled": "2026-08-12",
+  "_meta": {
+    "purpose": "Real-world precedent for grounding EVAL01 scenario parameters (config/benchmark/suez.yaml + scenario YAMLs, once written) for the Suez Canal chokepoint, matching the structure and honesty conventions of data/routing_research/hormuz_rerouting_patterns.json.",
+    "labeling": "Each numeric value carries an evidence tag: 'documented' (a cited source states the number) or 'extrapolated' (derived/interpolated — the derivation is recorded in that event's 'notes'). A null value is a correct result when no credible source was found; it is explained, not guessed.",
+    "key_finding": "Suez has TWO structurally distinct documented disruption modes, and this file deliberately keeps them as separate events rather than blending them: (1) the 2021 Ever Given grounding is an INSTANTANEOUS PHYSICAL BLOCKAGE with effectively zero warning time — a single ship grounds, the canal is physically impassable within hours, and no upstream signal (geopolitical, news, market) meaningfully precedes it. A detection system should be EXPECTED to show a poor lead-time result on this event; that is an honest finding about what cannot be anticipated from precursor signals, not a system defect. (2) The 2023-2024 Red Sea/Bab el-Mandeb knock-on decline is the opposite shape: a slow, sustained falloff in Suez-bound traffic caused by an external geopolitical campaign (documented in detail in data/region_research/bab_el_mandeb_disruption_patterns.json), where Suez itself is never physically blocked — its infrastructure stayed fully open throughout; ships simply stopped choosing to use it.",
+    "units_convention": "Per docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md: the EVAL01 pipeline's 'shipping' signal is a raw vessel-transit count/day; 'market' is an unbounded, roughly z-score-like index; 'geopolitical'/'routing'/'news'/'disaster' are 0-1 normalized scores. Values below are recorded in their real-world documented units; mapping to the pipeline's internal convention is scenario-authoring work for a later prompt."
+  },
+  "events": [
+    {
+      "name": "2021 Ever Given grounding",
+      "start": "2021-03-23",
+      "end": "2021-04-03",
+      "signal_effects": {
+        "shipping": {
+          "value": {"canal_physically_blocked_days": 6, "hours_precise": "6 days 7 hours", "vessels_queued_peak": 429, "vessels_queued_alt_figure": 422, "backlog_clearance_days_actual": 5, "backlog_clearance_days_official_estimate": 3.5},
+          "unit": "days (blockage duration, backlog clearance); vessel count (queue peak)",
+          "evidence": "documented"
+        },
+        "market": {
+          "value": {"daily_trade_value_halted_low_usd_bn": 9, "daily_trade_value_halted_lloyds_list_usd_bn": 9.6, "westbound_daily_usd_bn": 5.1, "eastbound_daily_usd_bn": 4.5, "estimated_total_loss_usd_bn": 1.0, "normal_daily_transit_value_range_usd_bn": [3, 9]},
+          "unit": "USD billions per day (trade value halted); USD billions (total estimated loss)",
+          "evidence": "documented"
+        },
+        "geopolitical": {
+          "value": null,
+          "unit": "n/a",
+          "evidence": "documented",
+          "explanation": "Not applicable — this is a navigational/physical accident (high winds and a sandstorm are the commonly cited proximate cause per the incident investigation), not a geopolitical event. No adversarial actor, no escalation timeline, no precursor tension to detect."
+        },
+        "disaster": {
+          "value": "high winds (~40 knots) and a sandstorm reducing visibility are the cited proximate meteorological factors in the grounding",
+          "unit": "qualitative — contributing weather factor, not a scenario-grade quantified disaster signal",
+          "evidence": "documented"
+        },
+        "routing": {
+          "value": null,
+          "unit": "n/a",
+          "evidence": "documented",
+          "explanation": "No rerouting occurred or was meaningfully possible during the 6-day physical blockage itself — ships already in the queue simply waited (there is no alternate canal), and vessels not yet committed to the Suez route worldwide had not yet had time to divert to Cape of Good Hope before the canal reopened. This is a key structural contrast with the 2023-2024 event below, where Cape of Good Hope rerouting is the dominant documented response precisely because that disruption was sustained for months rather than days."
+        },
+        "news": {"value": null, "unit": "n/a", "evidence": "extrapolated", "explanation": "No news-sentiment/volume index specific to this event was located, though the event is widely known to have generated an exceptionally large, near-instantaneous global media spike (the grounded ship became a viral meme within 24-48 hours) — this shape (near-zero to peak within ~1 day, near the zero-warning-time onset) is recorded qualitatively, not as a sourced number."
+        }
+      },
+      "sources": [
+        {"outlet": "Wikipedia (2021 Suez Canal obstruction, cross-referencing the official investigation report)", "url": "https://en.wikipedia.org/wiki/2021_Suez_Canal_obstruction", "accessed": "2026-08-12"},
+        {"outlet": "gCaptain (hosting the official Panama Maritime Authority / flag-state Final Investigation Report)", "url": "https://gcaptain.com/wp-content/uploads/2023/07/Final-Investigation-Report-Ever-Given-23-March-2021.pdf", "accessed": "2026-08-12"},
+        {"outlet": "Al Jazeera", "url": "https://www.aljazeera.com/economy/2021/3/25/suez-blockage-seen-halting-9-6-billion-a-day-of-ship-traffic", "accessed": "2026-08-12"},
+        {"outlet": "CNBC", "url": "https://www.cnbc.com/2021/03/25/suez-canal-blockage-is-delaying-an-estimated-400-million-an-hour-in-goods.html", "accessed": "2026-08-12"},
+        {"outlet": "Gulf News / Malay Mail (Suez Canal Authority chairman statement)", "url": "https://gulfnews.com/world/mena/losses-from-ever-given-suez-canal-blockage-could-reach-1b-1.1617231544957", "accessed": "2026-08-12"},
+        {"outlet": "Al Arabiya English (Suez Canal Authority official statement)", "url": "https://english.alarabiya.net/News/middle-east/2021/03/29/Suez-Canal-backlog-needs-3-5-days-to-clear-once-Ever-Given-ship-refloats-Official", "accessed": "2026-08-12"},
+        {"outlet": "NPR", "url": "https://www.npr.org/2021/04/03/984111501/suez-canal-traffic-backlog-finally-cleared-following-the-ever-given-saga", "accessed": "2026-08-12"},
+        {"outlet": "Port Economics, Management and Policy", "url": "https://porteconomicsmanagement.org/pemp/contents/part10/port-resilience/suez-canal-blockage-2021/", "accessed": "2026-08-12"}
+      ],
+      "notes": "This event is the clearest zero-lead-time precedent across all four new regions. Detection agents relying on geopolitical, news-buildup, or routing precursors have nothing to detect before 2021-03-23 — the entire signal is contemporaneous with or lagging the shipping-domain shock (the grounding itself), not leading it. If a P_CRIT-equivalent scenario is authored from this event in a later prompt, its event.ramp_days should be authored as very short (near-instantaneous onset), and any evaluation of lead-time metrics (per docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md's D-series metrics) against it should be interpreted as testing worst-case/no-warning detection latency, not penalizing the system for a structurally undetectable precursor. Total event window for scenario-authoring purposes should probably span 2021-03-23 (grounding) through 2021-04-03 (queue fully cleared) — 11 days end-to-end — even though the canal itself was physically blocked for only 6 of those days."
+    },
+    {
+      "name": "2023-2024 Red Sea/Bab el-Mandeb knock-on Suez transit decline",
+      "start": "2023-11-19",
+      "end": "2025-11-11",
+      "signal_effects": {
+        "shipping": {
+          "value": {"transits_2024": 13213, "transits_2023": 26434, "yoy_decline_pct": -50, "container_traffic_decline_early_2024_pct": [80, 90]},
+          "unit": "vessel transit count (annual, Suez Canal); % decline",
+          "evidence": "documented"
+        },
+        "market": {
+          "value": {"suez_revenue_2024_usd_bn": 4.0, "suez_revenue_2023_usd_bn": 10.3, "revenue_decline_pct": -60, "cumulative_2024_loss_usd_bn": 7.0},
+          "unit": "USD billions (annual Suez Canal Authority revenue)",
+          "evidence": "documented"
+        },
+        "geopolitical": {
+          "value": ">100 documented Houthi attack incidents on shipping attributable as the cause, Nov 2023 - mid 2024",
+          "unit": "cumulative incident count (external cause, not a Suez-side event)",
+          "evidence": "documented"
+        },
+        "disaster": {"value": null, "unit": "n/a", "evidence": "documented", "explanation": "Not applicable — this decline is entirely geopolitical/security-driven, with no natural-hazard component, and Suez's own canal infrastructure was never physically affected."},
+        "routing": {
+          "value": null,
+          "unit": "see data/region_research/bab_el_mandeb_disruption_patterns.json event 1 'routing' field",
+          "evidence": "documented",
+          "explanation": "Deliberately not re-duplicated here — the Cape of Good Hope reroute figures (85% of large container vessels diverted, +3,500-4,000 nm, +10-14 days) are already fully documented in the bab_el_mandeb file's first event, since the rerouting decision and the Suez transit decline are the same behavior observed from two ends of the same corridor."
+        },
+        "news": {"value": null, "unit": "n/a", "evidence": "extrapolated", "explanation": "Same as bab_el_mandeb file — no direct index found; incident-count trajectory is the closest proxy, not a measured value."}
+      },
+      "sources": [
+        {"outlet": "shipsandports.com.ng (citing Egyptian presidential statement)", "url": "https://shipsandports.com.ng/houthi-attacks-cost-egypts-suez-canal-7-billion-in-2024-revenue/", "accessed": "2026-08-12"},
+        {"outlet": "Bloomberg", "url": "https://www.bloomberg.com/news/articles/2024-12-26/red-sea-disruptions-cost-egypt-7-billion-in-suez-revenues", "accessed": "2026-08-12"},
+        {"outlet": "gCaptain", "url": "https://gcaptain.com/suez-canal-traffic-stalls-at-60-below-normal-despite-100-days-without-houthi-attacks/", "accessed": "2026-08-12"},
+        {"outlet": "IMF (blog)", "url": "https://www.imf.org/en/blogs/articles/2024/03/07/red-sea-attacks-disrupt-global-trade", "accessed": "2026-08-12"}
+      ],
+      "notes": "This event is the near-mirror-image of the Ever Given event in every structural dimension: sustained (months, not days) vs. instantaneous; caused by an external actor campaign with a clear precursor timeline (see bab_el_mandeb file) vs. an unpredictable single-ship accident; canal infrastructure fully open throughout vs. physically impassable. A scenario author drawing on both Suez events in the same benchmark region gets, by construction, two very different detection-difficulty profiles from a single canonical region — this is intentional and should not be smoothed into one 'average' Suez scenario. As of the 2025-11-11 to 2026-02-28 pause window (see bab_el_mandeb file event 2), Suez traffic recovery remained incomplete (60% below 2023 baseline even after ~100 attack-free days) — the same recovery-lag caveat applies here."
+    }
+  ],
+  "limitations": "(1) The Ever Given event's 'news' and precise media-volume figures were not sourced to a specific index — only the well-known qualitative fact of a very fast, very large coverage spike is recorded. (2) The 2023-2024 knock-on event's routing/news fields intentionally point to the bab_el_mandeb research file rather than duplicating figures, to avoid two files silently drifting out of sync if one is later corrected — a scenario author using this file should also read the bab_el_mandeb file's corresponding event. (3) No separate, Suez-specific war-risk-insurance premium figure (distinct from the Bab el-Mandeb-quoted range) was located or is claimed here. (4) This file does not attempt to quantify a 'geopolitical' 0-1 buildup curve for the Ever Given event because none exists to quantify — that is the entire point of the key_finding above, not an omission to fill in later."
+}
