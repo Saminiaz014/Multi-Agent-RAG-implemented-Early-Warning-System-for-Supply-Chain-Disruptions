@@ -1,0 +1,52 @@
+# P-HIGH: a shorter, less severe variant of panama_P_CRIT.yaml.
+#
+# DERIVATION METHOD (stated explicitly): built via an explicit
+# `copy.deepcopy(P_CRIT)` in a scratch verification script (not shipped),
+# then scaled — never a shallow copy / dict-spread. The script re-loaded and
+# asserted panama_P_CRIT.yaml's own values (shipping target 0.50, onset_day
+# 150) were unchanged after building this file's numbers; see this prompt's
+# validation output for the same check re-run against the actual written
+# files.
+#
+# Event timing mirrors the same proportional-scaling method used for
+# bab_el_mandeb_P_HIGH.yaml: Hormuz's own established P_CRIT-to-P_HIGH
+# ratios (onset 120/240=0.5, ramp 7/12=0.583, duration 25/60=0.417) applied
+# to panama_P_CRIT.yaml's own (evidence-grounded) timing, since no
+# independent P_HIGH-equivalent drought event exists in the evidence file to
+# derive a Panama-specific ratio from. Each domain's effect target and
+# lead_days are P_CRIT's own value scaled by that SAME domain's Hormuz ratio
+# — disaster (Panama's dominant domain, no direct Hormuz analogue since
+# Hormuz's own disaster stays silent) reuses geopolitical's ratio
+# (0.45/0.80=0.5625), since geopolitical plays the equivalent "dominant
+# domain" ROLE for Hormuz that disaster plays here.
+scenario_id: panama_P_HIGH
+region: panama
+class: P-HIGH
+seed: 42
+days: 365
+event:
+  onset_day: 75
+  ramp_days: 52
+  duration_days: 83
+  peak_band: high
+signals:
+  # extrapolated: P_CRIT's 0.50 (50% drop) scaled by Hormuz's own
+  # shipping-drop ratio (1-0.65)/(1-0.40) = 0.583 -> a 29% drop -> target
+  # 0.71 (1 - 0.50*0.583, rounded).
+  shipping: {baseline: {mean: 36, std: 3}, effect: {type: multiplicative_ramp, target: 0.71, lead_days: 0}}
+  # extrapolated: P_CRIT's 2.5 * Hormuz's market ratio (1.4/2.5 = 0.56) =
+  # 1.4.
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 1.4, lead_days: -23}}
+  # extrapolated: P_CRIT's 0.25 * Hormuz's routing ratio (0.30/0.60 = 0.50)
+  # = 0.12.
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: {type: additive_ramp, target: 0.12, lead_days: 23}}
+  # extrapolated: P_CRIT's 0.50 * Hormuz's news ratio (0.40/0.75 = 0.533) =
+  # 0.27.
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.27, lead_days: 38}}
+  # extrapolated: P_CRIT's 0.85 * geopolitical's Hormuz ratio (0.45/0.80 =
+  # 0.5625) = 0.48 — reusing the dominant-domain ratio (see header note).
+  disaster: {baseline: {mean: 0.02, std: 0.01}, effect: {type: additive_ramp, target: 0.48, lead_days: 0}}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

@@ -1,0 +1,89 @@
+# P-CRIT: the 2023-2024 Gatun Lake drought and transit-slot restrictions --
+# the sole documented event in
+# data/region_research/panama_disruption_patterns.json (the 2026 event there
+# is structurally OPPOSITE — a demand surge, not a supply restriction — and
+# is not used here). All five of this region's active domains move
+# (shipping, market, disaster, routing, news); geopolitical is absent from
+# config/benchmark/panama.yaml's active_domains entirely (not merely
+# silent) — the evidence file states outright "No geopolitical driver
+# applies... this event is purely hydrological/climate-driven" — so no
+# geopolitical signal entry appears below at all. This is the one region in
+# the benchmark where the domain that dominates elsewhere contributes
+# nothing, by design.
+#
+# SLOW ONSET (the structural point of this region): ramp_days=90, roughly
+# the documented Jul30-2023 (first cut, 36->32) to Nov-2023 (queue peak,
+# 11.4avg/22.8max day waits) tightening window — 7.5x longer than
+# bab_el_mandeb_P_CRIT.yaml's ramp_days=12. This is the explicit contrast
+# with Suez's zero-warning Ever Given event (not yet authored) and with
+# bab_el_mandeb/hormuz's fast-onset geopolitical campaigns. duration_days=200
+# stylizes the real ~13-month saga (Jul 2023 restrictions -> Aug 2024 full
+# recovery, longer than one synthetic year) into a still-dominant but
+# tractable window, with ramp=90/plateau=20/decay=90 (symmetric ramp/decay,
+# since event.ramp_days controls both — see
+# src/benchmark/scenario_generator.py:_intensity_curve — even though the
+# real recovery tail (~7 months) was longer than the real tightening
+# (~4 months); this simplification is a known approximation, not a second
+# documented figure).
+#
+# lead_days are extrapolated by proportionally scaling bab_el_mandeb's own
+# (already-extrapolated) lead_days by the ramp_days ratio (90/12 = 7.5x),
+# preserving Hormuz/bab_el_mandeb's established ordering (routing/news lead,
+# market lags, the dominant domain is neutral) at a magnitude appropriate to
+# this region's much longer ramp — not independently evidenced.
+scenario_id: panama_P_CRIT
+region: panama
+class: P-CRIT
+seed: 42
+days: 365
+event:
+  onset_day: 150
+  ramp_days: 90
+  duration_days: 200
+  peak_band: critical
+signals:
+  # documented: 36 -> 18 (the announced absolute floor transit cap, reached
+  # by Feb 1 2024 per the glide path 36->32->28-30->22-24->18) -> a -50%
+  # decline -> multiplicative target 0.50 (NOT "-50", NOT "50"). baseline
+  # mean=36 matches config/benchmark/panama.yaml's baseline_transits_per_day
+  # BY CONVENTION ONLY, not enforced — see
+  # docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6 gap 17. std=3
+  # extrapolated at roughly the same relative noise (~8% of mean) as the
+  # other regions' shipping std.
+  shipping: {baseline: {mean: 36, std: 3}, effect: {type: multiplicative_ramp, target: 0.50, lead_days: 0}}
+  # extrapolated: normal auction $15k-140k -> record Nov 2023 $2.85M
+  # (evidence file event 1 'market' field) — an even more extreme ratio
+  # (~20x the normal ceiling) than bab_el_mandeb's "tripled" freight rate.
+  # Rather than linearly extrapolate an unreliable ratio-to-zscore mapping
+  # from that figure, this reuses Hormuz's own P_CRIT market target (2.5) —
+  # an established, non-arbitrary anchor already used elsewhere in this
+  # benchmark for "a severe market shock" — consistent with this domain's
+  # STRONG classification (config/benchmark/panama.yaml).
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: {type: additive_ramp, target: 2.5, lead_days: -38}}
+  # extrapolated: WEAK classification (real but minority diversion — a
+  # targeted follow-up search found Stolt-Nielsen's 166-vessel fleet
+  # rerouted via Suez and Maersk's Balboa-Manzanillo rail land bridge, both
+  # documented — but "the queued/premium-paying population appears much
+  # larger than the population that actually diverted," per
+  # config/benchmark/panama.yaml). Set below Hormuz's own P_HIGH routing
+  # target (0.30) to reflect WEAK, not merely reduced-from-dominant.
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: {type: additive_ramp, target: 0.25, lead_days: 38}}
+  # extrapolated: no quantified sentiment/volume index exists (evidence file
+  # event 1 'news' field is explicitly marked extrapolated). MODERATE
+  # classification (config/benchmark/panama.yaml) -> comparable to
+  # bab_el_mandeb's own moderate-tier P_CRIT news target (0.55).
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.50, lead_days: 75}}
+  # extrapolated: Gatun Lake fell from a normal 85ft to a 79.6ft trough
+  # against an 88ft operating max — a modest PERCENTAGE lake-level drop
+  # (~6-10%) that caused a DOMINANT, severe OPERATIONAL impact (the 50%
+  # shipping-capacity cut above). This score reflects functional/operational
+  # severity, not a literal lake-level percentage. DOMINANT classification
+  # (config/benchmark/panama.yaml) -> set near saturation (0.85), comparable
+  # to bab_el_mandeb's own dominant-domain calibration (geopolitical/routing,
+  # both 0.85). lead_days=0: this is the root cause the other four domains
+  # react to, not something itself leading or lagging another signal.
+  disaster: {baseline: {mean: 0.02, std: 0.01}, effect: {type: additive_ramp, target: 0.85, lead_days: 0}}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02

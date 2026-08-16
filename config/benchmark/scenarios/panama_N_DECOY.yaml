@@ -1,0 +1,83 @@
+# N-DECOY: chronic media speculation about El Nino / Gatun Lake drought
+# forecasts that does not materialize into real transit-slot restrictions —
+# an isolated news spike with no corroborating move in shipping/market/
+# routing/disaster. Ground truth stays negative — this scenario exists to
+# catch detectors that over-trigger on a single noisy domain.
+#
+# DECOY DOMAIN CHOICE — news over routing (both were live candidates):
+# geopolitical is unavailable (absent from this region entirely). market is
+# Panama's own second-strongest signal and a REAL drought moves auction
+# prices, so a market decoy would be confounded with a true positive rather
+# than a clean false-positive trap — ruled out for that reason, matching the
+# region spec's own framing of market as a primary evidence-bearing domain,
+# not a background one. routing was the other candidate: the evidence file
+# DOES document real diversion (Stolt-Nielsen, Maersk), but every instance
+# on record occurred DURING and BECAUSE OF the real 2023-2024 drought — using
+# it as a decoy would mean inventing a standalone routing blip the evidence
+# doesn't describe, since the only documented routing activity is tightly
+# coupled to a genuine event, not standalone noise. news was chosen instead:
+# no source in data/region_research/panama_disruption_patterns.json
+# documents a NAMED false-alarm instance either (flagged honestly — this is
+# the weakest-evidenced individual decision in this scenario set), but
+# speculative climate/drought-forecast coverage that doesn't fully
+# materialize is a well-established real-world pattern for El Nino-linked
+# risk reporting, and matches hormuz_N_DECOY.yaml's own choice of news as
+# the domain most prone to anticipatory coverage.
+#
+# SIGMA-CONVENTION SIZING (docs/multiregion/BENCHMARK_SCHEMA_REFERENCE.md §6
+# gap 18): target sized so the event-window mean sits k_hormuz=5.4925 N_QUIET
+# baseline standard deviations above the N_QUIET baseline mean, the same
+# constant bab_el_mandeb_N_DECOY.yaml uses (adopted for cross-region
+# comparability and backward compatibility with Hormuz's own committed
+# results — NOT because it uniquely "trips a single-domain detector": Tier 0
+# reads no domain values at all and Tier 1 reads only shipping, so that
+# criterion is unachievable for any non-shipping decoy domain regardless of
+# magnitude; see BENCHMARK_SCHEMA_REFERENCE.md §6 gap 18 for the full
+# reasoning). Arithmetic: panama_N_QUIET's own news baseline (days 0-199)
+# mean=0.157257, std=0.088773; the exact pre-effect noise for the specific
+# event window (days 200-214, read directly off panama_N_QUIET.yaml's own
+# news values, since both files share seed 42 and identical baseline
+# configs) mean=0.163094; average ramp intensity over
+# onset_day=200/ramp_days=3/duration_days=15 is 0.8 (from
+# scenario_generator.py:_intensity_curve, deterministic). target = ((0.157257
+# + 5.4925*0.088773) - 0.163094) / 0.8 = 0.602, rounded to 0.60. Empirically
+# validated after rounding: achieved k=5.4728 (target 5.4925), event-window
+# peak=0.8949.
+#
+# PLAUSIBILITY CHECK (the check that stopped bab_el_mandeb_N_DECOY.yaml's
+# equivalent retrofit): panama_P_CRIT.yaml's own (real-crisis) news target is
+# 0.50; this decoy's target (0.60) is only ~20% above it, and the resulting
+# peak (0.89) stays safely inside the domain's natural [0, 1] range —
+# nothing like market's case, where the same k implied a raw value larger
+# than the real crisis's own peak by several times over. A brief, sharp
+# speculative spike modestly exceeding the news level of a slow, sustained
+# real crisis is a plausible media pattern, not an invented number with no
+# analogue — so, unlike market, this target is applied.
+#
+# NULL-GUARD NOTE: baseline blocks below were built by iterating
+# panama_P_CRIT.yaml's five domains and copying each domain's `baseline`
+# block (never assuming a sixth `geopolitical` entry exists, since it
+# doesn't for this region) — guarding with `if not sig: continue` before
+# touching `sig["baseline"]` on each domain.
+scenario_id: panama_N_DECOY
+region: panama
+class: N-DECOY
+seed: 42
+days: 365
+event:
+  onset_day: 200
+  ramp_days: 3
+  duration_days: 15
+  peak_band: none
+signals:
+  shipping: {baseline: {mean: 36, std: 3}, effect: null}
+  market: {baseline: {mean: 0.0, std: 1.0}, effect: null}
+  routing: {baseline: {mean: 0.08, std: 0.03}, effect: null}
+  # sigma-convention target (see header comment for full derivation):
+  # k=5.4925 of panama_N_QUIET's own news baseline std -> target 0.60.
+  news: {baseline: {mean: 0.15, std: 0.08}, effect: {type: additive_ramp, target: 0.60, lead_days: 0}}
+  disaster: {baseline: {mean: 0.02, std: 0.01}, effect: null}
+noise:
+  autocorrelation: 0.35
+  seasonality: {period: 365, amplitude: 0.08}
+  missing_data_rate: 0.02
