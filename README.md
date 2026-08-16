@@ -2,6 +2,15 @@
 
 A thesis-grade **Decision Support System (DSS)** for detecting, explaining, and contextualising supply chain disruptions in the **Strait of Hormuz** maritime corridor. The system combines multi-agent anomaly detection, SHAP-based explainability, and retrieval-augmented generation (RAG) for historical precedent retrieval — producing structured, interpretable alerts rather than raw predictions.
 
+> **Branch note (`phase-11-4region`):** this branch starts from commit `cc5e507`
+> ("Dashboard map: replace CesiumJS globe with keyless MapLibre GL JS"), predating
+> Phase 8 onward and the entire EVAL01 synthetic benchmark harness (region
+> registry, scenario generator, 5-region ablation study). That benchmark work is
+> preserved for reference — not deleted — as a static snapshot under
+> [`docs/eval01-archived/`](docs/eval01-archived/), and remains fully intact on
+> `main` (tagged `eval01-archived`) if this branch's Phase 11 work needs to
+> build on it later rather than alongside it.
+
 ---
 
 ## Research Context
