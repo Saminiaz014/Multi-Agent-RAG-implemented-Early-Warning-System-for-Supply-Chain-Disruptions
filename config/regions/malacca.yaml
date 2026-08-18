@@ -48,6 +48,8 @@ agents:
     # closest haze precedent is a 2010 navigational-hazard advisory at <2nm
     # visibility, not a measured reroute. Both alternate straits are real but
     # DRAFT-CONSTRAINED — a physical limit, not just an economic one.
+    # Also covered by the temporary GLOBAL routing muting — see the
+    # "ROUTING AGENT: GLOBALLY PASSIVE" block in src/core/regions.py.
     enabled: false
   news_sentiment:
     enabled: true

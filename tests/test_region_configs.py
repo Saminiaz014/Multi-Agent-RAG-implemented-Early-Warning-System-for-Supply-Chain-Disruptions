@@ -82,11 +82,17 @@ def test_yaml_coordinates_match_registry(region: str) -> None:
     assert data["region"]["longitude"] == pytest.approx(registry.longitude)
 
 
-def test_bab_el_mandeb_routing_active() -> None:
-    """Routing is enabled only in Bab el-Mandeb (85% documented diversion)."""
-    assert _load_region_yaml("bab_el_mandeb")["agents"]["routing"]["enabled"] is True
-    for region in ("hormuz", "panama", "malacca"):
-        assert _load_region_yaml(region)["agents"]["routing"]["enabled"] is False
+def test_routing_passive_in_every_region_yaml() -> None:
+    """Routing is globally muted across all four region YAMLs.
+
+    Mirrors test_regions.py::test_routing_passive_in_every_region — the YAMLs
+    and the registry must agree on this, and the muting is a deliberate
+    deferral rather than an evidence call (see src/core/regions.py).
+    """
+    for region in list_regions():
+        assert _load_region_yaml(region)["agents"]["routing"]["enabled"] is False, (
+            f"routing should be passive in {region}.yaml"
+        )
 
 
 def test_evidence_based_exclusions_in_yaml() -> None:

@@ -27,18 +27,25 @@ agents:
     # affirmative absence found in the region's evidence review.
     enabled: false
   routing:
-    # ACTIVE — the only region where routing carries documented evidence.
-    # 85% of large (7,500+ TEU) containerships diverted via the Cape of Good
-    # Hope by end-Dec 2023 (+3,500-4,000 nm / +10-14 days per voyage). This is
-    # genuine route DEVIATION — what the AIS-deviation model detects — not
-    # congestion, and it is the single most directly evidence-anchored figure
-    # in the benchmark (docs/eval01-archived/EVIDENCE_PROVENANCE.md).
+    # PASSIVE — by temporary GLOBAL muting, NOT because the evidence is weak.
+    # See the "ROUTING AGENT: GLOBALLY PASSIVE" block in src/core/regions.py
+    # for the full rationale and its caveat.
     #
-    # CAVEAT for Phase 11.3+: routing_connector.fetch_api() is still a
-    # NotImplementedError stub. Enabling routing here selects the synthetic or
-    # CSV path, not live diversion data — the evidence justifies the agent
-    # being active, it does not mean live data now flows.
-    enabled: true
+    # This region's routing evidence is the strongest in the benchmark: 85% of
+    # large (7,500+ TEU) containerships diverted via the Cape of Good Hope by
+    # end-Dec 2023 (+3,500-4,000 nm / +10-14 days per voyage) — genuine route
+    # DEVIATION, which is what the AIS-deviation model detects, and a literal
+    # documented percentage rather than an extrapolation
+    # (docs/eval01-archived/EVIDENCE_PROVENANCE.md). On evidence alone this
+    # would be the one region with routing ACTIVE.
+    #
+    # It is muted anyway, to defer per-region muting decisions to
+    # post-evaluation. Supporting note: routing_connector.fetch_api() is still
+    # a NotImplementedError stub, so enabling it would select the synthetic or
+    # CSV path, not live diversion data.
+    #
+    # If routing is revisited, re-enable THIS region first.
+    enabled: false
   news_sentiment:
     enabled: true
     # AUTHORED (not copied from settings.yaml, which only has Hormuz's block).
@@ -50,18 +57,32 @@ agents:
       countries: ["Yemen", "Djibouti", "Saudi Arabia", "Egypt"]
       topics: ["shipping", "tanker", "Houthi", "rerouting", "Cape of Good Hope", "military"]
 
-# Overlays config["extraction"]["chokepoints"]. NOTE: settings.yaml's existing
-# key for this corridor is "red_sea", not "bab_el_mandeb" — countries and
-# bounding_box below are that entry verbatim. The broad bbox (lat 12-30) spans
-# the whole Red Sea, which is correct for extractor sweeps but much wider than
-# the strait itself; aisstream.bbox below is the strait-scoped box.
+# INTENTIONAL SCOPE MISMATCH — the two geographic scopes below differ on
+# purpose, and a loader must not "reconcile" them into one box:
+#
+#   extraction.chokepoint_key: "red_sea"  -> lat 12-30 N, the WHOLE Red Sea
+#   aisstream.bbox                        -> lat 11.8-13.4 N, the STRAIT only
+#
+# Rationale: the two scopes feed different agents with different needs.
+#   - Extraction (ACLED events, news sweeps) feeds the geopolitical and
+#     news_sentiment agents, which need REGIONAL context — the Houthi campaign
+#     driving this chokepoint plays out across the whole Red Sea corridor and
+#     into Yemen, not within sight of the strait.
+#   - AIS feeds shipping/routing, which measure transits THROUGH the
+#     chokepoint itself; widening that box to the full Red Sea would count
+#     vessels that never approach Bab el-Mandeb.
+#
+# Also note the key-name mismatch: settings.yaml's existing chokepoint entry
+# for this corridor is "red_sea", not "bab_el_mandeb". countries and
+# bounding_box below are that entry verbatim.
 extraction:
   chokepoint_key: red_sea
   countries: ["Yemen", "Saudi Arabia", "Egypt", "Eritrea", "Djibouti", "Sudan", "Somalia"]
   bounding_box: { lat_min: 12.0, lat_max: 30.0, lon_min: 32.0, lon_max: 44.0 }
 
 # DERIVED, not sourced: a ~1.5-degree box centred on the strait's own
-# documented coordinate (12.58, 43.33) above. settings.yaml has no aisstream
+# documented coordinate (12.58, 43.33) above — deliberately narrower than the
+# extraction bbox, per the scope-mismatch note. settings.yaml has no aisstream
 # monitor region for this corridor, so there is nothing to copy verbatim.
 aisstream:
   bbox: [[11.8, 42.6], [13.4, 44.1]]

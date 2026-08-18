@@ -44,6 +44,8 @@ agents:
     # hold a slot. A queued vessel's path has not changed, so the
     # AIS-deviation model cannot see it; no source gives a total-fleet
     # diversion percentage.
+    # Also covered by the temporary GLOBAL routing muting — see the
+    # "ROUTING AGENT: GLOBALLY PASSIVE" block in src/core/regions.py.
     enabled: false
   news_sentiment:
     enabled: true

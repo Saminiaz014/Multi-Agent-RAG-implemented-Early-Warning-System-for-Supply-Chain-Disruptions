@@ -69,6 +69,35 @@ class RegionConfig:
         return [key for key in AGENT_KEYS if not self.agents.get(key, False)]
 
 
+# ---------------------------------------------------------------------------
+# ROUTING AGENT: GLOBALLY PASSIVE (as of Phase 11)
+# ---------------------------------------------------------------------------
+# Routing is disabled in ALL FOUR regions. Unlike every other passive flag in
+# this file, this is NOT an evidence-driven per-region call — it is a
+# deliberate, temporary, uniform muting.
+#
+# Rationale: defer per-region muting decisions until Phase 14 evaluation shows
+# which agents actually contribute where, rather than deciding now from
+# evidence tiers alone. Supporting this specific choice for routing:
+# routing_connector.fetch_api() is still a NotImplementedError stub, so the
+# agent emits synthetic or CSV signal in every region regardless of how well
+# the real-world driver is documented.
+#
+# IMPORTANT — this overrides the evidence in one direction that matters:
+# Bab el-Mandeb's routing signal is the single most directly evidence-anchored
+# figure in the whole benchmark (85% of large containerships diverted via the
+# Cape of Good Hope, +3,500-4,000 nm / +10-14 days per voyage — a literal
+# documented percentage, not an extrapolation). It is muted here IN SPITE of
+# that evidence, not because of any weakness in it. See the individual
+# passive_reasons entries, which preserve each region's underlying
+# evidence position separately from this blanket muting.
+#
+# CAVEAT for Phase 14: with routing off everywhere, evaluation cannot measure
+# routing's contribution in any region — so Phase 14 results alone will not
+# settle whether to re-enable it. Re-enabling needs the evidence tiers plus a
+# run with routing active, not symmetry and not silence.
+# ---------------------------------------------------------------------------
+
 REGIONS: dict[str, RegionConfig] = {
     "hormuz": RegionConfig(
         name="hormuz",
@@ -134,8 +163,9 @@ REGIONS: dict[str, RegionConfig] = {
             "geopolitical": True,
             # Evidence-excluded — see passive_reasons.
             "natural_disaster": False,
-            # The one region where routing is active — see module docstring.
-            "routing": True,
+            # Muted by the global routing decision above, NOT by weak evidence
+            # — this is the one region whose routing evidence is strongest.
+            "routing": False,
             "news_sentiment": True,
         },
         passive_reasons={
@@ -144,6 +174,15 @@ REGIONS: dict[str, RegionConfig] = {
                 "security/geopolitical campaign, not a natural disaster "
                 "(bab_el_mandeb.yaml: disaster_relevance: none — an "
                 "affirmative absence found in the evidence, not missing data)."
+            ),
+            "routing": (
+                "TEMPORARY GLOBAL MUTING, not an evidence judgement — see the "
+                "ROUTING AGENT block above. The evidence here is the strongest "
+                "in the benchmark (85% of large containerships diverted via "
+                "the Cape of Good Hope — a literal documented percentage) and "
+                "would justify activation; it is muted only to defer the "
+                "per-region decision to post-Phase-14 evaluation. Re-enable "
+                "this one first if routing is revisited."
             ),
         },
     ),

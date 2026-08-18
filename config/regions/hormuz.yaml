@@ -48,6 +48,8 @@ agents:
     # confirmed, bit-for-bit with #44"). Decide explicitly before wiring:
     # either keep routing enabled for Hormuz to preserve the gate, or accept
     # that the gate becomes "bit-for-bit except routing" and re-baseline.
+    # Also covered by the temporary GLOBAL routing muting — see the
+    # "ROUTING AGENT: GLOBALLY PASSIVE" block in src/core/regions.py.
     enabled: false
   news_sentiment:
     enabled: true

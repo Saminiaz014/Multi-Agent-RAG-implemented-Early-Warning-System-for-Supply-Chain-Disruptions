@@ -46,13 +46,22 @@ def test_invalid_region_raises() -> None:
         get_region("atlantis")
 
 
-def test_routing_active_only_in_bab_el_mandeb() -> None:
-    """Routing is active solely in Bab el-Mandeb (85% documented diversion)."""
-    assert is_agent_active("bab_el_mandeb", "routing") is True
-    for region in ("hormuz", "panama", "malacca"):
+def test_routing_passive_in_every_region() -> None:
+    """Routing is globally muted — passive in all four regions.
+
+    This is a deliberate temporary muting, not an evidence judgement; see the
+    "ROUTING AGENT: GLOBALLY PASSIVE" block in src/core/regions.py. Bab
+    el-Mandeb's routing evidence is the strongest in the benchmark and would
+    justify activation, so its muting carries an explicit reason recording
+    that — asserted here so re-enabling is a conscious change.
+    """
+    for region in list_regions():
         assert is_agent_active(region, "routing") is False, (
             f"routing should be passive in {region}"
         )
+
+    bab_reason = get_region("bab_el_mandeb").passive_reasons["routing"]
+    assert "not an evidence judgement" in bab_reason.lower()
 
 
 def test_market_passive_only_in_malacca() -> None:
