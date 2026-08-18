@@ -1,0 +1,69 @@
+# Region overlay: Bab el-Mandeb — the one region where routing is ACTIVE.
+#
+# Structure mirrors config/settings.yaml's key paths; see hormuz.yaml's header
+# for the overlay mapping. Agent keys are the pipeline's real config keys
+# (natural_disaster, news_sentiment).
+region:
+  name: bab_el_mandeb
+  display_name: "Bab el-Mandeb"
+  # Matches BOTH config/benchmark/bab_el_mandeb.yaml's centre point AND
+  # settings.yaml's existing "Bab el-Mandeb" monitoring point — one
+  # coordinate per chokepoint across the codebase.
+  latitude: 12.58
+  longitude: 43.33
+
+agents:
+  shipping:
+    enabled: true
+  market:
+    enabled: true
+  geopolitical:
+    enabled: true
+  natural_disaster:
+    # PASSIVE — evidence-excluded, not missing data.
+    # config/benchmark/bab_el_mandeb.yaml: disaster_relevance: none —
+    # "No natural-hazard driver applies to this event ... a
+    # security/geopolitical campaign, not a natural disaster." This is an
+    # affirmative absence found in the region's evidence review.
+    enabled: false
+  routing:
+    # ACTIVE — the only region where routing carries documented evidence.
+    # 85% of large (7,500+ TEU) containerships diverted via the Cape of Good
+    # Hope by end-Dec 2023 (+3,500-4,000 nm / +10-14 days per voyage). This is
+    # genuine route DEVIATION — what the AIS-deviation model detects — not
+    # congestion, and it is the single most directly evidence-anchored figure
+    # in the benchmark (docs/eval01-archived/EVIDENCE_PROVENANCE.md).
+    #
+    # CAVEAT for Phase 11.3+: routing_connector.fetch_api() is still a
+    # NotImplementedError stub. Enabling routing here selects the synthetic or
+    # CSV path, not live diversion data — the evidence justifies the agent
+    # being active, it does not mean live data now flows.
+    enabled: true
+  news_sentiment:
+    enabled: true
+    # AUTHORED (not copied from settings.yaml, which only has Hormuz's block).
+    # countries follow the region's own documented conflict geography;
+    # topics adapt Hormuz's list to the Houthi-campaign context.
+    location_context:
+      primary_location: "Bab el-Mandeb"
+      region: "Red Sea"
+      countries: ["Yemen", "Djibouti", "Saudi Arabia", "Egypt"]
+      topics: ["shipping", "tanker", "Houthi", "rerouting", "Cape of Good Hope", "military"]
+
+# Overlays config["extraction"]["chokepoints"]. NOTE: settings.yaml's existing
+# key for this corridor is "red_sea", not "bab_el_mandeb" — countries and
+# bounding_box below are that entry verbatim. The broad bbox (lat 12-30) spans
+# the whole Red Sea, which is correct for extractor sweeps but much wider than
+# the strait itself; aisstream.bbox below is the strait-scoped box.
+extraction:
+  chokepoint_key: red_sea
+  countries: ["Yemen", "Saudi Arabia", "Egypt", "Eritrea", "Djibouti", "Sudan", "Somalia"]
+  bounding_box: { lat_min: 12.0, lat_max: 30.0, lon_min: 32.0, lon_max: 44.0 }
+
+# DERIVED, not sourced: a ~1.5-degree box centred on the strait's own
+# documented coordinate (12.58, 43.33) above. settings.yaml has no aisstream
+# monitor region for this corridor, so there is nothing to copy verbatim.
+aisstream:
+  bbox: [[11.8, 42.6], [13.4, 44.1]]
+
+# No per-region market block — see hormuz.yaml's closing note.

@@ -1,0 +1,77 @@
+# Region overlay: Strait of Hormuz — the pipeline's default region.
+#
+# Structure mirrors config/settings.yaml's own key paths so a loader can
+# overlay this onto the settings dict without translation:
+#   agents.<key>            -> config["agents"][<key>]
+#   extraction.*            -> config["extraction"]["chokepoints"][<key>]
+#   aisstream.bbox          -> config["aisstream"]["monitor_regions"][n]["bbox"]
+# Agent keys are the pipeline's real config keys (natural_disaster,
+# news_sentiment) — NOT "disaster"/"news".
+#
+# Every value below is copied verbatim from settings.yaml's current Hormuz
+# configuration EXCEPT agents.routing.enabled — see the note there. This file
+# is inert until a loader consumes it (Phase 11.3+); creating it changes no
+# behaviour.
+region:
+  name: hormuz
+  display_name: "Strait of Hormuz"
+  # Matches config/benchmark/hormuz.yaml's centre point.
+  latitude: 26.5
+  longitude: 56.5
+
+agents:
+  shipping:
+    enabled: true
+  market:
+    enabled: true
+  geopolitical:
+    enabled: true
+  natural_disaster:
+    enabled: true
+    # Key into agents.natural_disaster.monitoring_points (settings.yaml).
+    location: "hormuz"
+  routing:
+    # PASSIVE — the one deviation from settings.yaml, which currently has
+    # routing.enabled: true for Hormuz.
+    #
+    # Rationale: Hormuz has no viable sea alternate into the Persian Gulf
+    # (config/benchmark/hormuz.yaml: reroutable: false), so
+    # avg_route_deviation_km has no real-world analogue —
+    # routing_connector.py's own module docstring calls it "a modeled proxy,
+    # not a measured quantity". routing_connector.fetch_api() is also still a
+    # NotImplementedError stub, so no live routing data exists for any region.
+    #
+    # !! REGRESSION-GATE WARNING for Phase 11.3 !!
+    # Applying this overlay to Hormuz will drop the routing agent from the
+    # default run and therefore CHANGE Hormuz's composite risk scores. That
+    # directly conflicts with Phase 11's stated gate ("Hormuz regression gate
+    # confirmed, bit-for-bit with #44"). Decide explicitly before wiring:
+    # either keep routing enabled for Hormuz to preserve the gate, or accept
+    # that the gate becomes "bit-for-bit except routing" and re-baseline.
+    enabled: false
+  news_sentiment:
+    enabled: true
+    # Verbatim from settings.yaml agents.news_sentiment.location_context.
+    location_context:
+      primary_location: "Strait of Hormuz"
+      region: "Persian Gulf"
+      countries: ["Iran", "Oman", "UAE", "Saudi Arabia"]
+      topics: ["shipping", "oil", "tanker", "sanctions", "military", "blockade"]
+
+# Overlays config["extraction"]["chokepoints"]["hormuz"] — verbatim.
+extraction:
+  chokepoint_key: hormuz
+  countries: ["Iran", "Oman", "United Arab Emirates", "Saudi Arabia", "Qatar", "Bahrain", "Kuwait", "Iraq"]
+  bounding_box: { lat_min: 25.0, lat_max: 27.5, lon_min: 55.0, lon_max: 58.0 }
+
+# Overlays config["aisstream"]["monitor_regions"] — verbatim from the existing
+# single entry. Format is [[lat_min, lon_min], [lat_max, lon_max]].
+aisstream:
+  bbox: [[25.0, 55.0], [27.5, 58.0]]
+
+# NOTE ON MARKET DATA: deliberately no per-region market block. The market
+# connector reads global benchmark series (Brent crude, freight PPI, freight
+# services) via ingestion.market.*_path, and its LOCATION constant is
+# "Global/Persian Gulf" — these are not region-scoped inputs. Inventing
+# per-region FRED series IDs here would fabricate data sources the pipeline
+# does not use.

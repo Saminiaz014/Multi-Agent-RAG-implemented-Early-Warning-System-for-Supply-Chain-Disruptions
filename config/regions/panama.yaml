@@ -1,0 +1,74 @@
+# Region overlay: Panama Canal.
+#
+# Structure mirrors config/settings.yaml's key paths; see hormuz.yaml's header
+# for the overlay mapping. Agent keys are the pipeline's real config keys
+# (natural_disaster, news_sentiment).
+region:
+  name: panama
+  display_name: "Panama Canal"
+  # Matches config/benchmark/panama.yaml's centre point (~9.08 N, 79.68 W).
+  # First region west of Greenwich — longitude is genuinely negative.
+  latitude: 9.08
+  longitude: -79.68
+
+agents:
+  shipping:
+    enabled: true
+  market:
+    enabled: true
+  geopolitical:
+    # PASSIVE — evidence-excluded, not missing data.
+    # config/benchmark/panama.yaml states outright: "No geopolitical driver
+    # applies -- this event is purely hydrological/climate-driven." The
+    # documented disruption is the Gatun Lake drought. geopolitical is absent
+    # from that spec's active_domains, deliberately: it is the one region
+    # where the domain that dominates elsewhere contributes nothing, which is
+    # what makes the multi-agent-value claim falsifiable rather than
+    # foreordained.
+    enabled: false
+  natural_disaster:
+    # ACTIVE and dominant: Gatun Lake elevation fell from a normal 85ft to a
+    # 79.6ft trough, directly forcing the transit-slot cap from 36/day down to
+    # 18-24/day. config/benchmark/panama.yaml: disaster_relevance: high.
+    enabled: true
+    # NOTE for Phase 11.3+: settings.yaml's
+    # agents.natural_disaster.monitoring_points has no "panama" entry (only
+    # hormuz, red_sea, malacca, suez). A loader applying this overlay must add
+    # one, or DisasterConnector.fetch_api() will have no point to query.
+    location: "panama"
+  routing:
+    # PASSIVE — WEAK evidence. Real but minority diversion is documented
+    # (Stolt-Nielsen's 166-vessel fleet via Suez, Maersk's Balboa-Manzanillo
+    # rail land bridge), but the dominant observed response was queueing (avg
+    # wait 11.4 days, max 22.8) and paying record auction premiums ($2.85M) to
+    # hold a slot. A queued vessel's path has not changed, so the
+    # AIS-deviation model cannot see it; no source gives a total-fleet
+    # diversion percentage.
+    enabled: false
+  news_sentiment:
+    enabled: true
+    # AUTHORED — see bab_el_mandeb.yaml's equivalent note.
+    location_context:
+      primary_location: "Panama Canal"
+      region: "Central America"
+      countries: ["Panama"]
+      topics: ["shipping", "drought", "Gatun Lake", "transit slots", "congestion", "auction"]
+
+# Overlays config["extraction"]["chokepoints"]. NEW KEY: settings.yaml has no
+# "panama" chokepoint entry (only hormuz, red_sea, malacca, suez), so both
+# fields below are authored rather than copied.
+# countries: Panama alone — the drought is domestic and hydrological; ACLED
+# conflict data is not the driver here (and geopolitical is passive anyway).
+# bounding_box: DERIVED — a box spanning the canal's Atlantic-to-Pacific
+# transit route around the centre point above.
+extraction:
+  chokepoint_key: panama
+  countries: ["Panama"]
+  bounding_box: { lat_min: 8.8, lat_max: 9.5, lon_min: -80.1, lon_max: -79.4 }
+
+# DERIVED, not sourced — same box as above in [[lat_min, lon_min],
+# [lat_max, lon_max]] form. settings.yaml has no aisstream monitor region here.
+aisstream:
+  bbox: [[8.8, -80.1], [9.5, -79.4]]
+
+# No per-region market block — see hormuz.yaml's closing note.

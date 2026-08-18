@@ -1,0 +1,77 @@
+# Region overlay: Strait of Malacca.
+#
+# Structure mirrors config/settings.yaml's key paths; see hormuz.yaml's header
+# for the overlay mapping. Agent keys are the pipeline's real config keys
+# (natural_disaster, news_sentiment).
+region:
+  name: malacca
+  display_name: "Strait of Malacca"
+  # Matches BOTH config/benchmark/malacca.yaml's centre point AND
+  # settings.yaml's existing "Malacca Strait Center" monitoring point.
+  latitude: 2.50
+  longitude: 101.80
+
+agents:
+  shipping:
+    enabled: true
+  market:
+    # PASSIVE — evidence-excluded, not missing data.
+    # All four documented Malacca events carry a null market field: no
+    # quantified OR qualitative market signal was located anywhere in the
+    # region's evidence file. market was originally included on
+    # domain-plausibility grounds and then removed, on the explicit finding
+    # that "plausibility-only inclusion was a standards violation, not a
+    # defensible weak-evidence call". This overlay preserves that removal.
+    enabled: false
+  geopolitical:
+    # ACTIVE but WEAK: piracy maps to geopolitical (fits that composite's
+    # stability sub-component), not to shipping — no source describes piracy
+    # measurably reducing strait transit counts. 86% of attacks are
+    # opportunistic hit-and-run (ReCAAP CAT 4): chronic low-grade background
+    # noise, 27-108 incidents/yr, not campaign-level tension.
+    enabled: true
+  natural_disaster:
+    # ACTIVE and dominant: transboundary haze. PSI 322-341 "Hazardous" in
+    # 2015, PSI 145 "Unhealthy" in 2019, 2.6M ha burned in 2015 alone.
+    # config/benchmark/malacca.yaml: disaster_relevance: high — but
+    # structurally different from Panama's: ACUTE-ONSET ATMOSPHERIC (3-5 and
+    # 15 day documented onset-to-peak gradients) versus Panama's SLOW-ONSET
+    # HYDROLOGICAL drought.
+    enabled: true
+    # Key into agents.natural_disaster.monitoring_points — "malacca" already
+    # exists in settings.yaml, unlike panama's.
+    location: "malacca"
+  routing:
+    # PASSIVE — WEAK evidence. A targeted search for documented Sunda/Lombok
+    # diversion attributable to piracy or haze found none: the evidence file's
+    # routing fields are explicitly null for the piracy events, and the
+    # closest haze precedent is a 2010 navigational-hazard advisory at <2nm
+    # visibility, not a measured reroute. Both alternate straits are real but
+    # DRAFT-CONSTRAINED — a physical limit, not just an economic one.
+    enabled: false
+  news_sentiment:
+    enabled: true
+    # AUTHORED — see bab_el_mandeb.yaml's equivalent note. Topics cover both
+    # documented signal families (haze and piracy), matching this region's
+    # MODERATE news rating, which explicitly spans both.
+    location_context:
+      primary_location: "Strait of Malacca"
+      region: "Southeast Asia"
+      countries: ["Malaysia", "Indonesia", "Singapore"]
+      topics: ["shipping", "haze", "visibility", "piracy", "armed robbery", "PSI"]
+
+# Overlays config["extraction"]["chokepoints"]["malacca"] — verbatim from
+# settings.yaml's existing entry.
+extraction:
+  chokepoint_key: malacca
+  countries: ["Malaysia", "Indonesia", "Singapore"]
+  bounding_box: { lat_min: 0.5, lat_max: 4.0, lon_min: 99.0, lon_max: 105.0 }
+
+# Same extent as the extraction bounding_box above, in [[lat_min, lon_min],
+# [lat_max, lon_max]] form. settings.yaml has no aisstream monitor region here.
+aisstream:
+  bbox: [[0.5, 99.0], [4.0, 105.0]]
+
+# No per-region market block — doubly so here: market is passive for this
+# region on evidence grounds (see agents.market above), and the connector's
+# series are global rather than region-scoped anyway.
