@@ -2,11 +2,17 @@
 
 Two modes:
 
-- ``python main.py [--mode csv|synthetic]`` runs the full hybrid pipeline
-  end-to-end (ingest → detect → aggregate → print summary).
+- ``python main.py [--mode csv|synthetic] [--region hormuz]`` runs the full
+  hybrid pipeline end-to-end (ingest → detect → aggregate → print summary).
 - ``python main.py --serve`` starts the FastAPI service defined in
   :mod:`src.api.endpoints` on the host/port configured in
   ``settings.yaml`` (``api.host`` / ``api.port``).
+
+Config is assembled *here*, at the call site: :func:`load_config` merges
+``config/settings.yaml`` with the active region's overlay from
+``config/regions/`` before the dict reaches :class:`~src.orchestrator.Orchestrator`,
+which stays region-unaware and simply reads the ``agents.<key>.enabled`` flags
+the merge produced.
 
 The pipeline path is defensive: missing CSV files trigger an automatic
 per-connector fallback to synthetic, agent failures are logged and the
@@ -18,23 +24,37 @@ import logging
 import sys
 from pathlib import Path
 
-import yaml
+from src.core.config_manager import (
+    available_regions,
+    load_config_for_region,
+)
 
 
-def load_config(path: str = "config/settings.yaml") -> dict:
-    """Load YAML configuration file.
+def load_config(
+    path: str = "config/settings.yaml", region: str | None = None
+) -> dict:
+    """Load the merged configuration for a region.
+
+    Thin wrapper over
+    :func:`src.core.config_manager.load_config_for_region` so every entry point
+    in this module gets the same region-merged dict.
 
     Args:
-        path: Relative path to the settings file.
+        path: Path to the base settings file, absolute or relative to the
+            project root.
+        region: Region key (``hormuz``, ``panama``, ``bab_el_mandeb``,
+            ``malacca``). ``None`` reads ``SUPPLY_CHAIN_REGION`` from the
+            environment, falling back to ``hormuz``.
 
     Returns:
-        Parsed configuration as a nested dictionary.
+        Base settings deep-merged with the region overlay, plus an
+        ``"_active_region"`` key naming the region it was built for.
+
+    Raises:
+        ValueError: If ``region`` is not a known region.
+        FileNotFoundError: If the base settings file is missing.
     """
-    config_path = Path(path)
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path.resolve()}")
-    with config_path.open("r") as f:
-        return yaml.safe_load(f)
+    return load_config_for_region(region=region, base_config_path=path)
 
 
 def setup_logging(config: dict) -> None:
@@ -79,6 +99,13 @@ def parse_args() -> argparse.Namespace:
         "(default: read from config/settings.yaml).",
     )
     parser.add_argument(
+        "--region",
+        choices=available_regions(),
+        default=None,
+        help="Chokepoint to run against; selects the overlay merged onto "
+        "settings.yaml (default: $SUPPLY_CHAIN_REGION, else hormuz).",
+    )
+    parser.add_argument(
         "--serve",
         action="store_true",
         help="Start the FastAPI HTTP service instead of running the pipeline.",
@@ -103,7 +130,7 @@ def parse_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 
 
-def run_pipeline(mode: str | None = None) -> dict:
+def run_pipeline(mode: str | None = None, region: str | None = None) -> dict:
     """Run the full six-agent pipeline and print a JSON risk assessment.
 
     Delegates ingestion → detection → aggregation to
@@ -117,6 +144,9 @@ def run_pipeline(mode: str | None = None) -> dict:
         mode: Optional override for both connectors' ``source_mode``.
             When provided, it takes precedence over the value in
             ``config/settings.yaml``.
+        region: Optional region key. The merged region overlay decides which
+            agents are enabled for the run; ``None`` uses the environment /
+            default region.
 
     Returns:
         The full pipeline output dictionary from ``run_full_pipeline`` —
@@ -129,7 +159,8 @@ def run_pipeline(mode: str | None = None) -> dict:
     from src.orchestrator import Orchestrator
 
     logger = logging.getLogger(__name__)
-    config = load_config()
+    config = load_config(region=region)
+    logger.info("[main] active region: %s", config.get("_active_region"))
 
     if mode is not None:
         ingestion = config.setdefault("ingestion", {})
@@ -170,6 +201,7 @@ def run_pipeline(mode: str | None = None) -> dict:
         shipping_windows=0,
         market_windows=0,
         note=(
+            f"region={config.get('_active_region', 'hormuz')} | "
             f"weight_mode={metadata.get('weight_mode', 'hand_tuned')} | "
             f"agents_active={len(metadata.get('agents_active', []))}/6"
         ),
@@ -177,7 +209,9 @@ def run_pipeline(mode: str | None = None) -> dict:
     return result
 
 
-def run_optimization(n_trials: int | None = None) -> dict:
+def run_optimization(
+    n_trials: int | None = None, region: str | None = None
+) -> dict:
     """Run Optuna weight optimization end-to-end.
 
     Generates the train/val/test splits, tunes all three weight layers on
@@ -188,6 +222,8 @@ def run_optimization(n_trials: int | None = None) -> dict:
 
     Args:
         n_trials: Optional override for ``optimization.n_trials``.
+        region: Optional region key — weights are tuned against that region's
+            merged config (and therefore its active agent set).
 
     Returns:
         The results dict from
@@ -200,7 +236,8 @@ def run_optimization(n_trials: int | None = None) -> dict:
 
     logger = logging.getLogger(__name__)
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    config = load_config()
+    config = load_config(region=region)
+    logger.info("[main.optimize] active region: %s", config.get("_active_region"))
 
     print("Generating train/validation/test splits (seeds 42/43/44)…")
     data_manager = DataSplitManager(config)
@@ -261,18 +298,19 @@ def main() -> None:
                 pass
 
     args = parse_args()
-    config = load_config()
+    config = load_config(region=args.region)
     setup_logging(config)
     logger = logging.getLogger(__name__)
-    logger.info("Pipeline initialized")
-    print("Pipeline initialized")
+    active_region = config.get("_active_region")
+    logger.info("Pipeline initialized | region=%s", active_region)
+    print(f"Pipeline initialized (region: {active_region})")
 
     if args.optimize:
-        run_optimization(n_trials=args.trials)
+        run_optimization(n_trials=args.trials, region=args.region)
     elif args.serve:
         start_api_server()
     else:
-        run_pipeline(mode=args.mode)
+        run_pipeline(mode=args.mode, region=args.region)
 
 
 # ---------------------------------------------------------------------------
