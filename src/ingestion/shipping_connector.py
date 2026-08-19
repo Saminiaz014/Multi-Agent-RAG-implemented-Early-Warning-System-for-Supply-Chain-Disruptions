@@ -181,6 +181,72 @@ class ShippingConnector(BaseConnector):
         self.api_endpoint: str | None = api_cfg.get("endpoint")
         self.api_key: str | None = api_cfg.get("key")
         self.api_bounding_box: dict | None = api_cfg.get("bounding_box")
+        self.ais_bounds: list | None = self._resolve_ais_bounds(cfg)
+
+    @staticmethod
+    def _resolve_ais_bounds(cfg: dict) -> list | None:
+        """Resolve the region's AIS bounding box, or ``None`` if unavailable.
+
+        Order of preference:
+
+        1. ``ais_bounds`` — ``[[lat_min, lon_min], [lat_max, lon_max]]``,
+           projected from the active region's ``aisstream.bbox`` by
+           :func:`src.core.config_manager.load_config_for_region`.
+        2. ``api.bounding_box`` — the pre-Phase-11 ``{lat_min, lat_max,
+           lon_min, lon_max}`` dict in settings.yaml, converted to the same
+           nested-list form.
+
+        Missing bounds are not an error: CSV and synthetic modes never need
+        them, and they are the modes the pipeline actually runs in.
+
+        Args:
+            cfg: The connector's config block (``ingestion.shipping``).
+
+        Returns:
+            Bounds as ``[[lat_min, lon_min], [lat_max, lon_max]]``, or ``None``.
+        """
+        bounds = cfg.get("ais_bounds")
+        if bounds is not None:
+            try:
+                (lat_min, lon_min), (lat_max, lon_max) = bounds
+                normalised = [
+                    [float(lat_min), float(lon_min)],
+                    [float(lat_max), float(lon_max)],
+                ]
+            except (TypeError, ValueError) as exc:
+                # Malformed bounds degrade to None rather than failing the run;
+                # CSV/synthetic modes are unaffected and API mode reports it.
+                logger.warning(
+                    "[ShippingConnector] ignoring malformed ais_bounds %r "
+                    "(expected [[lat_min, lon_min], [lat_max, lon_max]]): %s",
+                    bounds,
+                    exc,
+                )
+                return None
+            logger.info(
+                "[ShippingConnector] region-specific AIS bounds: %s", normalised
+            )
+            return normalised
+
+        box = cfg.get("api", {}) or {}
+        box = box.get("bounding_box") or {}
+        if all(k in box for k in ("lat_min", "lon_min", "lat_max", "lon_max")):
+            derived = [
+                [float(box["lat_min"]), float(box["lon_min"])],
+                [float(box["lat_max"]), float(box["lon_max"])],
+            ]
+            logger.debug(
+                "[ShippingConnector] no ais_bounds; derived from "
+                "api.bounding_box: %s",
+                derived,
+            )
+            return derived
+
+        logger.debug(
+            "[ShippingConnector] no ais_bounds configured — CSV / synthetic "
+            "modes do not need them."
+        )
+        return None
 
     # ------------------------------------------------------------------
     # Public API
@@ -392,18 +458,28 @@ class ShippingConnector(BaseConnector):
         Planned implementation:
             * Connect to the aisstream.io WebSocket using ``self.api_key``.
             * Subscribe to vessel position messages filtered by
-              ``self.api_bounding_box`` (Shuaiba port bounding box from config).
+              ``self.ais_bounds`` — the active region's box, in the
+              ``[[lat_min, lon_min], [lat_max, lon_max]]`` form aisstream's
+              ``BoundingBoxes`` subscription field already expects.
             * Aggregate raw AIS positions into daily vessel counts by type
               (Container / Dry Bulk / General Cargo / Roll-on/roll-off /
               Tanker) to match the CSV schema emitted by
               :meth:`load_from_csv`.
 
         Raises:
-            NotImplementedError: Always — API mode is not yet wired up.
+            NotImplementedError: Always — API mode is not yet wired up. The
+                message reports the resolved bounds so a region-config problem
+                is visible here rather than only once the API lands.
         """
+        bounds_note = (
+            f"Region bounds resolved: {self.ais_bounds}."
+            if self.ais_bounds
+            else "No AIS bounds configured for this region "
+            "(ingestion.shipping.ais_bounds is unset)."
+        )
         raise NotImplementedError(
             "API mode not yet implemented. Planned: aisstream.io WebSocket "
-            "for live AIS data. "
+            f"for live AIS data. {bounds_note} "
             "Set source_mode='csv' or 'synthetic' in config/settings.yaml."
         )
 

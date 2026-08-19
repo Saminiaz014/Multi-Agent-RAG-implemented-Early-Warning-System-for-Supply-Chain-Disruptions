@@ -86,8 +86,9 @@ class NewsConnector(BaseConnector):
 
     Args:
         config: Reads ``data_mode``, ``csv_path``, ``lead_days``,
-            ``location_context`` (for API keyword generation), and an
-            ``api`` sub-block.
+            ``location_context`` (for API keyword generation),
+            ``newsapi_keywords`` (explicit override for those keywords), and
+            an ``api`` sub-block.
     """
 
     LOCATION: str = _LOCATION
@@ -114,6 +115,57 @@ class NewsConnector(BaseConnector):
                 "topics": ["shipping", "oil", "tanker", "sanctions", "military", "blockade"],
             }
         )
+        self.newsapi_keywords: list[str] = self._resolve_keywords()
+
+    def _resolve_keywords(self) -> list[str]:
+        """Resolve the NewsAPI search keywords for this region.
+
+        An explicit ``newsapi_keywords`` list in config wins. Otherwise the
+        keywords are derived from ``location_context`` — which the region
+        overlays already set per region — following step 1 of
+        :meth:`fetch_api`'s planned pipeline: the primary location, then the
+        region, then its topics. Countries are deliberately left out: they are
+        the ACLED filter, and as free-text news queries they pull in unrelated
+        national coverage.
+
+        Returns:
+            Ordered, de-duplicated keyword list. Empty only if
+            ``location_context`` carries neither a location nor any topics.
+        """
+        explicit = self.config.get("newsapi_keywords")
+        if explicit:
+            keywords = [str(k) for k in explicit]
+            logger.info(
+                "[NewsConnector] explicit newsapi_keywords: %s", keywords
+            )
+            return keywords
+
+        ctx = self.location_context
+        candidates = [
+            ctx.get("primary_location"),
+            ctx.get("region"),
+            *(ctx.get("topics") or []),
+        ]
+        seen: dict[str, None] = {}
+        for candidate in candidates:
+            text = str(candidate).strip() if candidate else ""
+            if text:
+                seen.setdefault(text, None)
+        keywords = list(seen)
+
+        if keywords:
+            logger.info(
+                "[NewsConnector] keywords derived from location_context "
+                "('%s'): %s",
+                ctx.get("primary_location", "?"),
+                keywords,
+            )
+        else:
+            logger.warning(
+                "[NewsConnector] no newsapi_keywords and an empty "
+                "location_context — a live NewsAPI query would be unfiltered."
+            )
+        return keywords
 
     # ------------------------------------------------------------------ fetch
     def fetch(self) -> pd.DataFrame:
@@ -218,8 +270,9 @@ class NewsConnector(BaseConnector):
         """Planned NewsAPI / GDELT → VADER + embeddings + cluster pipeline.
 
         Planned implementation:
-            1. Derive keywords from ``self.location_context`` (primary
-               location, region, country list, topic list).
+            1. Keywords — already resolved into ``self.newsapi_keywords`` at
+               construction, either from an explicit config list or derived
+               from ``self.location_context``.
             2. Query NewsAPI ``/v2/everything`` and GDELT ``/api/v2/doc``
                for the past 24h; fallback to Reuters / AP / Bloomberg RSS.
             3. VADER sentiment per article (``nltk.sentiment.vader``).
@@ -230,12 +283,20 @@ class NewsConnector(BaseConnector):
             7. Aggregate per-day → DataFrame with this connector's schema.
 
         Raises:
-            NotImplementedError: Wiring stubbed for thesis scope.
+            NotImplementedError: Wiring stubbed for thesis scope. The message
+                reports the resolved keywords so a region-config gap surfaces
+                here rather than as a silently unfiltered query later.
         """
+        keywords_note = (
+            f"Region keywords: {self.newsapi_keywords}."
+            if self.newsapi_keywords
+            else "No keywords resolved for this region — a live query would "
+            "be unfiltered."
+        )
         raise NotImplementedError(
             "API mode not yet implemented. Planned: NewsAPI + GDELT + "
-            "VADER + sentence-transformers (see docstring). Set "
-            "data_mode='synthetic' or 'csv' in config."
+            f"VADER + sentence-transformers (see docstring). {keywords_note} "
+            "Set data_mode='synthetic' or 'csv' in config."
         )
 
     def validate(self, df: pd.DataFrame) -> bool:

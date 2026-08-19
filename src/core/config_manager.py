@@ -15,31 +15,38 @@ file), not the process CWD, so ``load_config_for_region()`` behaves the same
 from ``main.py``, from pytest, and from the Streamlit dashboard. Absolute paths
 are used as given.
 
-What the overlay actually reaches
----------------------------------
-The merge is a plain recursive dict merge. That lands each overlay block at the
-same key path it occupies in the region YAML:
+Two-step assembly
+-----------------
+``load_config_for_region`` does a plain recursive merge and then a *projection*
+pass, because the overlay YAMLs are flat where settings.yaml is keyed:
 
-- ``agents.<key>.enabled`` — **effective today.** Overlays
-  ``config["agents"][<key>]["enabled"]``, which is exactly the flag
-  :meth:`Orchestrator.__init__` already reads to decide whether to build a
-  domain connector. This is the one block that changes pipeline behaviour, and
-  it is the point of Phase 11.3.
-- ``region`` — added as a new top-level block (name / display_name / latitude /
-  longitude). Nothing reads it yet; it is there for logging and for Phase 11.4.
-- ``extraction.{chokepoint_key,countries,bounding_box}`` — lands as *siblings*
-  of ``extraction.chokepoints``, **not** merged into
-  ``extraction["chokepoints"][<key>]``. settings.yaml keys those by chokepoint
-  name, and the overlay is flat, so no plain dict merge can reach that path.
-- ``aisstream.bbox`` — likewise a sibling of ``aisstream.monitor_regions``, not
-  an update to ``monitor_regions[0]["bbox"]``.
+1. **Merge** (:func:`_deep_merge`) — lands each overlay block at the key path it
+   occupies in the region YAML. ``agents.<key>.enabled`` overlays
+   ``config["agents"][<key>]["enabled"]``, exactly the flag
+   :meth:`Orchestrator.__init__` reads to decide whether to build a domain
+   connector. The ``region`` block arrives as a new top-level key.
 
-The last two are therefore inert: they are carried in the merged config but no
-connector reads those key paths. Translating them into the shapes the
-extractors and the aisstream client expect is Phase 11.4's job ("Connectors
-Read Region-Specific Settings"); doing it here would mean rewriting connector
-inputs before any connector is ready to read them. The values are correct and
-present — they simply do not take effect yet.
+2. **Projection** (:func:`_project_region_settings`, Phase 11.4) — copies the
+   overlay's flat ``extraction`` / ``aisstream`` values to the key paths the
+   extractors and connectors actually read. A plain merge cannot reach these,
+   so without this step they would sit in the config inert:
+
+   ==================================  ==========================================
+   Overlay key                         Projected to
+   ==================================  ==========================================
+   ``extraction.countries``            ``extraction.chokepoints.<key>.countries``
+   ``extraction.bounding_box``         ``extraction.chokepoints.<key>.bounding_box``
+   ``extraction.countries``            ``agents.geopolitical.acled_countries``
+   ``aisstream.bbox``                  ``aisstream.monitor_regions[0]``
+   ``aisstream.bbox``                  ``ingestion.shipping.ais_bounds``
+   ==================================  ==========================================
+
+   The flat overlay keys are left in place as well — the projection copies
+   rather than moves, so the merged config stays a superset of the overlay.
+
+News keywords are not projected: :class:`~src.ingestion.NewsConnector` derives
+them from ``agents.news_sentiment.location_context``, which the merge already
+makes region-specific.
 """
 
 from __future__ import annotations
@@ -231,11 +238,77 @@ def resolve_active_region() -> str:
     return DEFAULT_REGION
 
 
+def _project_region_settings(
+    merged: dict, overlay: dict, region_key: str
+) -> None:
+    """Copy the overlay's flat region settings to the paths consumers read.
+
+    Mutates ``merged`` in place. See this module's docstring for the full
+    source → destination table. Each projection is independently guarded: an
+    overlay missing ``extraction.countries`` simply leaves the ACLED country
+    list alone rather than writing an empty one over whatever settings.yaml
+    already had.
+
+    Args:
+        merged: The deep-merged config, modified in place.
+        overlay: The raw region overlay, read for its flat keys.
+        region_key: Canonical region key, used to name the aisstream monitor
+            region and as the chokepoint key fallback.
+    """
+    extraction_overlay = overlay.get("extraction") or {}
+    countries = extraction_overlay.get("countries")
+    bounding_box = extraction_overlay.get("bounding_box")
+    # Regions may share a chokepoint entry with a different name — bab_el_mandeb
+    # maps onto settings.yaml's existing "red_sea" entry.
+    chokepoint_key = extraction_overlay.get("chokepoint_key") or region_key
+    bbox = (overlay.get("aisstream") or {}).get("bbox")
+
+    if countries or bounding_box:
+        chokepoints = merged.setdefault("extraction", {}).setdefault(
+            "chokepoints", {}
+        )
+        entry = dict(chokepoints.get(chokepoint_key) or {})
+        if countries:
+            entry["countries"] = countries
+        if bounding_box:
+            entry["bounding_box"] = bounding_box
+        chokepoints[chokepoint_key] = entry
+        logger.debug(
+            "[config_manager] projected extraction.chokepoints['%s'] for region '%s'",
+            chokepoint_key,
+            region_key,
+        )
+
+    if countries:
+        # GeopoliticalConnector receives only its agents.geopolitical block, so
+        # the ACLED country list has to live there to reach it.
+        merged.setdefault("agents", {}).setdefault("geopolitical", {})[
+            "acled_countries"
+        ] = countries
+
+    if bbox:
+        # Replaced wholesale, not appended: a run monitors one region, and
+        # settings.yaml's single Hormuz entry would otherwise leak into every
+        # other region's live monitoring.
+        merged.setdefault("aisstream", {})["monitor_regions"] = [
+            {"name": region_key, "bbox": bbox}
+        ]
+        # Likewise, ShippingConnector only receives ingestion.shipping.
+        merged.setdefault("ingestion", {}).setdefault("shipping", {})[
+            "ais_bounds"
+        ] = bbox
+
+
 def load_config_for_region(
     region: str | None = None,
     base_config_path: str | Path = "config/settings.yaml",
 ) -> dict:
-    """Load settings.yaml and overlay one region's config onto it.
+    """Load settings.yaml, overlay one region's config, and project it.
+
+    Deep-merges the region overlay onto the base config, then runs
+    :func:`_project_region_settings` so the overlay's flat ``extraction`` /
+    ``aisstream`` values reach the key paths the extractors and connectors
+    actually read (see the module docstring's table).
 
     This is the module's entry point and the intended call-site replacement for
     a bare ``yaml.safe_load("config/settings.yaml")``::
@@ -268,6 +341,7 @@ def load_config_for_region(
     base = load_base_config(base_config_path)
     overlay = load_region_overlay(region_key)
     merged = _deep_merge(base, overlay)
+    _project_region_settings(merged, overlay, region_key)
     merged["_active_region"] = region_key
 
     logger.info(

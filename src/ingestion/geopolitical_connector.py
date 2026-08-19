@@ -126,7 +126,8 @@ class GeopoliticalConnector(BaseConnector):
 
     Args:
         config: Connector-specific configuration block. Reads
-            ``data_mode``, ``csv_path``, ``lead_days``, ``api`` (sub-block).
+            ``data_mode``, ``csv_path``, ``lead_days``, ``acled_countries``,
+            ``api`` (sub-block).
     """
 
     LOCATION: str = _LOCATION
@@ -144,6 +145,25 @@ class GeopoliticalConnector(BaseConnector):
         self.data_mode: str = str(self.config.get("data_mode", "synthetic")).lower()
         self.csv_path: str = str(self.config.get("csv_path", _DEFAULT_CSV_PATH))
         self.lead_days: int = int(self.config.get("lead_days", _DEFAULT_LEAD_DAYS))
+
+        # Countries to pull ACLED events for, projected from the active
+        # region's extraction.countries by config_manager. Only the ``api``
+        # data_mode consumes this; synthetic and CSV are unaffected by its
+        # absence, which is why an empty list is a debug note and not a
+        # warning at construction time.
+        self.acled_countries: list[str] = [
+            str(c) for c in (self.config.get("acled_countries") or [])
+        ]
+        if self.acled_countries:
+            logger.info(
+                "[GeopoliticalConnector] region ACLED countries: %s",
+                self.acled_countries,
+            )
+        else:
+            logger.debug(
+                "[GeopoliticalConnector] no acled_countries configured; "
+                "only data_mode='api' needs them."
+            )
 
     # ------------------------------------------------------------------ fetch
     def fetch(self) -> pd.DataFrame:
@@ -249,9 +269,10 @@ class GeopoliticalConnector(BaseConnector):
         """Planned ACLED + OpenSanctions integration.
 
         Planned implementation:
-            * ACLED (``api.acleddata.com``) — filter Middle-East/Gulf armed
-              conflict events; daily-aggregate severity by event_type
-              weights → ``military_activity_index``.
+            * ACLED (``api.acleddata.com``) — filter armed-conflict events to
+              ``self.acled_countries`` (the active region's country list, so
+              Panama does not pull Gulf events); daily-aggregate severity by
+              event_type weights → ``military_activity_index``.
             * OpenSanctions API — extract new sanctions designations
               targeting maritime / oil entities → ``sanctions_severity``.
             * Diplomatic incidents derived from event_type tagging plus
@@ -259,11 +280,20 @@ class GeopoliticalConnector(BaseConnector):
               event volume.
 
         Raises:
-            NotImplementedError: Always — wiring stubbed for thesis scope.
+            NotImplementedError: Always — wiring stubbed for thesis scope. The
+                message reports the resolved country list so a region-config
+                gap surfaces here rather than as a silent empty query later.
         """
+        countries_note = (
+            f"Region ACLED countries: {self.acled_countries}."
+            if self.acled_countries
+            else "No acled_countries configured for this region — a live "
+            "query would have no country filter."
+        )
         raise NotImplementedError(
             "API mode not yet implemented. Planned: ACLED + OpenSanctions "
-            "(see docstring). Set data_mode='synthetic' or 'csv' in config."
+            f"(see docstring). {countries_note} "
+            "Set data_mode='synthetic' or 'csv' in config."
         )
 
     # ----------------------------------------------------------- validate
