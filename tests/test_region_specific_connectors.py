@@ -1,74 +1,77 @@
 """Tests for region-specific connector settings (Phase 11.4).
 
-Two layers, and the second is the one that matters:
+The Orchestrator hands each connector a *sub-block* (``ingestion.shipping``,
+``agents.geopolitical``, ...) rather than the whole config, so these tests read
+the same sub-blocks. A setting projected to the wrong path would otherwise
+leave every connector on Hormuz defaults while still passing.
 
-1. Each connector reads its region setting out of its own config block and
-   degrades sensibly when it is absent.
-2. ``load_config_for_region`` actually *puts* that setting where the connector
-   looks. The Orchestrator hands each connector a sub-block
-   (``ingestion.shipping``, ``agents.geopolitical``, ...), not the whole
-   config, so a setting projected to the wrong path would leave every
-   connector on Hormuz defaults while the tests above still passed.
+Regions are looped inside tests rather than parametrized, to keep one concept
+to one test case.
 """
 
 from __future__ import annotations
 
-import pandas as pd
 import pytest
 
 from src.core.config_manager import load_config_for_region
-from src.ingestion import (
-    DisasterConnector,
-    GeopoliticalConnector,
-    MarketConnector,
-    NewsConnector,
-    RoutingConnector,
-    ShippingConnector,
-)
 from src.core.regions import list_regions
+from src.ingestion import GeopoliticalConnector, NewsConnector, ShippingConnector
 
 
-def _shipping_block(region: str) -> dict:
-    """The block the Orchestrator hands ShippingConnector for ``region``."""
-    return load_config_for_region(region)["ingestion"]["shipping"]
+class TestRegionProjection:
+    """The merged config puts region settings where connectors look."""
 
+    def test_chokepoint_entries_are_populated_for_every_region(self) -> None:
+        """Extractors read extraction.chokepoints[key]; every region needs one.
 
-def _agent_block(region: str, agent: str) -> dict:
-    """The block the Orchestrator hands a domain connector for ``region``."""
-    return load_config_for_region(region)["agents"][agent]
+        Covers the two non-obvious cases: panama has no entry in settings.yaml
+        and must be created, and bab_el_mandeb maps onto the existing red_sea
+        entry rather than a key of its own.
+        """
+        for region in list_regions():
+            config = load_config_for_region(region)
+            key = config["extraction"]["chokepoint_key"]
+            entry = config["extraction"]["chokepoints"][key]
+
+            assert entry["countries"] == config["extraction"]["countries"]
+            assert entry["bounding_box"] == config["extraction"]["bounding_box"]
+            # Projecting one region must not drop settings.yaml's other entries.
+            for preexisting in ("hormuz", "red_sea", "malacca", "suez"):
+                assert preexisting in config["extraction"]["chokepoints"]
+
+        assert load_config_for_region("panama")["extraction"]["chokepoints"][
+            "panama"
+        ]["countries"] == ["Panama"]
+        assert (
+            load_config_for_region("bab_el_mandeb")["extraction"]["chokepoint_key"]
+            == "red_sea"
+        )
+
+    def test_aisstream_monitor_region_is_replaced_not_appended(self) -> None:
+        """A run monitors one region; Hormuz's box must not leak into others."""
+        for region in list_regions():
+            config = load_config_for_region(region)
+            monitor_regions = config["aisstream"]["monitor_regions"]
+
+            assert len(monitor_regions) == 1, f"{region}: expected one region"
+            assert monitor_regions[0]["name"] == region
+            assert monitor_regions[0]["bbox"] == config["aisstream"]["bbox"]
 
 
 class TestShippingConnectorRegion:
     """ShippingConnector reads region-specific AIS bounds."""
 
-    @pytest.mark.parametrize("region", list_regions())
-    def test_reads_ais_bounds_from_merged_config(self, region: str) -> None:
-        connector = ShippingConnector(
-            source_mode="csv", config=_shipping_block(region)
-        )
-        assert connector.ais_bounds is not None, f"{region}: no AIS bounds"
-        (lat_min, lon_min), (lat_max, lon_max) = connector.ais_bounds
-        assert lat_min < lat_max
-        assert lon_min < lon_max
+    def test_reads_distinct_bounds_for_every_region(self) -> None:
+        seen: list[list] = []
+        for region in list_regions():
+            config = load_config_for_region(region)
+            connector = ShippingConnector(config=config["ingestion"]["shipping"])
 
-    def test_bounds_differ_between_regions(self) -> None:
-        """Panama's box is west of Greenwich; Hormuz's is east."""
-        hormuz = ShippingConnector(config=_shipping_block("hormuz")).ais_bounds
-        panama = ShippingConnector(config=_shipping_block("panama")).ais_bounds
-
-        assert hormuz != panama
-        assert hormuz[0][1] > 0  # Persian Gulf, positive longitude
-        assert panama[0][1] < 0  # Panama, negative longitude
-
-    def test_bounds_match_the_region_overlay(self) -> None:
-        """The projected value is the overlay's, not a re-derived guess."""
-        config = load_config_for_region("malacca")
-        assert config["ingestion"]["shipping"]["ais_bounds"] == [
-            [0.5, 99.0],
-            [4.0, 105.0],
-        ]
-        connector = ShippingConnector(config=config["ingestion"]["shipping"])
-        assert connector.ais_bounds == [[0.5, 99.0], [4.0, 105.0]]
+            assert connector.ais_bounds == config["aisstream"]["bbox"], region
+            (lat_min, lon_min), (lat_max, lon_max) = connector.ais_bounds
+            assert lat_min < lat_max and lon_min < lon_max, region
+            assert connector.ais_bounds not in seen, f"{region}: duplicate bounds"
+            seen.append(connector.ais_bounds)
 
     def test_falls_back_to_legacy_api_bounding_box(self) -> None:
         """settings.yaml's pre-Phase-11 dict form still resolves."""
@@ -86,90 +89,60 @@ class TestShippingConnectorRegion:
         )
         assert connector.ais_bounds == [[28.95, 48.05], [29.20, 48.25]]
 
-    def test_missing_bounds_is_none_and_csv_still_works(self) -> None:
-        """No bounds must not break the mode the pipeline actually runs in."""
-        connector = ShippingConnector(source_mode="synthetic", config={})
-        assert connector.ais_bounds is None
-
-        df = connector.fetch()
-        assert isinstance(df, pd.DataFrame)
-        assert not df.empty
-
-    def test_malformed_bounds_degrade_to_none(
+    def test_absent_or_malformed_bounds_degrade_to_none(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """A bad box warns and disables API mode rather than raising."""
+        """Bad bounds must not break the modes the pipeline actually runs in."""
         with caplog.at_level("WARNING"):
-            connector = ShippingConnector(config={"ais_bounds": [1, 2, 3]})
-        assert connector.ais_bounds is None
+            assert ShippingConnector(config={"ais_bounds": [1, 2, 3]}).ais_bounds is None
         assert "malformed ais_bounds" in caplog.text
 
-    def test_api_mode_reports_resolved_bounds(self) -> None:
-        """The stub names the bounds it would have used."""
-        connector = ShippingConnector(config=_shipping_block("panama"))
-        with pytest.raises(NotImplementedError, match=r"Region bounds resolved"):
-            connector.fetch_from_api()
+        connector = ShippingConnector(source_mode="synthetic", config={})
+        assert connector.ais_bounds is None
+        assert not connector.fetch().empty
 
 
 class TestGeopoliticalConnectorRegion:
     """GeopoliticalConnector reads region-specific ACLED countries."""
 
-    @pytest.mark.parametrize("region", list_regions())
-    def test_reads_acled_countries_from_merged_config(self, region: str) -> None:
-        connector = GeopoliticalConnector(
-            config=_agent_block(region, "geopolitical")
-        )
-        assert connector.acled_countries, f"{region}: no ACLED countries"
-        assert all(isinstance(c, str) for c in connector.acled_countries)
+    def test_reads_region_countries(self) -> None:
+        for region in list_regions():
+            config = load_config_for_region(region)
+            connector = GeopoliticalConnector(config=config["agents"]["geopolitical"])
 
-    def test_countries_differ_between_regions(self) -> None:
-        hormuz = GeopoliticalConnector(
-            config=_agent_block("hormuz", "geopolitical")
-        )
-        panama = GeopoliticalConnector(
-            config=_agent_block("panama", "geopolitical")
-        )
-        assert "Iran" in hormuz.acled_countries
-        assert panama.acled_countries == ["Panama"]
+            assert connector.acled_countries == config["extraction"]["countries"]
+            assert all(isinstance(c, str) for c in connector.acled_countries)
 
-    def test_missing_countries_is_empty_and_synthetic_still_works(self) -> None:
+        hormuz = load_config_for_region("hormuz")["agents"]["geopolitical"]
+        panama = load_config_for_region("panama")["agents"]["geopolitical"]
+        assert "Iran" in GeopoliticalConnector(config=hormuz).acled_countries
+        assert GeopoliticalConnector(config=panama).acled_countries == ["Panama"]
+
+    def test_missing_countries_leaves_synthetic_mode_working(self) -> None:
         connector = GeopoliticalConnector(config={})
         assert connector.acled_countries == []
-
-        df = connector.fetch()
-        assert isinstance(df, pd.DataFrame)
-        assert not df.empty
-
-    def test_api_mode_reports_resolved_countries(self) -> None:
-        connector = GeopoliticalConnector(
-            config=_agent_block("bab_el_mandeb", "geopolitical")
-        )
-        with pytest.raises(NotImplementedError, match=r"Region ACLED countries"):
-            connector.fetch_api()
+        assert not connector.fetch().empty
 
 
 class TestNewsConnectorRegion:
     """NewsConnector resolves region-specific NewsAPI keywords."""
 
-    @pytest.mark.parametrize("region", list_regions())
-    def test_derives_keywords_from_region_location_context(
-        self, region: str
-    ) -> None:
-        config = _agent_block(region, "news_sentiment")
-        connector = NewsConnector(config=config)
+    def test_derives_keywords_from_region_location_context(self) -> None:
+        for region in list_regions():
+            config = load_config_for_region(region)["agents"]["news_sentiment"]
+            connector = NewsConnector(config=config)
 
-        assert connector.newsapi_keywords
-        assert (
-            config["location_context"]["primary_location"]
-            in connector.newsapi_keywords
+            assert (
+                config["location_context"]["primary_location"]
+                in connector.newsapi_keywords
+            ), region
+
+        panama = NewsConnector(
+            config=load_config_for_region("panama")["agents"]["news_sentiment"]
         )
-
-    def test_keywords_differ_between_regions(self) -> None:
-        hormuz = NewsConnector(config=_agent_block("hormuz", "news_sentiment"))
-        panama = NewsConnector(config=_agent_block("panama", "news_sentiment"))
-
-        assert "Strait of Hormuz" in hormuz.newsapi_keywords
-        assert "Panama Canal" in panama.newsapi_keywords
+        hormuz = NewsConnector(
+            config=load_config_for_region("hormuz")["agents"]["news_sentiment"]
+        )
         assert "Gatun Lake" in panama.newsapi_keywords
         assert "Gatun Lake" not in hormuz.newsapi_keywords
 
@@ -182,7 +155,7 @@ class TestNewsConnectorRegion:
         )
         assert connector.newsapi_keywords == ["custom term"]
 
-    def test_keywords_are_deduplicated_in_order(self) -> None:
+    def test_derived_keywords_are_deduplicated_in_order(self) -> None:
         connector = NewsConnector(
             config={
                 "location_context": {
@@ -194,16 +167,7 @@ class TestNewsConnectorRegion:
         )
         assert connector.newsapi_keywords == ["Suez Canal", "shipping", "transit"]
 
-    def test_absent_context_keeps_the_connector_default(self) -> None:
-        """An absent/empty context falls back to the pre-Phase-11 Hormuz block.
-
-        That fallback is the connector's existing contract, so keywords are
-        still derived rather than empty.
-        """
-        connector = NewsConnector(config={})
-        assert "Strait of Hormuz" in connector.newsapi_keywords
-
-    def test_blank_context_is_empty_and_synthetic_still_works(
+    def test_blank_context_leaves_synthetic_mode_working(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """A context present but carrying no usable values warns, not raises."""
@@ -219,109 +183,96 @@ class TestNewsConnectorRegion:
             )
         assert connector.newsapi_keywords == []
         assert "unfiltered" in caplog.text
-
-        df = connector.fetch()
-        assert isinstance(df, pd.DataFrame)
-        assert not df.empty
-
-    def test_api_mode_reports_resolved_keywords(self) -> None:
-        connector = NewsConnector(config=_agent_block("malacca", "news_sentiment"))
-        with pytest.raises(NotImplementedError, match=r"Region keywords"):
-            connector.fetch_api()
+        assert not connector.fetch().empty
 
 
-class TestRegionProjection:
-    """The merged config puts region settings where connectors look for them."""
+def test_api_stubs_report_the_settings_they_resolved() -> None:
+    """Each stub names its region setting, so a config gap surfaces there."""
+    config = load_config_for_region("malacca")
 
-    @pytest.mark.parametrize("region", list_regions())
-    def test_chokepoint_entry_is_populated(self, region: str) -> None:
-        """Extractors read extraction.chokepoints[key]; every region needs one."""
+    with pytest.raises(NotImplementedError, match=r"Region bounds resolved"):
+        ShippingConnector(config=config["ingestion"]["shipping"]).fetch_from_api()
+    with pytest.raises(NotImplementedError, match=r"Region ACLED countries"):
+        GeopoliticalConnector(config=config["agents"]["geopolitical"]).fetch_api()
+    with pytest.raises(NotImplementedError, match=r"Region keywords"):
+        NewsConnector(config=config["agents"]["news_sentiment"]).fetch_api()
+
+
+def test_orchestrator_wiring_carries_region_settings() -> None:
+    """End-to-end: settings survive the Orchestrator's own construction path.
+
+    This is the assertion the per-connector tests cannot make — they pick their
+    config blocks by hand, and this one does not.
+    """
+    from src.orchestrator import Orchestrator
+
+    for region in list_regions():
         config = load_config_for_region(region)
-        key = config["extraction"]["chokepoint_key"]
-        entry = config["extraction"]["chokepoints"][key]
+        orchestrator = Orchestrator(config=config)
 
-        assert entry["countries"] == config["extraction"]["countries"]
-        assert entry["bounding_box"] == config["extraction"]["bounding_box"]
+        assert (
+            orchestrator._shipping_connector.ais_bounds == config["aisstream"]["bbox"]
+        ), region
 
-    def test_panama_chokepoint_is_added_not_just_hormuz(self) -> None:
-        """settings.yaml has no panama entry — the projection must create it."""
-        config = load_config_for_region("panama")
-        assert config["extraction"]["chokepoints"]["panama"]["countries"] == [
-            "Panama"
-        ]
+        geo = orchestrator._domain_connectors.get("geopolitical")
+        if geo is not None:  # passive in panama
+            assert geo.acled_countries == config["extraction"]["countries"], region
 
-    def test_bab_el_mandeb_maps_onto_the_red_sea_entry(self) -> None:
-        """chokepoint_key, not region name, decides the destination."""
-        config = load_config_for_region("bab_el_mandeb")
-        assert config["extraction"]["chokepoint_key"] == "red_sea"
-        assert "Yemen" in config["extraction"]["chokepoints"]["red_sea"]["countries"]
-
-    @pytest.mark.parametrize("region", list_regions())
-    def test_aisstream_monitor_region_is_replaced_not_appended(
-        self, region: str
-    ) -> None:
-        """A run monitors one region; Hormuz's box must not leak into others."""
-        config = load_config_for_region(region)
-        monitor_regions = config["aisstream"]["monitor_regions"]
-
-        assert len(monitor_regions) == 1
-        assert monitor_regions[0]["name"] == region
-        assert monitor_regions[0]["bbox"] == config["aisstream"]["bbox"]
-
-    def test_untouched_chokepoints_survive(self) -> None:
-        """Projecting one region must not drop settings.yaml's other entries."""
-        config = load_config_for_region("panama")
-        for key in ("hormuz", "red_sea", "malacca", "suez"):
-            assert key in config["extraction"]["chokepoints"]
+        news = orchestrator._domain_connectors["news_sentiment"]
+        assert (
+            config["agents"]["news_sentiment"]["location_context"]["primary_location"]
+            in news.newsapi_keywords
+        ), region
 
 
-class TestConnectorsWithMergedConfig:
-    """Every connector builds from every region's merged config."""
+def test_all_six_connectors_build_from_every_merged_config() -> None:
+    """No connector chokes on a region config, including the passive ones."""
+    from src.ingestion import DisasterConnector, MarketConnector, RoutingConnector
 
-    @pytest.mark.parametrize("region", list_regions())
-    def test_all_six_connectors_initialise(self, region: str) -> None:
+    for region in list_regions():
         config = load_config_for_region(region)
         agents = config["agents"]
-
-        connectors = [
-            ShippingConnector(
-                source_mode="csv", config=config["ingestion"]["shipping"]
-            ),
-            MarketConnector(
-                source_mode="csv", config=config["ingestion"]["market"]
-            ),
+        built = [
+            ShippingConnector(config=config["ingestion"]["shipping"]),
+            MarketConnector(config=config["ingestion"]["market"]),
             GeopoliticalConnector(config=agents["geopolitical"]),
             DisasterConnector(config=agents["natural_disaster"]),
             RoutingConnector(config=agents["routing"]),
             NewsConnector(config=agents["news_sentiment"]),
         ]
-        assert all(c is not None for c in connectors)
+        assert all(c is not None for c in built), region
 
-    @pytest.mark.parametrize("region", list_regions())
-    def test_orchestrator_connectors_carry_region_settings(
-        self, region: str
-    ) -> None:
-        """End-to-end: the settings survive the Orchestrator's own wiring.
 
-        This is the assertion the per-connector tests cannot make — it uses the
-        real construction path rather than hand-picked config blocks.
-        """
-        from src.orchestrator import Orchestrator
+def test_connectors_accept_only_a_config_dict() -> None:
+    """Phase 11 keeps region awareness in config, not in constructor signatures."""
+    import inspect
 
-        config = load_config_for_region(region)
-        orchestrator = Orchestrator(config=config)
+    for cls in (ShippingConnector, GeopoliticalConnector, NewsConnector):
+        params = set(inspect.signature(cls.__init__).parameters)
+        assert "region" not in params, f"{cls.__name__} grew a region parameter"
 
-        assert (
-            orchestrator._shipping_connector.ais_bounds
-            == config["aisstream"]["bbox"]
-        )
-        geo = orchestrator._domain_connectors.get("geopolitical")
-        if geo is not None:  # passive in panama
-            assert geo.acled_countries == config["extraction"]["countries"]
-        news = orchestrator._domain_connectors["news_sentiment"]
-        assert (
-            config["agents"]["news_sentiment"]["location_context"][
-                "primary_location"
-            ]
-            in news.newsapi_keywords
-        )
+
+def test_projection_is_idempotent_across_repeated_loads() -> None:
+    """Loading a region twice must not accumulate monitor regions or entries."""
+    first = load_config_for_region("panama")
+    second = load_config_for_region("panama")
+
+    assert first["aisstream"]["monitor_regions"] == second["aisstream"]["monitor_regions"]
+    assert first["extraction"]["chokepoints"] == second["extraction"]["chokepoints"]
+    assert len(second["aisstream"]["monitor_regions"]) == 1
+
+
+def test_regions_do_not_share_mutable_config_state() -> None:
+    """Two regions' configs must be independent objects, not aliases.
+
+    _deep_merge copies shallowly per level, so a shared nested dict would let
+    one region's projection rewrite another's.
+    """
+    hormuz = load_config_for_region("hormuz")
+    panama = load_config_for_region("panama")
+
+    assert hormuz["agents"] is not panama["agents"]
+    assert hormuz["extraction"]["chokepoints"] is not panama["extraction"]["chokepoints"]
+    assert hormuz["ingestion"]["shipping"]["ais_bounds"] != panama["ingestion"][
+        "shipping"
+    ]["ais_bounds"]

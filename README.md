@@ -1693,6 +1693,157 @@ Nine sections: (1) detection performance, (2) explainability faithfulness + SHAP
 
 ---
 
+## Phase 11 — Multi-Region Pipeline (4 Chokepoints)
+
+The pipeline runs against any of four maritime chokepoints, selected per run.
+Region awareness lives entirely in **configuration**: no class gained a `region`
+parameter, and `Orchestrator(config: dict)` is unchanged and region-agnostic.
+
+| Region key | Chokepoint | Documented driver |
+|---|---|---|
+| `hormuz` *(default)* | Strait of Hormuz | Apr–May 2026 shutdown; oil/gas transit |
+| `panama` | Panama Canal | Gatún Lake drought → transit-slot cap |
+| `bab_el_mandeb` | Bab el-Mandeb | Red Sea security campaign → Cape diversion |
+| `malacca` | Strait of Malacca | Transboundary haze; piracy |
+
+### Architecture
+
+**Config is merged at the call site**, not inside the Orchestrator:
+
+```
+config/settings.yaml  ──┐
+                        ├─► _deep_merge ─► _project_region_settings ─► Orchestrator(config)
+config/regions/X.yaml ──┘
+```
+
+`src/core/config_manager.py` does this in two steps:
+
+1. **Merge** — recursive dict merge. The overlay's `agents.<key>.enabled` lands
+   on the flag `Orchestrator.__init__` already reads to decide whether to build
+   a domain connector. This is what activates or mutes an agent per region.
+2. **Project** — the overlays are flat where `settings.yaml` is keyed, so a
+   plain merge cannot reach the paths consumers read. The projection copies:
+
+   | Overlay key | Projected to | Read by |
+   |---|---|---|
+   | `extraction.countries` | `extraction.chokepoints.<key>.countries` | ACLED / NewsAPI / FRED / Ambee extractors |
+   | `extraction.bounding_box` | `extraction.chokepoints.<key>.bounding_box` | same |
+   | `extraction.countries` | `agents.geopolitical.acled_countries` | `GeopoliticalConnector` |
+   | `aisstream.bbox` | `aisstream.monitor_regions[0]` | `aisstream_monitor.py` |
+   | `aisstream.bbox` | `ingestion.shipping.ais_bounds` | `ShippingConnector` |
+
+   `monitor_regions` is *replaced*, not appended — otherwise Hormuz's box would
+   leak into every other region's live monitoring.
+
+`NewsConnector` needs no projection: it derives `newsapi_keywords` from
+`agents.news_sentiment.location_context`, which the merge already makes
+region-specific.
+
+The merged config also carries `_active_region` (the region it was built for)
+and a `region` block (display name, centre coordinates) for logging.
+
+### Running a region
+
+```bash
+python main.py                          # hormuz (default)
+python main.py --region panama
+python main.py --region malacca --mode synthetic
+
+export SUPPLY_CHAIN_REGION=bab_el_mandeb   # honoured when --region is absent
+python main.py
+```
+
+An unknown region fails loudly — `--region` validates against the registry, and
+a typo'd `SUPPLY_CHAIN_REGION` raises rather than silently running Hormuz.
+
+Programmatically — the Orchestrator builds its own agents, so there is nothing
+to register:
+
+```python
+from src.core.config_manager import load_config_for_region
+from src.orchestrator import Orchestrator
+
+config = load_config_for_region("panama")   # None → env var, else hormuz
+result = Orchestrator(config=config).run_full_pipeline()
+
+print(result["composite_score"], sorted(result["agent_scores"]))
+```
+
+### Per-region agent activation
+
+Activation is evidence-driven, sourced from the per-region review behind the
+EVAL01 benchmark (archived under `docs/eval01-archived/`). A domain with no
+documented real-world driver for a region is **passive**: not built, not run,
+not weighted. `src/core/regions.py` holds the registry and the reason for every
+exclusion.
+
+| Agent | hormuz | panama | bab_el_mandeb | malacca |
+|---|---|---|---|---|
+| `shipping` | ● | ● | ● | ● |
+| `market` | ● | ● | ● | ○ no market signal in any documented event |
+| `geopolitical` | ● | ○ driver is purely hydrological | ● | ● |
+| `natural_disaster` | ● | ● | ○ security campaign, not a natural hazard | ● |
+| `routing` | ○ | ○ | ○ | ○ |
+| `news_sentiment` | ● | ● | ● | ● |
+
+● active ○ passive
+
+**Routing is muted in all four regions.** Unlike every other exclusion, this is
+*not* an evidence call — it is a deliberate, temporary, uniform muting that
+defers the per-region decision to post-Phase-14 evaluation.
+`routing_connector.fetch_api()` is still a `NotImplementedError` stub, so the
+agent emits synthetic or CSV signal everywhere regardless. Note that Bab
+el-Mandeb's routing evidence is the strongest in the benchmark (85% of large
+containerships diverted via the Cape of Good Hope) and is muted *in spite* of
+that; re-enable that one first if routing is revisited.
+
+### Region-specific data sources
+
+| Region | AIS bounds `[[lat_min, lon_min], [lat_max, lon_max]]` | ACLED countries | Chokepoint key |
+|---|---|---|---|
+| `hormuz` | `[[25.0, 55.0], [27.5, 58.0]]` | Iran, Oman, UAE, Saudi Arabia, Qatar, Bahrain, Kuwait, Iraq | `hormuz` |
+| `panama` | `[[8.8, -80.1], [9.5, -79.4]]` | Panama | `panama` *(created by projection)* |
+| `bab_el_mandeb` | `[[11.8, 42.6], [13.4, 44.1]]` | Yemen, Saudi Arabia, Egypt, Eritrea, Djibouti, Sudan, Somalia | `red_sea` |
+| `malacca` | `[[0.5, 99.0], [4.0, 105.0]]` | Malaysia, Indonesia, Singapore | `malacca` |
+
+Market data is **not** region-scoped: the connector reads global benchmark
+series (Brent crude, freight PPI, freight services) whose `LOCATION` is
+`"Global/Persian Gulf"`. Inventing per-region FRED series IDs would fabricate
+sources the pipeline does not use.
+
+All three connector settings degrade gracefully when absent — a missing setting
+logs and falls back, and only `api` data mode needs them. CSV and synthetic
+modes, which is what the pipeline actually runs, are unaffected.
+
+### Hormuz regression gate — re-baselined
+
+Applying `hormuz.yaml` drops routing from the default run (6 → 5 agents),
+moving the synthetic composite from **0.333000 → 0.316134**. Phase 11's
+original gate ("bit-for-bit with #44") therefore no longer holds and is
+re-baselined as *"bit-for-bit except routing"*. This was the explicit choice
+`config/regions/hormuz.yaml` asked to be made before wiring.
+
+### Test Coverage (Phase 11)
+
+| File | Tests | What it verifies |
+|---|---|---|
+| `tests/test_regions.py` | 9 | Registry integrity — agent keys, activation lookup, unknown-region errors |
+| `tests/test_region_configs.py` | 21 | Region YAMLs parse, match the registry, and have coherent bounding boxes |
+| `tests/test_config_manager.py` | 12 | Merge semantics, region-selection precedence, merged flags match the registry |
+| `tests/test_region_specific_connectors.py` | 17 | Projection lands settings where connectors read them; connectors consume them and degrade gracefully |
+| `tests/test_region_config_completeness.py` | 5 | Every region supplies all three connector settings, distinct per region |
+| `tests/test_region_isolation.py` | 7 | Each region's pipeline runs end-to-end; only registry-active agents score; no cross-run contamination |
+
+```bash
+pytest tests/test_regions.py tests/test_region_configs.py \
+       tests/test_config_manager.py tests/test_region_specific_connectors.py \
+       tests/test_region_config_completeness.py tests/test_region_isolation.py -v
+```
+
+See `docs/REGION_USAGE_GUIDE.md` for usage recipes and troubleshooting.
+
+---
+
 ## Project Structure
 
 ```
@@ -1806,14 +1957,18 @@ Every key is optional — each extractor and `DisasterConnector.fetch_api()` log
 ### Pipeline entrypoint
 
 ```bash
-python main.py
+python main.py                        # default region: hormuz
+python main.py --region panama        # see Phase 11 for the four regions
 ```
 
 Expected output:
 ```
-2026-04-25 17:17:33 | INFO | __main__ | Pipeline initialized
-Pipeline initialized
+2026-04-25 17:17:33 | INFO | __main__ | Pipeline initialized | region=hormuz
+Pipeline initialized (region: hormuz)
 ```
+
+`--region` accepts `hormuz`, `panama`, `bab_el_mandeb`, `malacca`. With it
+absent, `SUPPLY_CHAIN_REGION` is consulted, then the `hormuz` default.
 
 ### Generate the synthetic datasets
 
