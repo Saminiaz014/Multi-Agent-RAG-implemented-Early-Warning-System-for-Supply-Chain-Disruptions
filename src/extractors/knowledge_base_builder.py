@@ -41,8 +41,19 @@ class KnowledgeBaseBuilder:
         stats = builder.build()
     """
 
-    def __init__(self, config: dict) -> None:
+    def __init__(self, config: dict, region_scoped: bool = False) -> None:
+        """Build the extractor set from ``config``.
+
+        Args:
+            config: Full application config. ``extraction.chokepoints`` decides
+                which regions are extracted — narrow that dict to scope a run.
+            region_scoped: ``True`` when the caller has narrowed
+                ``extraction.chokepoints`` to a single region. This changes two
+                behaviours so a partial run cannot damage what it did not
+                fetch — see :meth:`_extract_all_regions` and :meth:`build`.
+        """
         self.config = config
+        self.region_scoped = region_scoped
         self.rag_config = config.get("rag", {}) or {}
 
         self.extractors: dict[str, BaseExtractor] = {}
@@ -84,6 +95,13 @@ class KnowledgeBaseBuilder:
                 except Exception as exc:
                     logger.error("  %s/%s failed: %s", name, region, exc)
 
+            # These methods extract curated historical cases with the region
+            # hardcoded (Hormuz / Red Sea / Suez), ignoring the region loop
+            # above. On a region-scoped run they would spend rate-limited API
+            # calls re-fetching documents from other regions, so skip them.
+            if self.region_scoped:
+                continue
+
             for method_name in ("extract_specific_events", "extract_specific_scenarios", "extract_historical_events"):
                 method = getattr(extractor, method_name, None)
                 if method is None:
@@ -123,6 +141,46 @@ class KnowledgeBaseBuilder:
                 logger.error("ChromaDB upsert failed for batch starting at %d: %s", i, exc)
         return total
 
+    def _write_backup(self, path: Path, documents: list[dict]) -> int:
+        """Persist the JSON backup, preserving regions this run did not fetch.
+
+        A full run rewrites the file: it fetched every configured region, so
+        its output is authoritative. A **region-scoped run merges** instead —
+        overwriting would silently delete every other region's documents, and
+        the dashboard's news feed reads this file directly
+        (``core.get_news``), so a Panama-only run would blank the Hormuz
+        headlines. Existing entries are replaced by id where they overlap.
+
+        Args:
+            path: Destination JSON file.
+            documents: This run's deduplicated documents.
+
+        Returns:
+            Number of documents in the file after writing.
+        """
+        merged = documents
+        if self.region_scoped and path.exists():
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                # Never let an unreadable backup cost us this run's documents.
+                logger.warning(
+                    "Could not read existing backup %s (%s) — writing this "
+                    "run's documents only.", path, exc,
+                )
+                existing = []
+            fresh_ids = {doc["id"] for doc in documents}
+            kept = [doc for doc in existing if doc.get("id") not in fresh_ids]
+            merged = kept + documents
+            logger.info(
+                "Merging region-scoped run into backup: %d existing kept + "
+                "%d from this run = %d total.", len(kept), len(documents), len(merged),
+            )
+
+        path.write_text(json.dumps(merged, indent=2, default=str), encoding="utf-8")
+        logger.info("Saved backup to %s (%d documents)", path, len(merged))
+        return len(merged)
+
     def build(self) -> dict:
         """Run the full knowledge base population pipeline.
 
@@ -145,8 +203,8 @@ class KnowledgeBaseBuilder:
 
         backup_path = Path("data/knowledge_base/live_extracted_backup.json")
         backup_path.parent.mkdir(parents=True, exist_ok=True)
-        backup_path.write_text(json.dumps(unique_documents, indent=2, default=str), encoding="utf-8")
-        logger.info("Saved backup to %s", backup_path)
+        written = self._write_backup(backup_path, unique_documents)
+        stats["documents_in_backup"] = written
 
         try:
             collection = self._get_chromadb_collection()

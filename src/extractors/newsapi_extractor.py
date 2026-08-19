@@ -13,6 +13,11 @@ from src.extractors.base_extractor import BaseExtractor
 
 logger = logging.getLogger(__name__)
 
+#: Hand-authored queries for the four chokepoints settings.yaml has always
+#: carried. Regions added later (Phase 11) are not listed here — they fall back
+#: to :meth:`NewsAPIExtractor._queries_for_region`, which derives queries from
+#: the region's own ``location_context``. Do not add rows here for a new
+#: region unless its queries genuinely cannot be expressed that way.
 CHOKEPOINT_QUERIES: dict[str, list[str]] = {
     "hormuz": [
         '"Strait of Hormuz" AND (shipping OR tanker OR blockade OR attack)',
@@ -131,9 +136,67 @@ class NewsAPIExtractor(BaseExtractor):
             },
         )
 
+    def _queries_for_region(self, region: str) -> list[str]:
+        """Return the NewsAPI queries for ``region``.
+
+        Prefers the hand-authored :data:`CHOKEPOINT_QUERIES` entry. For a
+        region without one — any chokepoint added after Phase 11 — queries are
+        derived from that region's ``agents.news_sentiment.location_context``,
+        the same block :class:`~src.ingestion.NewsConnector` derives its live
+        keywords from. Deriving rather than hardcoding means a new region is
+        covered by writing its YAML, with no extractor change.
+
+        The derived form mirrors the hand-authored shape: the chokepoint name
+        quoted as a phrase, AND-ed against its documented topics.
+
+        Args:
+            region: Chokepoint key, e.g. ``"panama"``.
+
+        Returns:
+            Query strings, or ``[]`` if neither source yields one — in which
+            case the caller logs and extracts nothing rather than guessing.
+        """
+        hardcoded = CHOKEPOINT_QUERIES.get(region)
+        if hardcoded:
+            return hardcoded
+
+        context = (
+            self.config.get("agents", {})
+            .get("news_sentiment", {})
+            .get("location_context", {})
+        ) or {}
+        location = str(context.get("primary_location") or "").strip()
+        topics = [str(t).strip() for t in (context.get("topics") or []) if str(t).strip()]
+
+        if not location or not topics:
+            logger.warning(
+                "NewsAPI [%s] has no hand-authored queries and no usable "
+                "location_context — extracting nothing for this region.",
+                region,
+            )
+            return []
+
+        # Split the topics across two queries so neither OR-clause grows so
+        # broad that NewsAPI's relevance ranking drowns the chokepoint term.
+        midpoint = max(1, (len(topics) + 1) // 2)
+        queries = [
+            f'"{location}" AND ({" OR ".join(topics[:midpoint])})',
+        ]
+        if topics[midpoint:]:
+            queries.append(f'"{location}" AND ({" OR ".join(topics[midpoint:])})')
+
+        logger.info(
+            "NewsAPI [%s] no hand-authored queries — derived %d from "
+            "location_context ('%s').",
+            region,
+            len(queries),
+            location,
+        )
+        return queries
+
     def extract_historical(self, region: str, **kwargs) -> list[dict]:
         documents: list[dict] = []
-        for query in CHOKEPOINT_QUERIES.get(region, []):
+        for query in self._queries_for_region(region):
             articles = self._search_articles(query, page_size=50)
             logger.info("NewsAPI [%s] '%s...' -> %d articles", region, query[:40], len(articles))
             for article in articles:
