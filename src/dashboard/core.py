@@ -42,12 +42,13 @@ from string import Template
 import numpy as np
 import pandas as pd
 import streamlit as st
-import yaml
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from src.core.config_manager import load_config_for_region  # noqa: E402
+from src.core.regions import REGIONS as _REGIONS  # noqa: E402
 from src.evaluation.decision_effectiveness import (  # noqa: E402
     ACTIONS,
     load_decision_labels,
@@ -82,7 +83,6 @@ __all__ = [
 # Constants
 # ---------------------------------------------------------------------------
 
-_CONFIG_PATH = _PROJECT_ROOT / "config" / "settings.yaml"
 _KB_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "disruption_cases.json"
 _LABELS_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "decision_labels.json"
 _EVAL_RESULTS_PATH = _PROJECT_ROOT / "data" / "processed" / "evaluation_results.json"
@@ -117,11 +117,19 @@ SCENARIOS = {
 _TOTAL_DAYS = 365
 RANGE_PRESETS = ["Last 30 days", "Last 90 days", "Last 6 months", "Last year", "Custom range"]
 
-#: Region control: only Hormuz is populated for the thesis, but every fetch
-#: function below accepts an arbitrary region key so post-thesis chokepoints
-#: (red_sea / malacca / suez, already configured in settings.yaml) plug in
-#: without touching the UI code.
-AVAILABLE_REGIONS: dict[str, str] = {"Strait of Hormuz": "hormuz"}
+#: Region control (Phase 12): ``{display_name: region_key}`` for every region
+#: in :mod:`src.core.regions`, so the selector and the registry cannot drift.
+#: Ordered as the registry orders them, which puts Hormuz — the default and
+#: the thesis's primary chokepoint — first.
+#:
+#: Note the asymmetry this exposes: all four regions now carry real *pipeline*
+#: config (agent activation, AIS bounds, ACLED countries, news keywords), but
+#: the presentational layers below — ``_ROUTES`` and the news feed — remain
+#: Hormuz-only. Selecting another region gives its real risk scoring with an
+#: empty route list; see :func:`get_routes`.
+AVAILABLE_REGIONS: dict[str, str] = {
+    _cfg.display_name: key for key, _cfg in _REGIONS.items()
+}
 
 #: Monitored routes per chokepoint. Coordinates are schematic corridor
 #: polylines for visualisation (lng, lat) — not official IMO TSS geometry.
@@ -256,8 +264,21 @@ def decide_action(
 
 
 @st.cache_data(show_spinner=False)
-def load_app_config() -> dict:
-    return yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8"))
+def load_app_config(region: str | None = None) -> dict:
+    """Return the merged config for ``region``, cached per region.
+
+    Streamlit keys ``cache_data`` on the arguments, so each region is loaded
+    once and a switch back is free.
+
+    Args:
+        region: Region key. ``None`` resolves via ``SUPPLY_CHAIN_REGION``,
+            then the ``hormuz`` default — matching the CLI.
+
+    Returns:
+        Base settings deep-merged with the region overlay, carrying
+        ``_active_region``.
+    """
+    return load_config_for_region(region)
 
 
 def _layout_to_params(layout: dict) -> dict:

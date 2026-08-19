@@ -23,7 +23,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import yaml
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -47,6 +46,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Region management (Phase 12.3) — /api/regions/{list,current,info,switch}.
+# Imported after `app` exists because the router reads this module's active
+# region back out of it.
+from src.api.region_endpoints import router as _region_router  # noqa: E402
+
+app.include_router(_region_router)
+
 # ---------------------------------------------------------------------------
 # Module-level state
 # ---------------------------------------------------------------------------
@@ -58,6 +64,11 @@ _config: dict = {}
 _orchestrator: Any = None
 _last_run_timestamp: str | None = None
 
+#: Region the service scores (Phase 12.3). Process-global, not per-client —
+#: see src/api/region_endpoints.py. Resolved lazily so an invalid
+#: SUPPLY_CHAIN_REGION surfaces on first use rather than at import.
+_active_region: str | None = None
+
 ALL_AGENTS = [
     "shipping",
     "market",
@@ -68,12 +79,52 @@ ALL_AGENTS = [
 ]
 
 
+def get_active_region() -> str:
+    """Return the region the service is currently scoring.
+
+    Resolved on first call from ``SUPPLY_CHAIN_REGION``, falling back to
+    ``hormuz`` — the same precedence the CLI and dashboard use.
+    """
+    global _active_region
+    if _active_region is None:
+        from src.core.config_manager import resolve_active_region
+
+        _active_region = resolve_active_region()
+    return _active_region
+
+
+def set_active_region(region: str) -> str:
+    """Switch the service to ``region`` and invalidate the cached state.
+
+    Args:
+        region: Canonical region key — validate it before calling; this
+            function assumes it is already known to the registry.
+
+    Returns:
+        The newly active region key.
+    """
+    global _active_region, _config
+    _active_region = region
+    _config = {}
+    _reset_orchestrator()
+    return _active_region
+
+
 def _load_config() -> dict:
+    """Return the active region's merged config, cached until a region switch.
+
+    Phase 12.3: this reads ``config/settings.yaml`` *merged with* the active
+    region's overlay, so every endpoint below scores the selected chokepoint.
+    A missing settings.yaml degrades to an empty config rather than failing
+    the whole service at import.
+    """
     global _config
     if _config:
         return _config
     if _CONFIG_PATH.exists():
-        _config = yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        from src.core.config_manager import load_config_for_region
+
+        _config = load_config_for_region(get_active_region()) or {}
     else:
         logger.warning("config/settings.yaml not found — using empty config.")
         _config = {}

@@ -254,20 +254,28 @@ def test_jpeg_export_helper():
     assert len(data) > 10_000, "JPEG suspiciously small — render likely failed"
 
 
-def test_region_selector_hormuz_only():
-    """Hormuz is the only offered region, but every fetcher accepts an
-    arbitrary region parameter without raising (post-thesis expansion)."""
-    from src.dashboard.core import AVAILABLE_REGIONS, get_news, get_routes, get_vessels
+def test_route_fetchers_tolerate_any_region():
+    """Hormuz is the only region with mapped route corridors, and every fetcher
+    accepts an arbitrary region key without raising.
 
-    assert list(AVAILABLE_REGIONS.keys()) == ["Strait of Hormuz"]
-    assert AVAILABLE_REGIONS["Strait of Hormuz"] == "hormuz"
+    Phase 12 opened the selector to all four registered chokepoints (see
+    ``tests/test_dashboard_regions.py``), but ``core._ROUTES`` still holds
+    geometry for Hormuz alone — drawing corridors elsewhere would mean
+    inventing them. This pins the resulting asymmetry so it stays deliberate:
+    every other region falls to the empty-route branch rather than erroring.
+    """
+    from src.dashboard.core import AVAILABLE_REGIONS, get_news, get_routes, get_vessels
 
     # Populated region resolves to routes …
     hormuz_routes = get_routes("hormuz")
     assert len(hormuz_routes) >= 2
     assert get_vessels(hormuz_routes[0], day=155), "vessels should generate for a route"
 
-    # … arbitrary regions are accepted and return empty results, never raise.
-    for region in ("red_sea", "malacca", "suez", "atlantis", "", None):
+    # … every other selectable region returns empty, never raises.
+    for region in set(AVAILABLE_REGIONS.values()) - {"hormuz"}:
+        assert get_routes(region) == [], f"{region} unexpectedly has routes"
+
+    # … and unknown / malformed keys are equally safe.
+    for region in ("red_sea", "suez", "atlantis", "", None):
         assert isinstance(get_routes(region), list)
         assert isinstance(get_news(region), list)

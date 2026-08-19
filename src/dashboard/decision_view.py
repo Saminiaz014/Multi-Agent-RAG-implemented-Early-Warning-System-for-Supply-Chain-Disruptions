@@ -83,19 +83,22 @@ def _apply_pending_selection(route_keys: list[str]) -> None:
 
 def render() -> None:
     st.markdown(DASH_CSS, unsafe_allow_html=True)
-    config = load_app_config()
 
     # ---------------- Region selector (always visible, top of page) --------
     head_l, head_r = st.columns([2.2, 1.3])
     with head_l:
         st.markdown("## Supply-chain disruption monitor")
     with head_r:
-        # Only Hormuz is populated for the thesis; the underlying fetchers
-        # (get_routes / get_news / monitoring points) accept any region key,
-        # so post-thesis chokepoints appear here by extending AVAILABLE_REGIONS.
+        # All four Phase 11 chokepoints, sourced from the region registry via
+        # AVAILABLE_REGIONS so the selector cannot drift from it.
         region_label = st.selectbox("Region", list(AVAILABLE_REGIONS.keys()),
+                                    key="selected_region",
                                     label_visibility="collapsed")
     region = AVAILABLE_REGIONS.get(region_label, "hormuz")
+
+    # The selected region's merged config drives which agents are active for
+    # this run. Cached per region by load_app_config, so switching back is free.
+    config = load_app_config(region)
 
     routes = get_routes(region)
     route_keys = [r["key"] for r in routes]
@@ -128,7 +131,11 @@ def render() -> None:
         route = next((r for r in routes if r["key"] == selected_key), None)
 
         if route is None:
-            st.info("No routes are configured for this region yet.")
+            # Phase 11 gave all four regions real pipeline config, but the
+            # schematic route corridors below are still Hormuz-only — drawing
+            # them for another chokepoint would mean inventing geometry. Show
+            # the region's real activation instead of a dead end.
+            _render_region_without_routes(region)
             return
 
         series = route_risk_series(ts, params, route)
@@ -230,6 +237,38 @@ def render() -> None:
 # ---------------------------------------------------------------------------
 # Panel internals
 # ---------------------------------------------------------------------------
+
+
+def _render_region_without_routes(region: str) -> None:
+    """Explain a region that has pipeline config but no drawn route corridors.
+
+    Every region carries real agent activation, AIS bounds, ACLED countries and
+    news keywords (Phase 11), but ``core._ROUTES`` only defines corridor
+    geometry for Hormuz. Rather than a bare "nothing here", show what the
+    region's pipeline would actually run, straight from the registry.
+
+    Args:
+        region: Canonical region key.
+    """
+    from src.core.regions import get_region
+
+    cfg = get_region(region)
+    st.info(
+        f"**{cfg.display_name}** has no mapped route corridors yet — those are "
+        "drawn for the Strait of Hormuz only. Its detection pipeline is fully "
+        "configured; the summary below is live from the region registry."
+    )
+    st.markdown("**Active agents**")
+    st.markdown(
+        "\n".join(f"- {name.replace('_', ' ').title()}" for name in cfg.active_agents())
+        or "- _none_"
+    )
+    passive = cfg.passive_agents()
+    if passive:
+        st.markdown("**Passive agents** — excluded from this region's run")
+        for name in passive:
+            reason = cfg.passive_reasons.get(name, "No reason recorded.")
+            st.markdown(f"- **{name.replace('_', ' ').title()}** — {reason}")
 
 
 def _render_trend_chart(win_days, win_vals, peak_day, thresholds, route_name):

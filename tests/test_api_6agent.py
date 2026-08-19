@@ -16,7 +16,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.api.endpoints as _ep
-from src.api.endpoints import ALL_AGENTS, app
+from src.api.endpoints import ALL_AGENTS, app, get_active_region
+from src.core.regions import get_region
+
+
+def _active_region_agents() -> list[str]:
+    """Agents the service's active region actually runs (Phase 12.3)."""
+    return get_region(get_active_region()).active_agents()
 
 # ---------------------------------------------------------------------------
 # Canonical mock pipeline result (mirrors run_full_pipeline() return shape)
@@ -126,14 +132,24 @@ def client(mock_orch):
 # ---------------------------------------------------------------------------
 
 def test_health_6agents():
+    """/health reports the six known agents and which are active right now.
+
+    Phase 12.3 made the service region-aware, so ``agents_active`` is the
+    *active region's* agent set rather than all six — routing is muted in every
+    region, and other domains are passive per region. Expectations come from
+    the registry so this tracks the served region instead of a stale constant.
+    """
+    expected_active = set(_active_region_agents())
+
     with TestClient(app) as c:
         resp = c.get("/health")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
-    assert len(data["agents_active"]) == 6
-    assert set(data["agents_active"]) == set(ALL_AGENTS)
-    assert data["total_agents"] == 6
+    assert set(data["agents_active"]) == expected_active
+    assert set(data["agents_active"]) <= set(ALL_AGENTS)
+    assert "routing" not in data["agents_active"]  # globally muted in Phase 11
+    assert data["total_agents"] == len(data["agents_active"])
     assert "weight_mode" in data
     assert "knowledge_base_doc_count" in data
     assert "timestamp" in data
@@ -209,6 +225,15 @@ def test_agents_list():
 # ---------------------------------------------------------------------------
 
 def test_toggle_agent():
+    """Toggling one agent off and back on moves the enabled count by exactly 1.
+
+    The baseline is the active region's agent count rather than a hardcoded 6
+    (Phase 12.3) — natural_disaster is active in the default region, so it is a
+    valid agent to toggle there.
+    """
+    baseline = len(_active_region_agents())
+    assert "natural_disaster" in _active_region_agents()
+
     with TestClient(app) as c:
         # Toggle natural_disaster off
         resp = c.post(
@@ -219,7 +244,7 @@ def test_toggle_agent():
         toggle_data = resp.json()
         assert toggle_data["enabled"] is False
         assert "natural_disaster" not in toggle_data["agents_active"]
-        assert len(toggle_data["agents_active"]) == 5
+        assert len(toggle_data["agents_active"]) == baseline - 1
 
         # /agents should reflect disabled state
         resp = c.get("/agents")
@@ -227,7 +252,7 @@ def test_toggle_agent():
         agents = {a["name"]: a for a in resp.json()}
         assert agents["natural_disaster"]["enabled"] is False
         enabled_count = sum(1 for a in resp.json() if a["enabled"])
-        assert enabled_count == 5
+        assert enabled_count == baseline - 1
 
         # Toggle natural_disaster back on
         resp = c.post(
@@ -237,12 +262,12 @@ def test_toggle_agent():
         assert resp.status_code == 200
         assert resp.json()["enabled"] is True
 
-        # /agents should show all 6 enabled again
+        # /agents should be back to the region's full active set
         resp = c.get("/agents")
         agents = {a["name"]: a for a in resp.json()}
         assert agents["natural_disaster"]["enabled"] is True
         enabled_count = sum(1 for a in resp.json() if a["enabled"])
-        assert enabled_count == 6
+        assert enabled_count == baseline
 
 
 def test_toggle_invalid_agent():

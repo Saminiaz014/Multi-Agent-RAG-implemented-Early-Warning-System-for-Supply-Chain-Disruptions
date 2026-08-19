@@ -246,9 +246,12 @@ in the overlays themselves.
   `settings.yaml` covers `hormuz`, `red_sea`, `malacca`, and `suez` only, so
   `DisasterConnector.fetch_api()` has no point to query for Panama. Inert while
   `data_mode` is `synthetic`, which is the default.
-- **`src/api/endpoints.py` and the Streamlit dashboard are still region-blind.**
-  Both load `config/settings.yaml` directly rather than through
-  `load_config_for_region()`. A multi-region dashboard is Phase 12.
+- ~~`src/api/endpoints.py` and the Streamlit dashboard are still
+  region-blind.~~ **Closed in Phase 12** — both now load through
+  `load_config_for_region()`. The dashboard has a region selector and the API
+  has `/api/regions/*`; see `docs/DASHBOARD_USAGE.md`. The dashboard's *route
+  corridors, vessel markers, news feed and map* remain Hormuz-only, so other
+  regions show an activation summary instead.
 - **Live API modes are stubs.** `fetch_api()` on the shipping, geopolitical,
   news, and routing connectors raises `NotImplementedError`. The region settings
   are wired and reported in those messages, ready for the integrations.

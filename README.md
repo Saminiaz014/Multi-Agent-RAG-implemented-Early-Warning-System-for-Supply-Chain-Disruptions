@@ -1844,6 +1844,69 @@ See `docs/REGION_USAGE_GUIDE.md` for usage recipes and troubleshooting.
 
 ---
 
+## Phase 12 — Multi-Region Dashboard & API
+
+Phase 11 made the *pipeline* region-aware; Phase 12 makes the two front doors
+region-aware too. Neither the Orchestrator nor the config merging changed.
+
+### Dashboard region selector
+
+The Decision View's selector is populated from the region registry
+(`core.AVAILABLE_REGIONS = {display_name: key}`), so it cannot drift from
+`src/core/regions.py`. Selecting a region reloads its merged config, changing
+which agents run and what each connector is pointed at.
+
+**Presentation is still Hormuz-only.** `core._ROUTES` defines schematic
+corridor geometry for the Strait of Hormuz alone; the other three have none,
+and inventing polylines for them would be fabrication, not configuration. Every
+other region therefore renders an activation summary — active agents, and each
+passive agent with the registry's recorded reason — instead of the trend chart,
+map and route list. The pipeline for those regions is fully configured and
+runs headlessly via `python main.py --region <key>`.
+
+### Per-region caching
+
+`src/dashboard/cache.py` holds one config and one Orchestrator per region
+(`lru_cache`, `maxsize` = region count, so no region evicts another). The first
+visit builds six connectors; switching back is a cache hit. The cache is
+**process-global, not per-session**, and Orchestrator is stateful — fine for
+this single-analyst deployment, not for a multi-user one.
+
+### Region endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/regions/list` | Every region, with activation summary |
+| `GET` | `/api/regions/current` | The region being scored now |
+| `GET` | `/api/regions/info/{region}` | One region in detail (404 if unknown) |
+| `POST` | `/api/regions/switch` | Change the active region (400 if unknown) |
+
+`src/api/endpoints.py`'s `_load_config()` now merges the active region's
+overlay, so **every** existing endpoint scores the selected chokepoint.
+`switch` mutates process-global state and resets the cached Orchestrator — a
+real switch, but shared across all callers. An unknown region is rejected
+before any state changes.
+
+One consequence worth stating plainly: `/health` now reports the *active
+region's* agent set, not a fixed six. Routing is muted everywhere, so the
+default region reports five.
+
+### Test Coverage (Phase 12)
+
+| File | Tests | What it verifies |
+|---|---|---|
+| `tests/test_dashboard_regions.py` | 15 | Selector matches the registry; `load_app_config` is region-aware; caching identity, isolation, eviction and invalidation; cached results match a fresh run; the no-routes branch renders real activation |
+| `tests/test_api_regions.py` | 12 | List/current/info payloads and error codes; switch changes what later config loads return, is idempotent, and leaves state untouched on a bad request |
+
+```bash
+pytest tests/test_dashboard_regions.py tests/test_api_regions.py -v
+```
+
+See `docs/DASHBOARD_USAGE.md` for the selector, caching behaviour, endpoint
+recipes and troubleshooting.
+
+---
+
 ## Project Structure
 
 ```
