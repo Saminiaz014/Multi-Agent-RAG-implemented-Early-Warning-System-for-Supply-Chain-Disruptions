@@ -30,13 +30,15 @@ if str(_PROJECT_ROOT) not in sys.path:
 from src.core.regions import get_region  # noqa: E402
 from src.dashboard.core import (  # noqa: E402
     AGENT_COLORS,
-    get_region_map,
     ALL_AGENTS,
     AVAILABLE_REGIONS,
     DASH_CSS,
-    TIMELINE_AXIS_NOTE,
+    TIMELINE_SYNTHETIC_CAPTION,
     agent_contributions,
     detect_risk_spikes,
+    get_region_map,
+    relative_axis_ticks,
+    relative_day_label,
     timeline_dates,
     STATUS_COLORS,
     STATUS_ICONS,
@@ -90,24 +92,58 @@ def _apply_pending_selection(route_keys: list[str]) -> None:
             break
 
 
+#: Short button labels and icons for the region selector. Keyed by region key
+#: so a region added to the registry still renders (falling back to its
+#: display name) rather than disappearing from the selector.
+_REGION_BUTTONS: dict[str, tuple[str, str]] = {
+    "hormuz": ("🌊", "Hormuz"),
+    "panama": ("🚢", "Panama"),
+    "bab_el_mandeb": ("⛴️", "Bab el-M."),
+    "malacca": ("🧭", "Malacca"),
+}
+
+
 def _apply_region_query_param() -> None:
     """Let ``?region=<key>`` preselect the region, mirroring ``?route=``.
 
     Makes a region deep-linkable — useful for sharing a view, and for driving
-    the page deterministically in a browser session. Applied before the
-    selectbox renders so the widget picks it up; an unknown key is ignored
-    rather than raising, since the query string is user-supplied.
+    the page deterministically. An unknown key is ignored rather than raising,
+    since the query string is user-supplied.
     """
-    requested = st.query_params.get("region")
-    if not requested:
-        return
-    label = next(
-        (name for name, key in AVAILABLE_REGIONS.items()
-         if key == str(requested).strip().lower()),
-        None,
-    )
-    if label and st.session_state.get("selected_region") != label:
-        st.session_state["selected_region"] = label
+    requested = str(st.query_params.get("region") or "").strip().lower()
+    if requested in set(AVAILABLE_REGIONS.values()):
+        st.session_state["selected_region"] = requested
+
+
+def _render_region_selector() -> str:
+    """Region picker as one button per chokepoint.
+
+    Buttons rather than a dropdown: the four options are always visible, take
+    one click instead of two, and the active one can be shown as pressed.
+    The active button uses Streamlit's ``primary`` styling, so "which region
+    am I looking at" is answered by the control itself and needs no caption.
+
+    Returns:
+        The selected region key.
+    """
+    active = st.session_state.get("selected_region", "hormuz")
+    if active not in set(AVAILABLE_REGIONS.values()):
+        active = "hormuz"
+
+    keys = list(AVAILABLE_REGIONS.values())
+    for column, key in zip(st.columns(len(keys)), keys):
+        icon, short = _REGION_BUTTONS.get(key, ("", key.replace("_", " ").title()))
+        with column:
+            if st.button(
+                f"{icon} {short}".strip(),
+                key=f"btn_region_{key}",
+                use_container_width=True,
+                type="primary" if key == active else "secondary",
+            ):
+                st.session_state["selected_region"] = key
+                st.query_params["region"] = key   # keep the URL shareable
+                st.rerun()
+    return active
 
 
 def render() -> None:
@@ -115,16 +151,17 @@ def render() -> None:
     _apply_region_query_param()
 
     # ---------------- Region selector (always visible, top of page) --------
-    head_l, head_r = st.columns([2.2, 1.3])
+    head_l, head_r = st.columns([2.2, 1.7])
     with head_l:
         st.markdown("## Supply-chain disruption monitor")
     with head_r:
-        # All four Phase 11 chokepoints, sourced from the region registry via
+        # One button per chokepoint, sourced from the region registry via
         # AVAILABLE_REGIONS so the selector cannot drift from it.
-        region_label = st.selectbox("Region", list(AVAILABLE_REGIONS.keys()),
-                                    key="selected_region",
-                                    label_visibility="collapsed")
-    region = AVAILABLE_REGIONS.get(region_label, "hormuz")
+        region = _render_region_selector()
+    region_label = next(
+        (name for name, key in AVAILABLE_REGIONS.items() if key == region),
+        region.replace("_", " ").title(),
+    )
 
     # The selected region's merged config drives which agents are active for
     # this run. Cached per region by load_app_config, so switching back is free.
@@ -182,7 +219,7 @@ def render() -> None:
 
         _render_trend_chart(win_days, win_vals, peak_day, thresholds, route["name"],
                             win_dates=win_dates, spikes=spikes)
-        st.caption(TIMELINE_AXIS_NOTE)
+        st.caption(TIMELINE_SYNTHETIC_CAPTION)
 
         # -------- peak explanation (inline, natural language) --------------
         clicked = st.session_state.get("_peak_clicked", False)
@@ -233,11 +270,10 @@ def render() -> None:
         import streamlit.components.v1 as components
 
         components.html(html, height=470)
-        st.caption(
-            f"Routes are colour-coded by status. Click a route on the map to select it; "
-            f"vessel markers along **{route['name']}** open detail popups. "
-            f"Assessment day: day {day} of the monitored year."
-        )
+        # Only the assessment day is load-bearing here — that every panel is
+        # evaluated on the same day isn't visible from the UI. The rest was
+        # instructions for controls that explain themselves.
+        st.caption(f"All panels assessed on the same day: {relative_day_label(all_dates[day - 1])}.")
 
     # ======================= RIGHT column ==================================
     with col_right:
@@ -277,8 +313,6 @@ def render() -> None:
         else:
             st.caption("No extracted headlines available — run "
                        "`python scripts/populate_knowledge_base.py` to refresh the feed.")
-        st.caption("Headlines come from the system's own news-extraction layer, "
-                   "scoped to the selected chokepoint.")
 
     # ============ FULL WIDTH — agent breakdown + vessel detail =============
     _render_agent_breakdown(region, ts, all_dates, win_dates)
@@ -288,6 +322,19 @@ def render() -> None:
 # ---------------------------------------------------------------------------
 # Panel internals
 # ---------------------------------------------------------------------------
+
+
+def _relative_xaxis(dates) -> dict:
+    """Plotly ``xaxis`` config labelling ``dates`` by distance from today.
+
+    Shared by the composite trend and the agent breakdown so the two charts
+    carry identical tick labels as well as an identical range.
+    """
+    tickvals, ticktext = relative_axis_ticks(dates)
+    return dict(
+        title=None, tickfont=dict(size=10),
+        tickmode="array", tickvals=tickvals, ticktext=ticktext,
+    )
 
 
 def _render_spike_panel(region, ts, params, spikes, all_dates) -> None:
@@ -369,11 +416,13 @@ def _render_agent_breakdown(region, ts, all_dates, win_dates=None) -> None:
 
     st.markdown("**Agent contributions**")
     fig = go.Figure()
+    rel = [relative_day_label(d) for d in frame.index]
     for column in frame.columns:
         fig.add_trace(go.Scatter(
             x=frame.index, y=frame[column], mode="lines", name=column,
             line=dict(color=colors.get(column, "#8d99a8"), width=1.6),
-            hovertemplate=f"{column} · %{{x|%d %b %Y}} · %{{y:.2f}}<extra></extra>",
+            customdata=rel,
+            hovertemplate=f"{column} · %{{customdata}} · %{{y:.2f}}<extra></extra>",
         ))
     fig.update_layout(
         height=300, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)",
@@ -381,20 +430,19 @@ def _render_agent_breakdown(region, ts, all_dates, win_dates=None) -> None:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0,
                     font=dict(size=11)),
         yaxis=dict(range=[0, 1.02], title=None, gridcolor="#1c2431"),
-        # Pinned to the composite's window so the two charts stay in step.
-        xaxis=dict(title=None, tickfont=dict(size=10),
-                   range=[frame.index[0], frame.index[-1]]),
+        # Same tick labels and range as the composite, so the two stay in step.
+        xaxis={**_relative_xaxis(frame.index),
+               "range": [frame.index[0], frame.index[-1]]},
         hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True,
                     config={"displayModeBar": False})
 
+    # A missing line is the one thing the chart can't explain about itself.
     passive = get_region(region).passive_agents()
     st.caption(
-        f"One line per active agent, on the same window as the trend above. "
-        f"Click a name in the legend to toggle it. "
-        f"Not shown (passive here): {', '.join(passive) or 'none'}. "
-        f"{TIMELINE_AXIS_NOTE}"
+        f"{TIMELINE_SYNTHETIC_CAPTION} Not shown (passive in this region): "
+        f"{', '.join(a.replace('_', ' ') for a in passive) or 'none'}."
     )
 
 
@@ -427,10 +475,11 @@ def _render_vessel_panel(region, ts, params, day, routes) -> None:
         f"<span style='color:{vessel['color_hex']}'>●</span></div>",
         unsafe_allow_html=True,
     )
+    # Kept: neither fact is visible from the panel, and both change how a
+    # reader should weigh it.
     st.caption(
-        "Vessel records are deterministic synthetic placeholders for this view — "
-        "the pipeline tracks daily aggregate arrivals, not per-vessel AIS. A "
-        "vessel's status is its corridor's risk for the assessment day, so "
+        "Synthetic vessel records — the pipeline tracks daily aggregate "
+        "arrivals, not per-vessel AIS. Status is the corridor's risk, so "
         "vessels on one corridor share it."
     )
 
@@ -499,19 +548,30 @@ def _render_trend_chart(win_days, win_vals, peak_day, thresholds, route_name,
     for y, lbl in ((med / 2, "Low"), ((med + crit) / 2, "High"), ((crit + 1) / 2, "Critical")):
         fig.add_annotation(x=xs[0], y=y, text=lbl, showarrow=False,
                            font=dict(size=10, color="#8d99a8"), xanchor="left")
-    hover_x = "%{x|%d %b %Y}" if win_dates is not None else "day %{x}"
+    # Hover reports distance from today, matching the tick labels — a calendar
+    # date here would read as an event that happened on that date.
+    rel = {d: relative_day_label(d) for d in xs} if win_dates is not None else {}
+    hover_x = "%{customdata[1]}" if win_dates is not None else "day %{x}"
+    def _cdata(indices):
+        """customdata rows of (status word, relative-day label)."""
+        return [[words[i], rel.get(xs[i], f"day {win_days[i]}")] for i in indices]
+
     fig.add_trace(go.Scatter(
         x=xs, y=win_vals, mode="lines", name="risk",
         line=dict(color="#dfe6ee", width=2.2),
-        customdata=words, hovertemplate=f"{hover_x} · %{{customdata}}<extra></extra>",
+        customdata=_cdata(range(len(xs))),
+        hovertemplate=f"{hover_x} · %{{customdata[0]}}<extra></extra>",
     ))
-    peak_val = win_vals[win_days.index(peak_day)]
+    peak_idx = win_days.index(peak_day)
+    peak_val = win_vals[peak_idx]
     fig.add_trace(go.Scatter(
         x=[day_to_x[peak_day]], y=[peak_val], mode="markers", name="peak",
         marker=dict(size=13, color="#d9a514", symbol="diamond",
                     line=dict(color="#0b0e14", width=1.5)),
-        customdata=[words[win_days.index(peak_day)]],
-        hovertemplate=f"most significant peak · {hover_x} · %{{customdata}}<extra></extra>",
+        customdata=_cdata([peak_idx]),
+        hovertemplate=(
+            f"most significant peak · {hover_x} · %{{customdata[0]}}<extra></extra>"
+        ),
     ))
     # Trace 2 — threshold crossings. Clicking one opens its explanation.
     in_window = [s for s in spikes if s["day"] in day_to_x]
@@ -522,9 +582,12 @@ def _render_trend_chart(win_days, win_vals, peak_day, thresholds, route_name,
             mode="markers", name="spikes",
             marker=dict(size=9, color="#d64545", symbol="circle-open",
                         line=dict(width=2.2)),
-            customdata=[s["level"] for s in in_window],
+            customdata=[
+                [s["level"], rel.get(day_to_x[s["day"]], f"day {s['day']}")]
+                for s in in_window
+            ],
             hovertemplate=(
-                f"crossed into %{{customdata}} · {hover_x}"
+                f"crossed into %{{customdata[0]}} · {hover_x}"
                 "<br><i>click to explain</i><extra></extra>"
             ),
         ))
@@ -533,7 +596,8 @@ def _render_trend_chart(win_days, win_vals, peak_day, thresholds, route_name,
         plot_bgcolor="#10151d", margin=dict(l=6, r=6, t=24, b=4), showlegend=False,
         title=dict(text=f"Risk trend — {route_name}", font=dict(size=12)),
         yaxis=dict(range=[0, 1.02], showticklabels=False, showgrid=False),  # no raw scores
-        xaxis=dict(title=None, tickfont=dict(size=10)),
+        xaxis=_relative_xaxis(xs) if win_dates is not None
+        else dict(title=None, tickfont=dict(size=10)),
     )
     event = st.plotly_chart(fig, use_container_width=True, on_select="rerun",
                             key="trend_chart", config={"displayModeBar": False})
@@ -609,5 +673,4 @@ def _render_decision(ts, params, route, day, top_driver, region=None):
     if hist_event:
         rationale += f" — similar to {hist_event}"
     st.markdown(rationale + ".")
-    st.markdown(f"<div class='rule-box'>rule fired: {rule}</div>", unsafe_allow_html=True)
     st.caption("Rule-based recommendation, not an automated decision.")

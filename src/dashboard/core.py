@@ -81,6 +81,7 @@ __all__ = [
     "get_region_map", "region_destinations", "timeline_dates",
     "detect_risk_spikes", "agent_contributions",
     "TIMELINE_AXIS_NOTE", "TIMELINE_SOURCE_RANGE",
+    "TIMELINE_SYNTHETIC_CAPTION", "relative_day_label", "relative_axis_ticks",
 ]
 
 # ---------------------------------------------------------------------------
@@ -499,6 +500,70 @@ TIMELINE_AXIS_NOTE = (
 
 #: The split's true timestamps, stated once so the shift stays auditable.
 TIMELINE_SOURCE_RANGE = ("2025-01-01", "2025-12-31")
+
+#: Short caption rendered under every chart on the display axis. Charts label
+#: their ticks *relative to today* rather than as calendar dates (see
+#: :func:`relative_axis_ticks`), so this states the one thing a reader still
+#: needs: the series is synthetic and the positions are relative.
+TIMELINE_SYNTHETIC_CAPTION = (
+    "⚠️ Synthetic evaluation data on a relative timeline — positions are "
+    "relative to today, not calendar dates."
+)
+
+
+def relative_day_label(date, today=None, compact: bool = False) -> str:
+    """Label one date by its distance from today.
+
+    Args:
+        date: The date to label.
+        today: Reference point; defaults to today at midnight.
+        compact: Use the short form for axis ticks. The long form is prose
+            ("28 days ago" in a sentence); the short form keeps five ticks
+            horizontal in a narrow chart instead of rotating them diagonally.
+
+    Returns:
+        ``"Today"``, or e.g. ``"90 days ago"`` / ``"90d ago"``.
+    """
+    reference = pd.Timestamp.now().normalize() if today is None else pd.Timestamp(today)
+    offset = (pd.Timestamp(date).normalize() - reference).days
+    if offset >= 0:
+        return "Today"
+    days = -offset
+    if compact:
+        return f"{days}d ago"
+    return "1 day ago" if days == 1 else f"{days} days ago"
+
+
+def relative_axis_ticks(dates, n_ticks: int = 5, today=None):
+    """Tick positions and labels for a relative (non-calendar) date axis.
+
+    Calendar labels on this axis invite a real misreading: a spike at
+    "18 Jan 2026" looks like something that happened in January, when the
+    series is synthetic and re-indexed (see :func:`timeline_dates`). Labelling
+    by distance from today keeps the recency the axis is *for* while removing
+    the false calendar precision.
+
+    Args:
+        dates: The display axis.
+        n_ticks: How many ticks to place, including both ends.
+        today: Reference point for the labels; defaults to today.
+
+    Returns:
+        ``(tickvals, ticktext)`` for a plotly ``xaxis``. Empty lists for an
+        empty axis.
+    """
+    axis = list(dates)
+    if not axis:
+        return [], []
+    count = max(2, int(n_ticks))
+    step = max(1, (len(axis) - 1) // (count - 1))
+    positions = list(range(0, len(axis), step))
+    if positions[-1] != len(axis) - 1:
+        positions.append(len(axis) - 1)
+    return (
+        [axis[i] for i in positions],
+        [relative_day_label(axis[i], today, compact=True) for i in positions],
+    )
 
 
 def timeline_dates(n: int = _TOTAL_DAYS, end: pd.Timestamp | None = None) -> pd.DatetimeIndex:

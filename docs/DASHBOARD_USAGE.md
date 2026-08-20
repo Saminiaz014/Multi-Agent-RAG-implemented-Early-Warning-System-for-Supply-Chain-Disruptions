@@ -24,7 +24,9 @@ View**) renders the evaluation suite, which is not region-scoped.
 
 ## The region selector
 
-Top-right of the Decision View header, beside the page title:
+One button per chokepoint, top-right of the Decision View header. The active
+region's button is highlighted, so the control itself answers "which region am
+I looking at":
 
 | Label | Region key |
 |---|---|
@@ -34,8 +36,9 @@ Top-right of the Decision View header, beside the page title:
 | Strait of Malacca | `malacca` |
 
 The list is built from `src.core.regions.REGIONS` at import
-(`core.AVAILABLE_REGIONS`), so a region added to the registry appears in the
-dropdown with no UI change — and the two cannot drift apart.
+(`core.AVAILABLE_REGIONS`), so a region added to the registry gets a button with
+no UI change — and the two cannot drift apart. Give it an icon and short label
+in `decision_view._REGION_BUTTONS`, or it falls back to its display name.
 
 ### What changes when you switch
 
@@ -68,18 +71,23 @@ identity fields are deterministic synthetic labels.
 A region with no corridors still falls back to the activation summary panel
 (active agents, plus each passive agent's recorded reason).
 
-### The timeline's dates are a display window — read this
+### The timeline is relative, not a calendar
 
-The trend chart's x-axis **ends today**, but the underlying series is the
-365-day evaluation test split (seed 44), whose own timestamps run
-**2025-01-01 → 2025-12-31**. The axis re-indexes that series onto a rolling
-window so the right edge is always current.
+Both charts label the x-axis by **distance from today** — `364d ago`, `182d
+ago`, `Today` — not with calendar dates. That is deliberate. The underlying
+series is the 365-day evaluation test split (seed 44), whose own timestamps run
+**2025-01-01 → 2025-12-31**, re-indexed onto a window ending today. A calendar
+label like "18 Jan 2026" invites exactly the misreading the axis can't support:
+that something happened in January. Distance-from-today keeps the recency the
+axis is *for* and drops the false precision.
 
-**A date on this axis is a position in a synthetic series, not a calendar
-event.** In particular it has nothing to do with the real April–May 2026 Hormuz
-shutdown in `data/raw/shuaiba_arrivals.csv`. The note under every chart using
-the axis (`core.TIMELINE_AXIS_NOTE`) says so; leave it in place if you restyle
-the page.
+Every chart on this axis carries `core.TIMELINE_SYNTHETIC_CAPTION` — "⚠️
+Synthetic evaluation data on a relative timeline". Leave it in place if you
+restyle the page. Nothing on this axis relates to the real April–May 2026
+Hormuz shutdown in `data/raw/shuaiba_arrivals.csv`.
+
+Tick labels use a compact form (`28d ago`) so five of them stay horizontal in
+the narrow trend chart; prose uses the long form (`28 days ago`).
 
 To see a region's true, unrelabelled scoring, run it headlessly:
 
@@ -216,10 +224,11 @@ have corridors, so this means `core._ROUTES` has no entry for the selected key �
 check the region was added to `_ROUTES` and `_REGION_MAP`, not just to the
 registry.
 
-### The timeline says a date that means nothing to me
+### The timeline shows "182d ago" instead of a date
 
-Correct — it is a display window ending today, not the data's own dates. See
-*The timeline's dates are a display window* above.
+Deliberate — see *The timeline is relative, not a calendar* above. The series is
+synthetic and re-indexed, so calendar labels would imply a precision it doesn't
+have.
 
 ### A corridor's trend looks wrong for the region
 

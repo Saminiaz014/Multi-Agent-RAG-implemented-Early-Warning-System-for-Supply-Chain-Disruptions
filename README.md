@@ -1853,8 +1853,10 @@ region-aware too. Neither the Orchestrator nor the config merging changed.
 
 The Decision View's selector is populated from the region registry
 (`core.AVAILABLE_REGIONS = {display_name: key}`), so it cannot drift from
-`src/core/regions.py`. Selecting a region reloads its merged config, changing
-which agents run and what each connector is pointed at.
+`src/core/regions.py`. It renders as one button per chokepoint with the active
+one highlighted (Phase 12.5; previously a dropdown). Selecting a region reloads
+its merged config, changing which agents run and what each connector is pointed
+at, and updates `?region=` so the view stays shareable.
 
 **Presentation was Hormuz-only through Phase 12; Phase 12.5 extends it to all
 four regions** — see the Phase 12.5 section below. The activation-summary
@@ -1926,14 +1928,14 @@ routing is re-enabled.
 
 ### Timeline: date axis and spikes
 
-> ⚠️ **The date axis is a display window, not the data's dates.** The series is
-> the 365-day evaluation test split (seed 44), whose own timestamps run
-> **2025-01-01 → 2025-12-31**. The axis re-indexes it onto a rolling window
-> ending **today**, so the right edge is always current. A date on this axis is
-> a position in a synthetic series — it is **not** a calendar event, and it is
-> unrelated to the real April–May 2026 Hormuz shutdown in
-> `data/raw/shuaiba_arrivals.csv`. `core.TIMELINE_AXIS_NOTE` states this and is
-> rendered under every chart that uses the axis.
+> ⚠️ **The axis is relative, not a calendar.** Both charts label ticks by
+> distance from today (`364d ago` … `Today`). The series is the 365-day
+> evaluation test split (seed 44), whose own timestamps run **2025-01-01 →
+> 2025-12-31**, re-indexed onto a window ending today. Calendar labels invited
+> the misreading that something happened on a given date; relative labels keep
+> the recency and drop the false precision. `core.TIMELINE_SYNTHETIC_CAPTION`
+> is rendered under every chart on this axis. Nothing here relates to the real
+> April–May 2026 Hormuz shutdown in `data/raw/shuaiba_arrivals.csv`.
 
 Upward threshold crossings are drawn as clickable rings. Only the highest band
 crossed on a day is reported — 0.2 → 0.85 is one `Critical` spike, not three

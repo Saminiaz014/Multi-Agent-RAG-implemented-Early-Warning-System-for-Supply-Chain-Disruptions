@@ -14,12 +14,15 @@ from src.core.regions import get_region, list_regions
 from src.dashboard.core import (
     TIMELINE_AXIS_NOTE,
     TIMELINE_SOURCE_RANGE,
+    TIMELINE_SYNTHETIC_CAPTION,
     agent_contributions,
     detect_risk_spikes,
     get_region_map,
     get_routes,
     get_vessels,
     region_destinations,
+    relative_axis_ticks,
+    relative_day_label,
     timeline_dates,
 )
 from src.dashboard.llm_explanations import (
@@ -144,11 +147,133 @@ class TestTimelineDates:
         The series' own timestamps are 2025-01-01..2025-12-31; the axis maps
         them onto a window ending today. That is a presentation choice, and a
         reader who was not in the room must be able to see that it was made.
+        The long note records the provenance; the short caption is what the
+        charts render.
         """
         assert TIMELINE_SOURCE_RANGE == ("2025-01-01", "2025-12-31")
         assert "display window" in TIMELINE_AXIS_NOTE
         for fragment in TIMELINE_SOURCE_RANGE:
             assert fragment in TIMELINE_AXIS_NOTE
+
+        lowered = TIMELINE_SYNTHETIC_CAPTION.lower()
+        assert "synthetic" in lowered
+        assert "not calendar dates" in lowered
+
+
+class TestRelativeAxisLabels:
+    """Ticks read as distance from today, not as calendar dates (P12.5 polish).
+
+    A spike labelled "18 Jan 2026" invites exactly the misreading the axis
+    can't support — that something happened in January. Distance-from-today
+    keeps the recency the axis is for and drops the false precision.
+    """
+
+    def test_labels_are_relative_not_calendar(self) -> None:
+        axis = timeline_dates(365)
+        _, ticktext = relative_axis_ticks(axis)
+
+        assert ticktext[-1] == "Today"
+        assert ticktext[0] == "364d ago"
+        for label in ticktext:
+            assert "2025" not in label and "2026" not in label
+
+    def test_ticks_use_the_compact_form(self) -> None:
+        """Five long labels rotate diagonally in the narrow trend chart."""
+        _, ticktext = relative_axis_ticks(timeline_dates(30))
+        assert all(len(label) <= 9 for label in ticktext), ticktext
+
+    def test_single_label_edges(self) -> None:
+        today = pd.Timestamp("2026-08-20")
+        assert relative_day_label("2026-08-20", today) == "Today"
+        assert relative_day_label("2026-08-19", today) == "1 day ago"
+        assert relative_day_label("2026-07-21", today) == "30 days ago"
+        # Compact form is for ticks; prose keeps the readable wording.
+        assert relative_day_label("2026-07-21", today, compact=True) == "30d ago"
+        assert relative_day_label("2026-08-20", today, compact=True) == "Today"
+
+    def test_ticks_span_both_ends(self) -> None:
+        axis = timeline_dates(90)
+        tickvals, ticktext = relative_axis_ticks(axis, n_ticks=4)
+
+        assert tickvals[0] == axis[0]
+        assert tickvals[-1] == axis[-1]
+        assert len(tickvals) == len(ticktext) >= 4
+
+    def test_empty_axis_is_safe(self) -> None:
+        assert relative_axis_ticks([]) == ([], [])
+
+    def test_both_charts_share_one_tick_builder(self) -> None:
+        """Composite and agent charts must not drift apart in formatting."""
+        import src.dashboard.decision_view as view
+
+        axis = timeline_dates(120)
+        config = view._relative_xaxis(axis)
+
+        assert config["tickmode"] == "array"
+        assert config["ticktext"][-1] == "Today"
+        assert config["tickvals"][0] == axis[0]
+
+
+class TestRegionSelector:
+    """Region picker as buttons (P12.5 polish)."""
+
+    def test_every_region_has_a_button_label(self) -> None:
+        import src.dashboard.decision_view as view
+
+        for key in list_regions():
+            assert key in view._REGION_BUTTONS, f"{key} has no button label"
+            icon, short = view._REGION_BUTTONS[key]
+            assert icon and short.strip()
+
+    def test_button_labels_are_distinct(self) -> None:
+        """Two identical labels would make two chokepoints indistinguishable."""
+        import src.dashboard.decision_view as view
+
+        labels = [f"{i} {s}" for i, s in view._REGION_BUTTONS.values()]
+        assert len(set(labels)) == len(labels)
+
+
+class TestTextCleanup:
+    """Captions carry only what the UI can't say for itself (P12.5 polish)."""
+
+    def test_agent_caption_explains_missing_lines_not_the_legend(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Legend interaction is self-evident; a *missing* agent line is not."""
+        import src.dashboard.decision_view as view
+        from src.dashboard.core import compute_timeseries
+
+        captions: list[str] = []
+        monkeypatch.setattr(view.st, "markdown", lambda *a, **k: None)
+        monkeypatch.setattr(view.st, "plotly_chart", lambda *a, **k: None)
+        monkeypatch.setattr(view.st, "caption", lambda text, **k: captions.append(text))
+
+        ts = compute_timeseries("hand_tuned")
+        axis = timeline_dates(len(ts))
+        view._render_agent_breakdown("panama", ts, axis, axis)
+
+        assert captions, "the chart must still declare the synthetic timeline"
+        caption = captions[0]
+        assert "Synthetic" in caption
+        # Panama's passive agents are named, since their lines are absent.
+        assert "geopolitical" in caption and "routing" in caption
+        # …and the self-evident instruction is gone.
+        assert "legend" not in caption.lower()
+
+    def test_decision_panel_drops_the_raw_rule_trace(self) -> None:
+        """The plain-language rationale carries the "why"; the rule notation
+        was technical clutter. It still lives on the Analysis view, and
+        ``decide_action`` still returns it — only the badge box is gone.
+        """
+        source = (
+            __import__("pathlib").Path(__import__("src.dashboard.decision_view",
+                                                  fromlist=["__file__"]).__file__)
+            .read_text(encoding="utf-8")
+        )
+        assert "rule-box" not in source
+        assert "rule fired" not in source
+        # The honesty disclaimer stays.
+        assert "not an automated decision" in source
 
 
 class TestSpikeDetection:
