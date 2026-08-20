@@ -48,24 +48,73 @@ changes:
 - **ACLED countries** handed to `GeopoliticalConnector`.
 - **NewsAPI keywords** derived for `NewsConnector`.
 
-### What does *not* change — read this before judging the output
+### Corridors, vessels and the map (Phase 12.5)
 
-The Decision View's **route corridors, vessel markers, news feed and map are
-Hormuz-only**. `core._ROUTES` defines schematic corridor geometry for the
-Strait of Hormuz alone; the other three chokepoints have none, because drawing
-them would mean inventing polylines rather than sourcing them.
+All four chokepoints render the full Decision View. Each has three schematic
+corridors, its own camera framing, and named waypoint buttons.
 
-Selecting any region other than Hormuz therefore shows a summary panel — the
-region's display name, its active agents, and each passive agent with the
-registry's recorded reason for the exclusion — instead of the trend chart, map
-and route list. The detection pipeline for that region is fully configured and
-runnable; it is the *presentation* layer that is Hormuz-only.
+**The corridor polylines are schematic.** They trace each strait's real transit
+axis between real named places — Gatún and Miraflores locks, Perim Island, One
+Fathom Bank, Bandar Abbas — at a fidelity suitable for a dashboard overview.
+They are **not official IMO TSS geometry**; do not read navigational meaning
+into them.
 
-To confirm a non-Hormuz region really is scoring, run it headlessly:
+Vessel markers carry their **corridor's** risk score, so vessels on one corridor
+share a status. The pipeline has no per-vessel signal (daily aggregate arrivals,
+`aisstream.enabled` false, `fetch_from_api` a stub), and spreading the corridor
+score across ships with a per-vessel jitter would be invented detail. Vessel
+identity fields are deterministic synthetic labels.
+
+A region with no corridors still falls back to the activation summary panel
+(active agents, plus each passive agent's recorded reason).
+
+### The timeline's dates are a display window — read this
+
+The trend chart's x-axis **ends today**, but the underlying series is the
+365-day evaluation test split (seed 44), whose own timestamps run
+**2025-01-01 → 2025-12-31**. The axis re-indexes that series onto a rolling
+window so the right edge is always current.
+
+**A date on this axis is a position in a synthetic series, not a calendar
+event.** In particular it has nothing to do with the real April–May 2026 Hormuz
+shutdown in `data/raw/shuaiba_arrivals.csv`. The note under every chart using
+the axis (`core.TIMELINE_AXIS_NOTE`) says so; leave it in place if you restyle
+the page.
+
+To see a region's true, unrelabelled scoring, run it headlessly:
 
 ```bash
 python main.py --region panama
 ```
+
+### Spikes and explanations
+
+Upward threshold crossings appear as clickable rings on the trend chart; only
+the highest band crossed on a day is marked. Clicking one opens an explanation
+plus the contributing agent scores, and a Close button.
+
+Explanations come from Anthropic when `ANTHROPIC_API_KEY` is set, and otherwise
+from a deterministic paragraph composed from the live agent scores — the caption
+under each explanation says which. Both are cached per `(region, day, level)`,
+so re-clicking never re-queries.
+
+Because the axis is relabelled, the LLM is explicitly forbidden from naming a
+real incident, actor or date, and is asked to explain the *signal* instead. A
+safety refusal (plausible — these prompts name sanctions and military signals)
+falls back to the composed text rather than erroring.
+
+```python
+from src.dashboard.llm_explanations import clear_explanation_cache
+clear_explanation_cache()   # force a re-query
+```
+
+### Agent breakdown
+
+Below the map, a full-width chart plots one line per **active** agent on the
+same axis as the composite. Click a legend entry to toggle a line. Passive
+agents are omitted rather than drawn flat at zero — a zero line would read as
+"measured and quiet" rather than "not run in this region"; the caption lists
+which agents are passive.
 
 ---
 
@@ -160,10 +209,25 @@ The service's starting region follows the same precedence as the CLI:
 `src/core/regions.py` itself has one region — check it imports cleanly
 (`_validate_registry()` raises on a malformed entry).
 
-### A non-Hormuz region shows no chart or map
+### A region shows the agent-summary panel instead of the map
 
-Expected — see *What does not change* above. The panel listing active and
-passive agents is the intended output, not an error.
+That is the no-corridors fallback. As of Phase 12.5 all four registered regions
+have corridors, so this means `core._ROUTES` has no entry for the selected key —
+check the region was added to `_ROUTES` and `_REGION_MAP`, not just to the
+registry.
+
+### The timeline says a date that means nothing to me
+
+Correct — it is a display window ending today, not the data's own dates. See
+*The timeline's dates are a display window* above.
+
+### A corridor's trend looks wrong for the region
+
+Corridor `agents` are intersected with the region's active agents at render
+time, so a corridor listing a regionally-passive agent (Hormuz's eastbound
+corridor lists `routing`, muted since Phase 11) does not fold that signal in.
+If a trend looks like it includes a muted agent, check that the call site is
+passing `region` to `route_risk_series`.
 
 ### Region switch is slow every time
 
@@ -189,9 +253,14 @@ the composite.
 
 ## Known gaps
 
-- **Route corridors, vessel markers, news feed and map: Hormuz-only.** The
-  largest remaining asymmetry, and the reason non-Hormuz regions show a summary
-  panel rather than the full Decision View.
+- ~~Route corridors, vessel markers and map: Hormuz-only.~~ **Closed in Phase
+  12.5** — all four regions render the full Decision View. The corridors remain
+  schematic, not sourced navigational geometry.
+- **The timeline axis is relabelled onto a window ending today.** The series'
+  own dates are 2025-01-01 → 2025-12-31. This is a deliberate presentation
+  choice, labelled in the UI, but it means axis dates are not calendar events.
+- **Vessel records are synthetic and share a corridor's score.** There is no
+  per-vessel signal to draw on until `aisstream` is implemented.
 - **Analysis View is not region-scoped.** It renders
   `data/processed/evaluation_results.json`, which is produced by a single
   evaluation run and carries no region dimension yet.

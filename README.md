@@ -1856,13 +1856,9 @@ The Decision View's selector is populated from the region registry
 `src/core/regions.py`. Selecting a region reloads its merged config, changing
 which agents run and what each connector is pointed at.
 
-**Presentation is still Hormuz-only.** `core._ROUTES` defines schematic
-corridor geometry for the Strait of Hormuz alone; the other three have none,
-and inventing polylines for them would be fabrication, not configuration. Every
-other region therefore renders an activation summary — active agents, and each
-passive agent with the registry's recorded reason — instead of the trend chart,
-map and route list. The pipeline for those regions is fully configured and
-runs headlessly via `python main.py --region <key>`.
+**Presentation was Hormuz-only through Phase 12; Phase 12.5 extends it to all
+four regions** — see the Phase 12.5 section below. The activation-summary
+fallback remains for any region without corridors.
 
 ### Per-region caching
 
@@ -1904,6 +1900,86 @@ pytest tests/test_dashboard_regions.py tests/test_api_regions.py -v
 
 See `docs/DASHBOARD_USAGE.md` for the selector, caching behaviour, endpoint
 recipes and troubleshooting.
+
+---
+
+## Phase 12.5 — Decision View UX
+
+All four chokepoints now render the full Decision View. Changes are confined to
+`src/dashboard/`; the pipeline, API and config layers are untouched.
+
+### Region corridors and map framing
+
+Each region has three schematic corridors and its own camera framing. Corridor
+polylines trace each strait's real transit axis between real named places
+(Gatún and Miraflores locks, Perim Island, One Fathom Bank, Bandar Abbas) at
+dashboard-overview fidelity — **they are not official IMO TSS geometry** and
+carry no navigational meaning. Map quick-jump buttons are the selected region's
+own waypoints; the previous fixed Hormuz/Red Sea/Malacca/**Suez** chip row is
+gone, so the map no longer offers jumps out of the region under analysis.
+
+Corridor `agents` are **intersected with the region's active agents** at render
+time. Hormuz's eastbound corridor lists `routing`, which Phase 11 muted
+everywhere; without the intersection its trend renormalised over a signal the
+region never runs. The corridor keeps listing it, so it returns automatically if
+routing is re-enabled.
+
+### Timeline: date axis and spikes
+
+> ⚠️ **The date axis is a display window, not the data's dates.** The series is
+> the 365-day evaluation test split (seed 44), whose own timestamps run
+> **2025-01-01 → 2025-12-31**. The axis re-indexes it onto a rolling window
+> ending **today**, so the right edge is always current. A date on this axis is
+> a position in a synthetic series — it is **not** a calendar event, and it is
+> unrelated to the real April–May 2026 Hormuz shutdown in
+> `data/raw/shuaiba_arrivals.csv`. `core.TIMELINE_AXIS_NOTE` states this and is
+> rendered under every chart that uses the axis.
+
+Upward threshold crossings are drawn as clickable rings. Only the highest band
+crossed on a day is reported — 0.2 → 0.85 is one `Critical` spike, not three
+stacked ones — and the bands come from the engine's own thresholds rather than a
+second hardcoded set.
+
+### Spike explanations
+
+Clicking a spike opens an explanation plus the contributing agent scores.
+`src/dashboard/llm_explanations.py` follows the pattern `core.generate_risk_narrative`
+already established: Anthropic (`claude-opus-5`) when `ANTHROPIC_API_KEY` is
+set, otherwise a deterministic paragraph composed from the live agent scores.
+Cached per `(region, day, level)`.
+
+Because the axis is relabelled, the system prompt **forbids naming any real
+incident, actor or date** and asks for an explanation of the *signal*. The
+composed path cannot violate this by construction — it only restates the scores
+it was given. `stop_reason == "refusal"` is checked before reading content
+(realistic here: these prompts name sanctions, military and blockade signals)
+and falls through to the composed text.
+
+### Vessels
+
+Vessel markers carry **their corridor's** risk — the pipeline's own scoped
+aggregation, the same number the route status list shows. Vessels on one
+corridor therefore share a score. Spreading it with per-ship jitter would look
+more informative while being entirely invented, and would let a reader believe
+one ship was measurably riskier than the one beside it. Records are
+deterministic synthetic placeholders (`synthetic: True`) with region-appropriate
+destination ports; the pipeline tracks daily aggregate arrivals, not per-vessel
+AIS.
+
+### Agent breakdown and news
+
+A full-width per-agent chart shares the composite's axis, with an interactive
+legend. Passive agents are **omitted rather than drawn flat at zero** — a zero
+line reads as "measured and quiet" instead of "not run here". The news feed
+keeps its existing region / all-regions toggle and is region-scoped via
+`core.get_news`.
+
+### Test Coverage (Phase 12.5)
+
+`tests/test_dashboard_ux.py` — 27 tests: corridor coverage and agent scoping,
+map framing containment, region-appropriate vessel destinations, date-axis
+behaviour and the declared shift, spike banding, agent-line omission, vessel
+risk provenance, and explanation composition/caching/refusal handling.
 
 ---
 

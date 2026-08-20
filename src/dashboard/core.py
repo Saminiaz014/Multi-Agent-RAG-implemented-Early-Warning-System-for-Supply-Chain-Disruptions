@@ -77,6 +77,10 @@ __all__ = [
     "get_routes", "route_risk_series", "get_vessels", "get_news",
     "generate_risk_narrative", "fig_to_jpeg", "export_button", "select_route",
     "route_status_word", "DASH_CSS",
+    # Phase 12.5
+    "get_region_map", "region_destinations", "timeline_dates",
+    "detect_risk_spikes", "agent_contributions",
+    "TIMELINE_AXIS_NOTE", "TIMELINE_SOURCE_RANGE",
 ]
 
 # ---------------------------------------------------------------------------
@@ -132,9 +136,14 @@ AVAILABLE_REGIONS: dict[str, str] = {
 }
 
 #: Monitored routes per chokepoint. Coordinates are schematic corridor
-#: polylines for visualisation (lng, lat) — not official IMO TSS geometry.
+#: polylines for visualisation (lng, lat) — **not official IMO TSS geometry**.
+#: They trace each strait's real transit axis between real named places, at a
+#: fidelity suitable for a dashboard overview and nothing else; do not read
+#: navigational meaning into them.
 #: ``agents`` scopes the route's trend to the pipeline signals most relevant
-#: to that corridor (same masking mechanism as the diversity ablation).
+#: to that corridor (same masking mechanism as the diversity ablation), and is
+#: intersected with the region's *active* agents at render time — a corridor
+#: cannot be scoped to an agent that is passive for its region.
 _ROUTES: dict[str, list[dict]] = {
     "hormuz": [
         {
@@ -159,6 +168,139 @@ _ROUTES: dict[str, list[dict]] = {
                        (56.55, 25.95), (56.60, 26.20)],
         },
     ],
+    "panama": [
+        {
+            "key": "atlantic_approach",
+            "name": "Atlantic approach — Colón anchorage",
+            # Congestion and the transit-slot queue are the documented Panama
+            # story; geopolitical is passive for this region and is not listed.
+            "agents": ["shipping", "market", "news_sentiment"],
+            "coords": [(-79.98, 9.62), (-79.95, 9.48), (-79.93, 9.40),
+                       (-79.92, 9.36)],
+        },
+        {
+            "key": "canal_transit",
+            "name": "Canal transit — Gatún to Miraflores",
+            "agents": ["natural_disaster", "shipping", "market"],
+            "coords": [(-79.92, 9.36), (-79.90, 9.27), (-79.84, 9.18),
+                       (-79.76, 9.09), (-79.66, 9.02), (-79.59, 8.99)],
+        },
+        {
+            "key": "pacific_approach",
+            "name": "Pacific approach — Balboa anchorage",
+            "agents": ["shipping", "news_sentiment"],
+            "coords": [(-79.59, 8.99), (-79.56, 8.93), (-79.51, 8.84),
+                       (-79.46, 8.74)],
+        },
+    ],
+    "bab_el_mandeb": [
+        {
+            "key": "northbound_red_sea",
+            "name": "Northbound — strait to southern Red Sea",
+            "agents": ["shipping", "geopolitical", "news_sentiment"],
+            "coords": [(43.62, 12.18), (43.46, 12.48), (43.32, 12.74),
+                       (43.06, 13.18), (42.82, 13.68)],
+        },
+        {
+            "key": "southbound_aden",
+            "name": "Southbound — strait to Gulf of Aden",
+            "agents": ["shipping", "geopolitical", "market"],
+            "coords": [(42.86, 13.60), (43.14, 13.10), (43.38, 12.68),
+                       (43.60, 12.34), (44.02, 12.08)],
+        },
+        {
+            "key": "djibouti_approach",
+            "name": "Djibouti / Doraleh approach",
+            "agents": ["shipping", "market", "news_sentiment"],
+            "coords": [(43.40, 12.20), (43.22, 11.98), (43.12, 11.76),
+                       (43.06, 11.60)],
+        },
+    ],
+    "malacca": [
+        {
+            "key": "northbound_andaman",
+            "name": "Northbound — strait to Andaman Sea",
+            # Market is evidence-passive for Malacca; not listed here.
+            "agents": ["shipping", "geopolitical", "news_sentiment"],
+            "coords": [(101.52, 2.28), (100.82, 3.18), (100.22, 4.18),
+                       (99.54, 5.16)],
+        },
+        {
+            "key": "southbound_singapore",
+            "name": "Southbound — strait to Singapore Strait",
+            "agents": ["shipping", "geopolitical"],
+            "coords": [(101.18, 2.62), (101.92, 2.08), (102.82, 1.58),
+                       (103.52, 1.28)],
+        },
+        {
+            "key": "port_klang_approach",
+            "name": "One Fathom Bank — Port Klang approach",
+            # Haze is the dominant documented Malacca hazard (PSI 322-341 in
+            # 2015): a visibility problem on the approach, hence disaster here.
+            "agents": ["natural_disaster", "shipping", "news_sentiment"],
+            "coords": [(100.98, 2.86), (101.18, 2.94), (101.32, 2.99),
+                       (101.40, 3.02)],
+        },
+    ],
+}
+
+#: Per-region map framing and named waypoints (Phase 12.5).
+#:
+#: Kept **separate from** :data:`_ROUTES` deliberately: ``get_routes()`` returns
+#: the corridor list and several callers plus the test suite depend on that
+#: shape, so map-only metadata lives here rather than nesting the two.
+#:
+#: ``chokepoints`` are real, named places — locks, ports, islands, banks — used
+#: as map labels. ``center``/``zoom`` frame the camera on the strait.
+_REGION_MAP: dict[str, dict] = {
+    "hormuz": {
+        "center": (56.30, 26.30),
+        "zoom": 7.6,
+        "chokepoints": [
+            {"name": "Hormuz Strait Center", "lng": 56.25, "lat": 26.56},
+            {"name": "Bandar Abbas", "lng": 56.27, "lat": 27.18},
+            {"name": "Fujairah anchorage", "lng": 56.33, "lat": 25.12},
+        ],
+    },
+    "panama": {
+        "center": (-79.75, 9.15),
+        "zoom": 9.0,
+        "chokepoints": [
+            {"name": "Colón — Atlantic entrance", "lng": -79.92, "lat": 9.36},
+            {"name": "Gatún Locks", "lng": -79.92, "lat": 9.27},
+            {"name": "Miraflores Locks", "lng": -79.59, "lat": 8.996},
+            {"name": "Balboa — Pacific entrance", "lng": -79.56, "lat": 8.93},
+        ],
+    },
+    "bab_el_mandeb": {
+        "center": (43.30, 12.60),
+        "zoom": 7.8,
+        "chokepoints": [
+            {"name": "Perim Island", "lng": 43.42, "lat": 12.65},
+            {"name": "Mocha", "lng": 43.25, "lat": 13.32},
+            {"name": "Djibouti Port", "lng": 43.15, "lat": 11.60},
+        ],
+    },
+    "malacca": {
+        "center": (101.60, 2.70),
+        "zoom": 7.2,
+        "chokepoints": [
+            {"name": "One Fathom Bank", "lng": 100.98, "lat": 2.87},
+            {"name": "Port Klang", "lng": 101.39, "lat": 3.00},
+            {"name": "Singapore Strait", "lng": 103.80, "lat": 1.25},
+        ],
+    },
+}
+
+#: Representative destination ports per region for the synthetic vessel
+#: records. Real ports, used only as UI labels — see :func:`get_vessels`.
+_REGION_DESTINATIONS: dict[str, list[str]] = {
+    "hormuz": ["Jebel Ali", "Ras Tanura", "Shuaiba Port", "Fujairah",
+               "Bandar Abbas", "Hamad Port", "Mina Salman"],
+    "panama": ["Balboa", "Colón", "Manzanillo", "Cristóbal", "Rodman"],
+    "bab_el_mandeb": ["Djibouti", "Jeddah", "Aden", "Port Sudan", "Massawa"],
+    "malacca": ["Singapore", "Port Klang", "Tanjung Pelepas", "Belawan",
+                "Penang"],
 }
 
 #: Representative destinations for the synthetic vessel records (real ports).
@@ -346,6 +488,45 @@ def compute_timeseries(weight_mode: str) -> pd.DataFrame:
     return df
 
 
+#: Text shown wherever the shifted date axis appears. The axis is a display
+#: window, not the data's own dates — see :func:`timeline_dates`.
+TIMELINE_AXIS_NOTE = (
+    "Dates are a rolling display window ending today. The underlying series is "
+    "the 365-day evaluation test split (seed 44), whose own timestamps run "
+    "2025-01-01 to 2025-12-31; it is re-indexed onto this window for "
+    "presentation. Treat positions as relative, not as calendar events."
+)
+
+#: The split's true timestamps, stated once so the shift stays auditable.
+TIMELINE_SOURCE_RANGE = ("2025-01-01", "2025-12-31")
+
+
+def timeline_dates(n: int = _TOTAL_DAYS, end: pd.Timestamp | None = None) -> pd.DatetimeIndex:
+    """Return the display date axis: ``n`` consecutive days ending at ``end``.
+
+    **This re-indexes the series onto a window ending today rather than showing
+    its own timestamps.** The evaluation test split that drives the timeline
+    carries real timestamps of 2025-01-01..2025-12-31
+    (:data:`TIMELINE_SOURCE_RANGE`); this maps row *i* onto a trailing window
+    instead, so the right edge is always the current date.
+
+    That is a deliberate presentation choice, not a data property. Anything
+    rendering this axis must show :data:`TIMELINE_AXIS_NOTE` alongside it, so a
+    reader cannot mistake an axis position for a calendar event — in
+    particular, a date here is unrelated to the real April-May 2026 Hormuz
+    shutdown in ``data/raw/shuaiba_arrivals.csv``.
+
+    Args:
+        n: Number of days; defaults to the series length.
+        end: Right edge. Defaults to today, normalised to midnight.
+
+    Returns:
+        A daily :class:`~pandas.DatetimeIndex` of length ``n``.
+    """
+    right = (pd.Timestamp.now().normalize() if end is None else pd.Timestamp(end).normalize())
+    return pd.date_range(end=right, periods=int(n), freq="D")
+
+
 def composite_series(ts: pd.DataFrame, params: dict, enabled: set[str]) -> pd.Series:
     """Composite risk from cached agent scores (mirrors ``_aggregate_daily``)."""
     inter = params["inter_weights"]
@@ -418,16 +599,135 @@ def sustained_high_flags(risk: pd.Series, high_thr: float, min_run: int = 5) -> 
 # ===========================================================================
 
 
+def detect_risk_spikes(
+    risk: pd.Series | list[float],
+    dates: pd.DatetimeIndex,
+    thresholds: dict,
+) -> list[dict]:
+    """Find days where risk crosses a threshold upwards.
+
+    Only *upward* crossings are reported, and only the highest band crossed on
+    a given day — a jump from 0.2 to 0.85 is one ``Critical`` spike, not three
+    stacked ones, which is what a reader would otherwise see.
+
+    Args:
+        risk: Composite risk per day, aligned with ``dates``.
+        dates: Display axis from :func:`timeline_dates`.
+        thresholds: The engine's own thresholds — reads ``risk_medium``,
+            ``risk_high`` and ``risk_critical`` so the bands match the rest of
+            the dashboard rather than hardcoding a second set.
+
+    Returns:
+        Spikes ordered by date, each ``{day, date, risk, level}`` where ``day``
+        is the 1-based index into the series.
+    """
+    values = list(risk)
+    if len(values) < 2:
+        return []
+
+    bands = [
+        ("Critical", float(thresholds.get("risk_critical", 0.8))),
+        ("High", float(thresholds.get("risk_high", 0.6))),
+        ("Medium", float(thresholds.get("risk_medium", 0.4))),
+    ]
+
+    spikes: list[dict] = []
+    for i in range(1, min(len(values), len(dates))):
+        prev, curr = float(values[i - 1]), float(values[i])
+        for level, threshold in bands:  # highest band first; take one and stop
+            if prev < threshold <= curr:
+                spikes.append({
+                    "day": i + 1,
+                    "date": pd.Timestamp(dates[i]),
+                    "risk": curr,
+                    "level": level,
+                })
+                break
+    return spikes
+
+
+def agent_contributions(
+    ts: pd.DataFrame, dates: pd.DatetimeIndex, active: set[str]
+) -> pd.DataFrame:
+    """Per-agent score series on the display date axis.
+
+    Args:
+        ts: Frame from :func:`compute_timeseries`.
+        dates: Display axis from :func:`timeline_dates`.
+        active: Agents active for the region — passive agents are omitted
+            rather than drawn as a flat zero line, which would read as
+            "measured and quiet" instead of "not run here".
+
+    Returns:
+        Date-indexed frame with one column per active agent, titled for display.
+    """
+    cols = [a for a in ALL_AGENTS if a in active and a in ts.columns]
+    frame = pd.DataFrame(
+        {a.replace("_", " ").title(): ts[a].to_numpy()[: len(dates)] for a in cols},
+        index=dates[: len(ts)],
+    )
+    frame.index.name = "date"
+    return frame
+
+
 def get_routes(region: str) -> list[dict]:
-    """Monitored routes for a chokepoint. Any region key is accepted; only
-    ``hormuz`` is populated for the thesis (others return an empty list)."""
+    """Monitored routes for a chokepoint.
+
+    All four Phase 11 regions carry schematic corridors as of Phase 12.5. Any
+    region key is still accepted; unknown keys return an empty list rather
+    than raising, so a caller can probe freely.
+    """
     return list(_ROUTES.get(str(region or "").lower(), []))
 
 
-def route_risk_series(ts: pd.DataFrame, params: dict, route: dict) -> pd.Series:
+def get_region_map(region: str) -> dict:
+    """Camera framing and named waypoints for ``region``'s map.
+
+    Args:
+        region: Region key. Unknown keys fall back to Hormuz's framing so the
+            map always renders something rather than a blank canvas.
+
+    Returns:
+        ``{"center": (lng, lat), "zoom": float, "chokepoints": [...]}``.
+    """
+    key = str(region or "").lower()
+    return dict(_REGION_MAP.get(key) or _REGION_MAP["hormuz"])
+
+
+def region_destinations(region: str) -> list[str]:
+    """Representative destination ports used for ``region``'s vessel labels."""
+    key = str(region or "").lower()
+    return list(_REGION_DESTINATIONS.get(key) or _REGION_DESTINATIONS["hormuz"])
+
+
+def route_risk_series(
+    ts: pd.DataFrame, params: dict, route: dict, region: str | None = None
+) -> pd.Series:
     """A route's risk trend — the pipeline aggregation scoped to the route's
-    relevant agent subset. Same underlying signals, no invented analytics."""
-    return composite_series(ts, params, set(route.get("agents", ALL_AGENTS)))
+    relevant agent subset. Same underlying signals, no invented analytics.
+
+    Args:
+        route: Corridor dict; its ``agents`` list scopes the aggregation.
+        region: When given, the corridor's agents are **intersected with that
+            region's active agents**. Without this a corridor listing a
+            regionally-passive agent would fold a signal into its trend that
+            the region never runs — Hormuz's eastbound corridor lists
+            ``routing``, which Phase 11 muted everywhere. The corridor keeps
+            listing it so the scoping stays honest about what the corridor is
+            about, and it starts contributing again if routing is re-enabled.
+
+    Returns:
+        The route's composite risk series.
+    """
+    agents = set(route.get("agents", ALL_AGENTS))
+    if region:
+        from src.core.regions import get_region
+
+        try:
+            agents &= set(get_region(region).active_agents())
+        except ValueError:
+            pass  # unknown region — fall back to the corridor's own scoping
+    return composite_series(ts, params, agents)
 
 
 def route_status_word(ts: pd.DataFrame, params: dict, route: dict, day: int) -> str:
@@ -435,17 +735,29 @@ def route_status_word(ts: pd.DataFrame, params: dict, route: dict, day: int) -> 
     return status_word(float(series.iloc[day - 1]), params["thresholds"])
 
 
-def get_vessels(route: dict, day: int) -> list[dict]:
+def get_vessels(route: dict, day: int, region: str = "hormuz") -> list[dict]:
     """Representative synthetic vessel records along a route — **UI only**.
 
     Per-vessel AIS is not tracked by this system (the shipping connector
-    ingests daily aggregates; ``aisstream.enabled`` is false), so these are
-    deterministic, clearly-synthetic placeholders as allowed by the redesign
-    spec. Vessel types are the shipping connector's real CSV classes.
+    ingests daily aggregates; ``aisstream.enabled`` is false, and
+    ``fetch_from_api`` is still a stub), so these are deterministic,
+    clearly-synthetic placeholders as allowed by the redesign spec. Vessel
+    types are the shipping connector's real CSV classes.
+
+    Args:
+        route: A corridor dict from :func:`get_routes`.
+        day: 1-based day index; seeds the generator so a given route+day always
+            yields the same vessels.
+        region: Region key, used only to pick plausible destination ports —
+            a Panama transit should not be bound for Ras Tanura.
+
+    Returns:
+        Vessel dicts, each carrying ``synthetic: True``.
     """
     coords = route.get("coords", [])
     if len(coords) < 2:
         return []
+    destinations = region_destinations(region)
     rng = np.random.default_rng((hash(route["key"]) % 2**16) * 1000 + int(day))
     n = int(rng.integers(4, 7))
     vessels = []
@@ -458,7 +770,7 @@ def get_vessels(route: dict, day: int) -> list[dict]:
         vessels.append({
             "id": f"IMO 9{rng.integers(100000, 999999)}",
             "type": _VESSEL_TYPES[int(rng.integers(0, len(_VESSEL_TYPES)))],
-            "destination": _VESSEL_DESTINATIONS[int(rng.integers(0, len(_VESSEL_DESTINATIONS)))],
+            "destination": destinations[int(rng.integers(0, len(destinations)))],
             "speed_kn": round(float(rng.uniform(8.0, 16.5)), 1),
             "lng": round(lng + float(rng.normal(0, 0.02)), 4),
             "lat": round(lat + float(rng.normal(0, 0.02)), 4),
@@ -825,6 +1137,7 @@ def build_map_html(
     route_status: dict[str, str] | None = None,
     status: str | None = None,
     maptiler_key: str | None = None,
+    region: str = "hormuz",
 ) -> str:
     """Build the MapLibre GL JS iframe HTML for the Decision view.
 
@@ -832,7 +1145,15 @@ def build_map_html(
     chokepoint with status-colored route lines, vessel markers, terrain and
     conditional 3-D buildings. Works with zero API keys; a MapTiler key (when
     provided) is injected into the rendered HTML only — never logged.
+
+    Phase 12.5: framing comes from ``region`` via :func:`get_region_map`, and
+    the quick-jump buttons are that region's own named waypoints rather than a
+    fixed cross-region list.
+
+    Args:
+        region: Region key deciding camera centre, zoom and waypoint buttons.
     """
+    region_map = get_region_map(region)
     key = resolve_map_key() if maptiler_key is None else maptiler_key.strip()
     if key:
         style_url = f"https://api.maptiler.com/maps/dataviz-dark/style.json?key={key}"
@@ -881,14 +1202,19 @@ def build_map_html(
         "vessels": vessels or [],
         "selected_route": selected_route,
         # Pitched regional camera on the strait — not a full-globe view.
-        "camera": {"lng": focus["lng"], "lat": focus["lat"] - 0.25,
-                   "zoom": 7.6, "pitch": 55, "bearing": -12},
+        # Centre and zoom come from the selected region so the camera frames
+        # the chokepoint actually being monitored.
+        "camera": {"lng": region_map["center"][0],
+                   "lat": region_map["center"][1] - 0.25,
+                   "zoom": float(region_map["zoom"]), "pitch": 55, "bearing": -12},
     }
+    # Quick-jump buttons are this region's own waypoints. Previously they were
+    # a fixed cross-region list (Hormuz / Red Sea / Malacca / Suez), which
+    # offered jumps out of the region under analysis.
     buttons = "".join(
-        f"<button class=\"{'primary' if p['name'] == focus['name'] else ''}\" "
-        f"onclick=\"flyTo({p['lng']},{p['lat']})\">{p['label']}</button>"
-        for p in [{**focus, "label": "Hormuz"}]
-        + [{**s, "label": s.get("region", s["name"]).replace("_", " ").title()} for s in secondary]
+        f"<button class=\"{'primary' if i == 0 else ''}\" "
+        f"onclick=\"flyTo({p['lng']},{p['lat']})\">{p['name']}</button>"
+        for i, p in enumerate(region_map["chokepoints"])
     )
     return _MAP_TEMPLATE.substitute(
         DATA=json.dumps(data), BUTTONS=buttons, FALLBACK=MAP_FALLBACK_MESSAGE,
