@@ -20,11 +20,14 @@ logger = logging.getLogger(__name__)
 MILITARY_EVENT_TYPES = {"Battles", "Explosions/Remote violence"}
 CIVILIAN_EVENT_TYPES = {"Violence against civilians"}
 
+#: Curated scenarios matching the static RAG cases. Region keys must exist in
+#: the registry — ``red_sea`` was retired in favour of ``bab_el_mandeb``, and
+#: documents tagged with the old key are unreachable by any region filter.
 HISTORICAL_SCENARIOS: list[dict] = [
     {"name": "hormuz_2019_tanker", "country": "Iran", "year": 2019, "region": "hormuz"},
     {"name": "iran_sanctions_2012", "country": "Iran", "year": 2012, "region": "hormuz"},
-    {"name": "houthi_red_sea_2024", "country": "Yemen", "year": 2024, "region": "red_sea"},
-    {"name": "somali_piracy_2011", "country": "Somalia", "year": 2011, "region": "red_sea"},
+    {"name": "houthi_red_sea_2024", "country": "Yemen", "year": 2024, "region": "bab_el_mandeb"},
+    {"name": "somali_piracy_2011", "country": "Somalia", "year": 2011, "region": "bab_el_mandeb"},
 ]
 
 
@@ -100,13 +103,36 @@ class ACLEDExtractor(BaseExtractor):
             "risk_level": risk_level,
         }
 
-    def extract_historical(self, region: str, **kwargs) -> list[dict]:
+    def extract_historical(
+        self, region: str, start_year: int | None = None,
+        end_year: int | None = None, **kwargs,
+    ) -> list[dict]:
+        """Summarize ACLED conflict activity per country-year for ``region``.
+
+        One document per country-year: a risk profile (event counts, military
+        vs civilian split, fatalities) rather than one document per incident.
+        A single country-year can hold thousands of ACLED rows, and individual
+        incidents retrieve poorly — the aggregate is the supply-chain signal.
+
+        Args:
+            region: Chokepoint key.
+            start_year: Overrides ``extraction.historical_range.start_year``.
+            end_year: Overrides ``extraction.historical_range.end_year``.
+        """
         countries = (
             self.config.get("extraction", {}).get("chokepoints", {}).get(region, {}).get("countries", [])
         )
-        start_year = self.config.get("extraction", {}).get("historical_range", {}).get("start_year", 2010)
-        end_year = self.config.get("extraction", {}).get("historical_range", {}).get("end_year", 2025)
-        sample_years = list(range(start_year, end_year + 1, 3))
+        hist = self.config.get("extraction", {}).get("historical_range", {}) or {}
+        start_year = int(hist.get("start_year", 2010) if start_year is None else start_year)
+        end_year = int(hist.get("end_year", 2025) if end_year is None else end_year)
+
+        # Stride 1 covers every year. The previous default of 3 sampled only a
+        # third of the span (2018, 2021, 2024, 2026 over 2018-2026), leaving
+        # gaps that read as quiet years rather than as unsampled ones.
+        stride = int(
+            (self.config.get("extraction", {}).get("acled", {}) or {}).get("year_stride", 1)
+        )
+        sample_years = list(range(start_year, end_year + 1, max(stride, 1)))
         if end_year not in sample_years:
             sample_years.append(end_year)
 

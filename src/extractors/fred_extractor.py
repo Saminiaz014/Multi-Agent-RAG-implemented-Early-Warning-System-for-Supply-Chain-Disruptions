@@ -24,17 +24,28 @@ FRED_SERIES: dict[str, dict] = {
     "BAMLH0A0HYM2": {"name": "High Yield Bond Spread", "description": "ICE BofA US High Yield Index Option-Adjusted Spread"},
 }
 
+#: Documented disruptions to sample market series around. Region keys must
+#: exist in the registry: ``suez`` and ``red_sea`` were retired, and documents
+#: carrying them are unreachable by any region filter — which is why this
+#: extractor produced nothing for three of the four regions.
+#:
+#: Ever Given is filed under bab_el_mandeb because the Suez blockage halted the
+#: whole Red Sea corridor, which Bab el-Mandeb gates; it is not a Suez-specific
+#: signal in this registry.
 DISRUPTION_PERIODS: list[dict] = [
     {"name": "hormuz_2019_tanker_attacks", "start": "2019-05-01", "end": "2019-08-31",
      "region": "hormuz", "agents": ["market", "geopolitical"]},
     {"name": "ever_given_2021", "start": "2021-03-15", "end": "2021-04-30",
-     "region": "suez", "agents": ["market", "routing", "shipping"]},
+     "region": "bab_el_mandeb", "agents": ["market", "routing", "shipping"]},
     {"name": "iran_sanctions_2012", "start": "2011-11-01", "end": "2013-03-31",
      "region": "hormuz", "agents": ["market", "geopolitical"]},
     {"name": "houthi_red_sea_2024", "start": "2023-11-01", "end": "2024-06-30",
-     "region": "red_sea", "agents": ["market", "geopolitical"]},
+     "region": "bab_el_mandeb", "agents": ["market", "geopolitical"]},
     {"name": "cyclone_gonu_2007", "start": "2007-05-01", "end": "2007-07-31",
      "region": "hormuz", "agents": ["market", "natural_disaster"]},
+    # Gatun Lake drought cut Panama Canal daily transits by roughly a third.
+    {"name": "panama_drought_2023", "start": "2023-07-01", "end": "2024-06-30",
+     "region": "panama", "agents": ["market", "routing", "shipping"]},
 ]
 
 
@@ -100,9 +111,52 @@ class FREDExtractor(BaseExtractor):
             "volatility": round(volatility, 2),
         }
 
-    def extract_historical(self, region: str, **kwargs) -> list[dict]:
+    @staticmethod
+    def _annual_periods(region: str, start_year: int, end_year: int) -> list[dict]:
+        """One market-conditions window per year across the span.
+
+        The curated :data:`DISRUPTION_PERIODS` only cover known incidents, so
+        every other year produced no market signal at all. These fill the span
+        so a query about an ordinary year retrieves the market context for it
+        rather than nothing.
+
+        Annual rather than monthly on purpose: FRED series here are global, so
+        a finer grain would copy the same worldwide prices into the knowledge
+        base once per region per window and crowd out region-specific
+        evidence. A year is enough to carry a spike and its volatility.
+        """
+        return [
+            {
+                "name": f"market_conditions_{year}",
+                "start": f"{year}-01-01",
+                "end": f"{year}-12-31",
+                "region": region,
+                "agents": ["market"],
+            }
+            for year in range(start_year, end_year + 1)
+        ]
+
+    def extract_historical(
+        self, region: str, start_year: int | None = None,
+        end_year: int | None = None, **kwargs,
+    ) -> list[dict]:
+        """Extract market signals for ``region``.
+
+        Combines the curated disruption windows with one annual window per
+        year, so coverage is continuous rather than limited to known incidents.
+
+        Args:
+            region: Chokepoint key.
+            start_year: Overrides ``extraction.historical_range.start_year``.
+            end_year: Overrides ``extraction.historical_range.end_year``.
+        """
+        hist = self.config.get("extraction", {}).get("historical_range", {}) or {}
+        start_year = int(hist.get("start_year", 2010) if start_year is None else start_year)
+        end_year = int(hist.get("end_year", 2025) if end_year is None else end_year)
+
         documents: list[dict] = []
         region_periods = [p for p in DISRUPTION_PERIODS if p["region"] == region]
+        region_periods += self._annual_periods(region, start_year, end_year)
 
         for period in region_periods:
             for series_id, series_info in FRED_SERIES.items():
@@ -133,7 +187,11 @@ class FREDExtractor(BaseExtractor):
                     severity = "low"
 
                 documents.append(self._normalize_document(
-                    doc_id=f"{period['name']}_{series_id}",
+                    # Region-qualified: annual window names repeat across
+                    # regions, and the builder deduplicates by id — an
+                    # unqualified id would keep one region's copy and silently
+                    # drop the rest.
+                    doc_id=f"{region}_{period['name']}_{series_id}",
                     text=text,
                     event_date=period["start"],
                     region=region,
