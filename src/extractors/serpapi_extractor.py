@@ -42,6 +42,10 @@ SERPAPI_URL = "https://serpapi.com/search.json"
 # collection with near-duplicate headlines about the same event.
 _MAX_RESULTS_PER_QUERY = 10
 
+# Region keys are registry keys. "red_sea" and "suez" were retired when the
+# extraction vocabulary was realigned; cases carrying them produced documents
+# no region filter could reach. See regions.RETIRED_REGION_ALIASES for why
+# Suez cases are filed under bab_el_mandeb.
 HISTORICAL_QUERIES: list[dict] = [
     {"case_id": "hormuz_2019", "region": "hormuz",
      "primary_agents": ["geopolitical", "shipping"],
@@ -51,7 +55,7 @@ HISTORICAL_QUERIES: list[dict] = [
          {"q": '"Gulf of Oman" tanker explosion Iran after:2019-06-01 before:2019-07-31',
           "context": "Gulf of Oman tanker incidents 2019"},
      ]},
-    {"case_id": "ever_given_2021", "region": "suez",
+    {"case_id": "ever_given_2021", "region": "bab_el_mandeb",
      "primary_agents": ["routing", "shipping"],
      "queries": [
          {"q": '"Ever Given" "Suez Canal" blocked after:2021-03-20 before:2021-04-15',
@@ -59,7 +63,7 @@ HISTORICAL_QUERIES: list[dict] = [
          {"q": '"Suez Canal" shipping disruption reroute after:2021-03-23 before:2021-04-10',
           "context": "Suez Canal shipping disruption and rerouting 2021"},
      ]},
-    {"case_id": "houthi_red_sea_2024", "region": "red_sea",
+    {"case_id": "houthi_red_sea_2024", "region": "bab_el_mandeb",
      "primary_agents": ["geopolitical", "routing", "news_sentiment"],
      "queries": [
          {"q": 'Houthi "Red Sea" shipping attack after:2023-11-01 before:2024-03-31',
@@ -75,7 +79,7 @@ HISTORICAL_QUERIES: list[dict] = [
          {"q": 'Iran "Strait of Hormuz" closure threat oil after:2010-01-01 before:2011-06-30',
           "context": "Iran Hormuz closure threat 2010-2011"},
      ]},
-    {"case_id": "somali_piracy_2011", "region": "red_sea",
+    {"case_id": "somali_piracy_2011", "region": "bab_el_mandeb",
      "primary_agents": ["routing", "shipping"],
      "queries": [
          {"q": 'Somalia piracy shipping "Gulf of Aden" after:2011-01-01 before:2011-12-31',

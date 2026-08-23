@@ -23,25 +23,27 @@ CHOKEPOINT_QUERIES: dict[str, list[str]] = {
         '"Strait of Hormuz" AND (shipping OR tanker OR blockade OR attack)',
         "Iran AND (sanctions OR oil OR embargo OR military)",
     ],
-    "red_sea": [
+    # Formerly keyed "red_sea"; renamed with the registry. The Suez queries
+    # that had their own retired "suez" key are folded in here — a Suez
+    # blockage reroutes the traffic this corridor carries, and Suez is not a
+    # region in its own right (see regions.RETIRED_REGION_ALIASES).
+    "bab_el_mandeb": [
         '"Red Sea" AND (Houthi OR shipping OR attack OR reroute)',
         '"Bab el-Mandeb" AND (shipping OR disruption)',
+        '"Suez Canal" AND (blockage OR disruption OR delay OR grounding)',
+        '"Suez Canal" AND (shipping OR container OR reroute)',
     ],
     "malacca": [
         '"Strait of Malacca" AND (piracy OR shipping OR disruption)',
         '"Malacca Strait" AND (security OR vessel)',
     ],
-    "suez": [
-        '"Suez Canal" AND (blockage OR disruption OR delay OR grounding)',
-        '"Suez Canal" AND (shipping OR container OR reroute)',
-    ],
 }
 
 HISTORICAL_EVENT_QUERIES: list[dict] = [
     {"query": "Ever Given Suez Canal blocked", "date_from": "2021-03-20", "date_to": "2021-04-15",
-     "region": "suez", "agents": ["routing", "shipping"]},
+     "region": "bab_el_mandeb", "agents": ["routing", "shipping"]},
     {"query": "Houthi Red Sea shipping attack", "date_from": "2023-11-01", "date_to": "2024-03-31",
-     "region": "red_sea", "agents": ["geopolitical", "routing", "news_sentiment"]},
+     "region": "bab_el_mandeb", "agents": ["geopolitical", "routing", "news_sentiment"]},
     {"query": "Iran sanctions oil embargo tanker", "date_from": "2024-01-01", "date_to": "2024-12-31",
      "region": "hormuz", "agents": ["geopolitical", "market"]},
 ]

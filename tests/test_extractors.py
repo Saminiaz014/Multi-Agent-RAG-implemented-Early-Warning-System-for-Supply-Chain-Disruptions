@@ -493,9 +493,26 @@ class TestSerpAPIExtractor:
         for case in HISTORICAL_QUERIES:
             assert len(case["queries"]) >= 2
 
-    def test_all_regions_covered(self):
-        regions = {case["region"] for case in HISTORICAL_QUERIES}
-        assert regions == {"hormuz", "red_sea", "suez", "malacca"}
+    def test_every_case_targets_a_live_region(self):
+        """Case regions must exist in the registry, not merely be spelled right.
+
+        This previously pinned the literal set {"hormuz", "red_sea", "suez",
+        "malacca"}. When the registry dropped red_sea and suez the assertion
+        kept passing, so the extractor went on tagging documents with keys no
+        region filter could match — 382 of them, invisible to retrieval.
+        Comparing against the registry is what makes this test able to fail.
+        """
+        from src.core.regions import RETIRED_REGION_ALIASES, list_regions
+
+        case_regions = {case["region"] for case in HISTORICAL_QUERIES}
+        unknown = case_regions - set(list_regions())
+
+        assert not unknown, (
+            f"serpapi cases target non-registry regions: {sorted(unknown)}. "
+            f"Retired keys map as {RETIRED_REGION_ALIASES}."
+        )
+        # The corridors this source actually has curated cases for.
+        assert {"hormuz", "bab_el_mandeb", "malacca"} <= case_regions
 
     def test_all_agent_domains_covered(self):
         all_agents: set[str] = set()
@@ -540,3 +557,65 @@ class TestRAGCompositeThreshold:
         assert result is not None
         assert result["triggered"] is True
         assert result["composite_score"] == 0.80
+
+
+class TestRegistryRegionKeys:
+    """No extractor may hardcode a region key the registry does not have.
+
+    Retired keys (``red_sea``, ``suez``) are not spelling mistakes — they were
+    valid once, so nothing rejected them. Documents carrying them stayed in the
+    collection but became unreachable by region-filtered retrieval: 1,513 of
+    them across four sources before this was found. These tests fail on the
+    constant, at import time, rather than waiting for a silent retrieval gap.
+    """
+
+    def _registry(self) -> set[str]:
+        from src.core.regions import list_regions
+
+        return set(list_regions())
+
+    def test_serpapi_case_regions_are_live(self) -> None:
+        from src.extractors.serpapi_extractor import HISTORICAL_QUERIES
+
+        stale = {c["region"] for c in HISTORICAL_QUERIES} - self._registry()
+        assert not stale, f"serpapi: {sorted(stale)}"
+
+    def test_newsapi_regions_are_live(self) -> None:
+        from src.extractors.newsapi_extractor import (
+            CHOKEPOINT_QUERIES,
+            HISTORICAL_EVENT_QUERIES,
+        )
+
+        stale = (
+            set(CHOKEPOINT_QUERIES) | {e["region"] for e in HISTORICAL_EVENT_QUERIES}
+        ) - self._registry()
+        assert not stale, f"newsapi: {sorted(stale)}"
+
+    def test_acled_scenario_regions_are_live(self) -> None:
+        from src.extractors.acled_extractor import HISTORICAL_SCENARIOS
+
+        stale = {s["region"] for s in HISTORICAL_SCENARIOS} - self._registry()
+        assert not stale, f"acled: {sorted(stale)}"
+
+    def test_fred_period_regions_are_live(self) -> None:
+        from src.extractors.fred_extractor import DISRUPTION_PERIODS
+
+        stale = {p["region"] for p in DISRUPTION_PERIODS} - self._registry()
+        assert not stale, f"fred: {sorted(stale)}"
+
+    def test_reliefweb_regions_are_live(self) -> None:
+        """Disabled today, but must not reintroduce the bug when re-enabled."""
+        from src.extractors.reliefweb_extractor import HISTORICAL_DISASTERS
+
+        stale = {q["region"] for q in HISTORICAL_DISASTERS} - self._registry()
+        assert not stale, f"reliefweb: {sorted(stale)}"
+
+    def test_retired_aliases_point_at_live_regions(self) -> None:
+        """An alias mapping to another dead key would migrate nothing."""
+        from src.core.regions import RETIRED_REGION_ALIASES
+
+        registry = self._registry()
+        assert not set(RETIRED_REGION_ALIASES) & registry, (
+            "a retired key is back in the registry — drop its alias"
+        )
+        assert set(RETIRED_REGION_ALIASES.values()) <= registry

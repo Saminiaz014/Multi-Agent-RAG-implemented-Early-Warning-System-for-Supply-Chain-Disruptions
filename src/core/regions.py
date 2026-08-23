@@ -98,6 +98,25 @@ class RegionConfig:
 # run with routing active, not symmetry and not silence.
 # ---------------------------------------------------------------------------
 
+#: Region keys retired when the extraction vocabulary was realigned to this
+#: registry, mapped to their successor. Extractors and the knowledge-base
+#: migration both read this, so the mapping has exactly one definition.
+#:
+#: ``red_sea`` -> ``bab_el_mandeb`` is a straight rename: same corridor, new
+#: name.
+#:
+#: ``suez`` -> ``bab_el_mandeb`` is **not** a rename. Suez is a distinct
+#: chokepoint this registry does not model. Its disruptions are filed under
+#: bab_el_mandeb because the two gate the same Asia-Europe corridor — a Suez
+#: blockage reroutes exactly the traffic Bab el-Mandeb carries. Documents
+#: mapped this way keep their original text, which still names Suez, so the
+#: distinction stays visible to anyone reading them. Model Suez as its own
+#: region and this entry should go.
+RETIRED_REGION_ALIASES: dict[str, str] = {
+    "red_sea": "bab_el_mandeb",
+    "suez": "bab_el_mandeb",
+}
+
 REGIONS: dict[str, RegionConfig] = {
     "hormuz": RegionConfig(
         name="hormuz",

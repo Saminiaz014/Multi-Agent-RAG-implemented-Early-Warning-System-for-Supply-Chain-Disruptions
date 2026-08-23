@@ -71,7 +71,8 @@ class BaseExtractor(ABC):
         """Extract historical data for a chokepoint region.
 
         Args:
-            region: Chokepoint name (``"hormuz"``, ``"red_sea"``, ``"malacca"``, ``"suez"``).
+            region: Registry chokepoint key (``"hormuz"``, ``"bab_el_mandeb"``,
+                ``"panama"``, ``"malacca"``).
 
         Returns:
             List of normalized document dicts ready for ChromaDB.

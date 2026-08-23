@@ -34,7 +34,7 @@ HISTORICAL_DISASTERS: list[dict] = [
      "agents": ["natural_disaster", "shipping"]},
     {"query": "tsunami earthquake", "country": "Indonesia", "region": "malacca",
      "agents": ["natural_disaster", "routing"]},
-    {"query": "flood storm", "country": "Egypt", "region": "suez",
+    {"query": "flood storm", "country": "Egypt", "region": "bab_el_mandeb",
      "agents": ["natural_disaster"]},
 ]
 
