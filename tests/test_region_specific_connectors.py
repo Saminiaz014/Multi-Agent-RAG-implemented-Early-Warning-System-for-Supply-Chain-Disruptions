@@ -36,16 +36,21 @@ class TestRegionProjection:
             assert entry["countries"] == config["extraction"]["countries"]
             assert entry["bounding_box"] == config["extraction"]["bounding_box"]
             # Projecting one region must not drop settings.yaml's other entries.
-            for preexisting in ("hormuz", "red_sea", "malacca", "suez"):
+            for preexisting in list_regions():
                 assert preexisting in config["extraction"]["chokepoints"]
 
         assert load_config_for_region("panama")["extraction"]["chokepoints"][
             "panama"
         ]["countries"] == ["Panama"]
-        assert (
-            load_config_for_region("bab_el_mandeb")["extraction"]["chokepoint_key"]
-            == "red_sea"
-        )
+        # chokepoint_key now equals the region key for every region: the
+        # extraction vocabulary was realigned to the registry when GDACS was
+        # added (red_sea -> bab_el_mandeb, suez dropped, panama added), so the
+        # two key sets no longer diverge.
+        for region in list_regions():
+            assert (
+                load_config_for_region(region)["extraction"]["chokepoint_key"]
+                == region
+            )
 
     def test_aisstream_monitor_region_is_replaced_not_appended(self) -> None:
         """A run monitors one region; Hormuz's box must not leak into others."""

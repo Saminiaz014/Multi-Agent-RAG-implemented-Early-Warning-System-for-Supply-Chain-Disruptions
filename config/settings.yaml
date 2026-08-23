@@ -240,7 +240,9 @@ extraction:
   enabled_extractors:
     - newsapi
     - serpapi     # date-unbounded Google News, for historical RAG backfill (NewsAPI free tier is ~30-day only)
-    - ambee       # replaces reliefweb (gated by an unapproved appname); see severity_mapping note above
+    # gdacs + usgs run behind one wrapper so the monthly cap applies to their
+    # combined output. Enabling them individually would bypass it.
+    - disaster_combined
     - fred
     - acled
     # aisstream is live-only, not used for historical RAG population
@@ -251,22 +253,63 @@ extraction:
     start_year: 2007   # Cyclone Gonu (earliest RAG case)
     end_year: 2025
 
+  # Keys now match src/core/regions.py exactly (Phase 11 registry), so the
+  # extraction layer and the pipeline no longer use two different vocabularies.
+  # red_sea was renamed to bab_el_mandeb; suez was dropped (it is not a live
+  # region). iso2 mirrors `countries` for APIs that key on ISO-3166 alpha-2
+  # (GDACS); the two lists are positional and must stay in step.
   chokepoints:
     hormuz:
       countries: ["Iran", "Oman", "United Arab Emirates", "Saudi Arabia", "Qatar", "Bahrain", "Kuwait", "Iraq"]
+      iso2: ["IR", "OM", "AE", "SA", "QA", "BH", "KW", "IQ"]
       bounding_box: { lat_min: 25.0, lat_max: 27.5, lon_min: 55.0, lon_max: 58.0 }
-    red_sea:
+    bab_el_mandeb:
       countries: ["Yemen", "Saudi Arabia", "Egypt", "Eritrea", "Djibouti", "Sudan", "Somalia"]
+      iso2: ["YE", "SA", "EG", "ER", "DJ", "SD", "SO"]
+      # Deliberately the whole Red Sea, not just the strait — see
+      # config/regions/bab_el_mandeb.yaml for why the scope is wider here.
       bounding_box: { lat_min: 12.0, lat_max: 30.0, lon_min: 32.0, lon_max: 44.0 }
+    panama:
+      countries: ["Panama"]
+      iso2: ["PA"]
+      bounding_box: { lat_min: 8.8, lat_max: 9.5, lon_min: -80.1, lon_max: -79.4 }
     malacca:
       countries: ["Malaysia", "Indonesia", "Singapore"]
+      iso2: ["MY", "ID", "SG"]
       bounding_box: { lat_min: 0.5, lat_max: 4.0, lon_min: 99.0, lon_max: 105.0 }
-    suez:
-      countries: ["Egypt"]
-      bounding_box: { lat_min: 29.5, lat_max: 31.5, lon_min: 32.0, lon_max: 33.0 }
+
+  # GDACS has no working server-side geographic filter -- countrycode, iso3 and
+  # countrylist are all accepted and all ignored, returning identical global
+  # results. Region scoping therefore happens client-side on each event's
+  # affectedcountries[].iso2, matched against the iso2 lists above.
+  #
+  # Adaptive windowing: one request for the whole global span, halved only when
+  # GDACS's silent 100-result cap is hit, down to min_window_months. The global
+  # list is fetched once and shared by every region.
+  gdacs:
+    # Orange;Red only, and this is a hard constraint rather than a preference.
+    # Green-inclusive queries return >100 events per month *globally*, so even
+    # a one-month window -- the finest this extractor goes -- comes back
+    # truncated at the silent 100-result cap. Every month would be quietly
+    # incomplete, which is precisely the failure that made Ambee useless.
+    # Enumerating Green would need sub-monthly or per-event-type windows,
+    # ~700+ requests, and a Green-inclusive attempt got this host throttled
+    # (HTTP 400s, then hanging requests). At Orange;Red the global list is
+    # ~160 events per 2 years, so windows never truncate and the data is
+    # complete. The cost is volume: hazards near these chokepoints are simply
+    # rare, so expect tens of documents, not thousands.
+    alert_levels: "Orange;Red"
+    event_types: "EQ;TC;FL;VO;WF;DR"
+    min_window_months: 1               # stop subdividing below this (months)
+
+  usgs:
+    min_magnitude: 4.0
+    max_per_request: 2000
 
   rate_limits:
     newsapi: 30       # Free tier: 100/day, so ~30/min is safe
+    gdacs: 20         # Free public UN service — be conservative
+    usgs: 40
     reliefweb: 60     # No published limit, be respectful
     ambee: 60         # Be respectful, free tier
     fred: 100         # Official: 120/min

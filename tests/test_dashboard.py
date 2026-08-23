@@ -19,6 +19,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+#: Keys of agents.natural_disaster.monitoring_points (the Ambee query points)
+#: — deliberately NOT extraction.chokepoints, which is a different structure
+#: and was realigned to the region registry in the GDACS/USGS work.
 _CHOKEPOINTS = ("hormuz", "red_sea", "malacca", "suez")
 _DECISION_PAGE = str(_PROJECT_ROOT / "src" / "dashboard" / "pages" / "1_Decision_View.py")
 _ANALYSIS_PAGE = str(_PROJECT_ROOT / "src" / "dashboard" / "pages" / "2_Analysis_View.py")

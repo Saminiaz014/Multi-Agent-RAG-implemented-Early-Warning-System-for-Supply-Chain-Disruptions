@@ -76,7 +76,9 @@ agents:
 # for this corridor is "red_sea", not "bab_el_mandeb". countries and
 # bounding_box below are that entry verbatim.
 extraction:
-  chokepoint_key: red_sea
+  # Renamed from red_sea when extraction.chokepoints was aligned with the
+  # region registry; the wide whole-Red-Sea box below is unchanged.
+  chokepoint_key: bab_el_mandeb
   countries: ["Yemen", "Saudi Arabia", "Egypt", "Eritrea", "Djibouti", "Sudan", "Somalia"]
   bounding_box: { lat_min: 12.0, lat_max: 30.0, lon_min: 32.0, lon_max: 44.0 }
 

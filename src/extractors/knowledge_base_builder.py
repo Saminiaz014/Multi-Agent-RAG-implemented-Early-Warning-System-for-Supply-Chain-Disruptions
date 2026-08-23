@@ -15,17 +15,25 @@ from pathlib import Path
 from src.extractors.acled_extractor import ACLEDExtractor
 from src.extractors.ambee_extractor import AmbeeExtractor
 from src.extractors.base_extractor import BaseExtractor
+from src.extractors.disaster_combined_extractor import DisasterCombinedExtractor
 from src.extractors.fred_extractor import FREDExtractor
+from src.extractors.gdacs_extractor import GDACSExtractor
 from src.extractors.newsapi_extractor import NewsAPIExtractor
 from src.extractors.reliefweb_extractor import ReliefWebExtractor
 from src.extractors.serpapi_extractor import SerpAPIExtractor
+from src.extractors.usgs_extractor import USGSExtractor
 
 logger = logging.getLogger(__name__)
 
 _EXTRACTOR_CLASSES: dict[str, type] = {
     "newsapi": NewsAPIExtractor,
     "serpapi": SerpAPIExtractor,    # historical news for RAG backfill (NewsAPI is current-only)
-    "ambee": AmbeeExtractor,        # primary natural_disaster source
+    # GDACS + USGS behind one wrapper, so the per-month cap covers their
+    # combined output. Both remain registered for a targeted, uncapped run.
+    "disaster_combined": DisasterCombinedExtractor,
+    "gdacs": GDACSExtractor,        # primary natural_disaster source (replaced ambee)
+    "usgs": USGSExtractor,          # seismic detail below GDACS's alert bar
+    "ambee": AmbeeExtractor,        # retained, disabled: valid key, zero documents
     "reliefweb": ReliefWebExtractor,  # fallback once an approved appname is obtained
     "fred": FREDExtractor,
     "acled": ACLEDExtractor,
