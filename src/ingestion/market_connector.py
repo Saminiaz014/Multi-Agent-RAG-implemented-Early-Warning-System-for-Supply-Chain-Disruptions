@@ -21,13 +21,18 @@ agents can consume regardless of which mode produced the data.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 import numpy as np
 import pandas as pd
+import requests
 
+# Shared with the extractors rather than reimplemented: '${VAR}' placeholders
+# must resolve identically on both sides of the pipeline.
+from src.extractors.base_extractor import resolve_env_value
 from src.ingestion.base_connector import BaseConnector
 
 logger = logging.getLogger(__name__)
@@ -90,6 +95,12 @@ _ROLLING_WINDOW: int = 30
 _BRENT_SIGMA: float = 2.0
 _FREIGHT_SIGMA: float = 1.5
 
+# Live-FRED request tuning. The _*_VALUE_COLUMN constants above double as the
+# series ids: a FRED CSV export names its column after the series it came from.
+_API_TIMEOUT: int = 60
+_API_ATTEMPTS: int = 3
+_API_BACKOFF_SECONDS: float = 2.0
+
 
 class MarketConnector(BaseConnector):
     """Hybrid Brent / freight market-data connector.
@@ -144,7 +155,7 @@ class MarketConnector(BaseConnector):
             "freight_services_path", _FREIGHT_SERVICES_DEFAULT_PATH
         )
         api_cfg: dict = cfg.get("api", {}) or {}
-        self.fred_api_key: str | None = api_cfg.get("fred_key")
+        self.fred_api_key: str | None = resolve_env_value(api_cfg.get("fred_key") or "")
         self.alpha_vantage_key: str | None = api_cfg.get("alpha_vantage_key")
         self.fred_endpoint: str | None = api_cfg.get(
             "fred_endpoint", "https://api.stlouisfed.org/fred"
@@ -213,7 +224,34 @@ class MarketConnector(BaseConnector):
         services = self._load_freight_services(
             Path(self.freight_services_path)
         )
+        return self._merge_and_derive(brent, ppi, services, start_date, end_date)
 
+    def _merge_and_derive(
+        self,
+        brent: pd.DataFrame,
+        ppi: pd.DataFrame,
+        services: pd.DataFrame,
+        start_date: str | pd.Timestamp | None = None,
+        end_date: str | pd.Timestamp | None = None,
+    ) -> pd.DataFrame:
+        """Merge the three FRED series onto a daily index and derive features.
+
+        Shared by :meth:`load_from_fred_csvs` and :meth:`fetch_from_api` so a
+        live pull and a CSV export produce identical numbers. The derivations
+        here (freight rebasing, trade volume from inverse Brent volatility,
+        the co-spike disruption label) are modelling choices; defining them
+        per-source would let the two paths silently disagree.
+
+        Args:
+            brent: ``timestamp``, ``brent_crude_usd`` (daily).
+            ppi: ``timestamp``, ``freight_rate_index_raw`` (monthly).
+            services: ``timestamp``, ``freight_services_pct_change`` (monthly).
+            start_date: Optional inclusive lower bound.
+            end_date: Optional inclusive upper bound.
+
+        Returns:
+            Daily-frequency frame in the connector's standard schema.
+        """
         # Build a daily index spanning the brent series and merge all three.
         idx_min = brent["timestamp"].min()
         idx_max = brent["timestamp"].max()
@@ -391,24 +429,102 @@ class MarketConnector(BaseConnector):
             lag_days=lag_days,
         )
 
-    def fetch_from_api(self) -> pd.DataFrame:
-        """Planned live FRED / Alpha Vantage integration.
+    def _fetch_fred_series(self, series_id: str, value_column: str) -> pd.DataFrame:
+        """Fetch one FRED series as a two-column frame.
 
-        Planned implementation:
-            * Pull daily Brent + freight indices from the FRED API
-              (``api.stlouisfed.org``) using ``self.fred_api_key``.
-            * Cross-check with Alpha Vantage real-time commodity prices
-              using ``self.alpha_vantage_key`` for intraday updates.
+        Args:
+            series_id: FRED series identifier, e.g. ``"DCOILBRENTEU"``.
+            value_column: Name to give the observation column.
+
+        Returns:
+            ``timestamp`` plus ``value_column``, missing observations dropped.
 
         Raises:
-            NotImplementedError: Always — API mode is not yet wired up.
+            RuntimeError: If the series cannot be fetched after retrying, or
+                comes back empty. A short series would quietly change the
+                rebasing and volatility baselines derived from it.
         """
-        raise NotImplementedError(
-            "API mode not yet implemented. Planned integrations:\n"
-            " - FRED API (api.stlouisfed.org) for daily Brent + freight indices\n"
-            " - Alpha Vantage for real-time commodity prices\n"
-            "Set source_mode='csv' or 'synthetic' in config/settings.yaml."
+        for attempt in range(1, _API_ATTEMPTS + 1):
+            try:
+                response = requests.get(
+                    f"{self.fred_endpoint}/series/observations",
+                    params={
+                        "series_id": series_id,
+                        "api_key": self.fred_api_key,
+                        # FRED defaults to XML; without this, .json() raises.
+                        "file_type": "json",
+                    },
+                    timeout=_API_TIMEOUT,
+                )
+                response.raise_for_status()
+                observations = response.json().get("observations", [])
+                break
+            except Exception as exc:
+                if attempt == _API_ATTEMPTS:
+                    raise RuntimeError(
+                        f"FRED series {series_id} failed after "
+                        f"{_API_ATTEMPTS} attempts: {exc}"
+                    ) from exc
+                logger.warning(
+                    "[MarketConnector/FRED] %s attempt %d/%d failed (%s) — retrying",
+                    series_id, attempt, _API_ATTEMPTS, exc,
+                )
+                time.sleep(_API_BACKOFF_SECONDS * attempt)
+
+        rows = [
+            {"timestamp": pd.Timestamp(o["date"]), value_column: float(o["value"])}
+            # FRED writes "." for a missing observation, not null.
+            for o in observations
+            if o.get("value") not in (".", "", None)
+        ]
+        if not rows:
+            raise RuntimeError(
+                f"FRED series {series_id} returned no usable observations."
+            )
+        return pd.DataFrame(rows)
+
+    def fetch_from_api(self) -> pd.DataFrame:
+        """Fetch the three FRED series live instead of from local CSV exports.
+
+        Same series the CSV path reads — ``DCOILBRENTEU`` (Brent, daily),
+        ``PCU4831114831115`` (deep-sea freight PPI, monthly) and
+        ``TSIFRGHTC`` (freight transport services % change, monthly) — pulled
+        from ``api.stlouisfed.org`` and passed through the identical
+        :meth:`_merge_and_derive` transform, so a live pull and a CSV export
+        produce the same numbers for the same dates.
+
+        Alpha Vantage is not used: FRED already serves every series this
+        connector needs, and adding a second vendor for intraday prices would
+        buy nothing for a daily-frequency pipeline.
+
+        Returns:
+            Daily-frequency frame in the connector's standard schema.
+
+        Raises:
+            ValueError: If no FRED API key is configured.
+            RuntimeError: If any series cannot be fetched.
+        """
+        if not self.fred_api_key:
+            raise ValueError(
+                "No FRED API key configured. Set api_keys.fred / FRED_API_KEY, "
+                "or use source_mode='csv'."
+            )
+
+        # The _*_VALUE_COLUMN constants are the FRED series ids.
+        brent = self._fetch_fred_series(_BRENT_VALUE_COLUMN, "brent_crude_usd")
+        ppi = self._fetch_fred_series(_FREIGHT_PPI_VALUE_COLUMN, "freight_rate_index_raw")
+        services = self._fetch_fred_series(
+            _FREIGHT_SERVICES_VALUE_COLUMN, "freight_services_pct_change"
         )
+
+        df = self._merge_and_derive(brent, ppi, services)
+        logger.info(
+            "[MarketConnector/FRED] %d days [%s .. %s] brent mean=$%.2f "
+            "disruption_days=%d",
+            len(df), df["timestamp"].min().date(), df["timestamp"].max().date(),
+            df["brent_crude_usd"].mean(), int(df["is_disruption"].sum()),
+        )
+        return df
 
     # Synthetic-schema CSV columns produced by generate_synthetic / save_raw.
     _SYNTHETIC_SCHEMA: tuple[str, ...] = (

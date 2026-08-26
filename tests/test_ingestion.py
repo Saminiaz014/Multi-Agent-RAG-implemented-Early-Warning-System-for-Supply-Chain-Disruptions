@@ -800,15 +800,130 @@ class TestMarketCsvMode:
 
 
 class TestMarketApiMode:
-    def test_api_mode_raises_not_implemented_via_fetch(self) -> None:
-        c = MarketConnector(source_mode="api", config={})
-        with pytest.raises(NotImplementedError, match="FRED"):
-            c.fetch()
+    """API mode pulls the same three FRED series the CSV path reads.
 
-    def test_api_mode_raises_not_implemented_direct(self) -> None:
-        c = MarketConnector(source_mode="api", config={})
-        with pytest.raises(NotImplementedError):
+    Network is mocked — these pin parsing and the guards, not the service.
+    """
+
+    @staticmethod
+    def _observations(series_id: str) -> dict:
+        """One year of daily observations, with FRED's '.' missing marker."""
+        dates = pd.date_range("2024-01-01", periods=400, freq="D")
+        return {
+            "observations": [
+                {
+                    "date": d.strftime("%Y-%m-%d"),
+                    # every 50th value missing, as FRED encodes it
+                    "value": "." if i % 50 == 49 else f"{80 + (i % 20)}",
+                }
+                for i, d in enumerate(dates)
+            ]
+        }
+
+    def _connector(self, monkeypatch, *, key="test-key"):
+        from src.ingestion import market_connector as mod
+
+        class _Resp:
+            def __init__(self, series_id: str) -> None:
+                self._series = series_id
+
+            def raise_for_status(self) -> None: ...
+
+            def json(self) -> dict:
+                return TestMarketApiMode._observations(self._series)
+
+        def fake_get(_url, params=None, **_kw):
+            return _Resp((params or {}).get("series_id", ""))
+
+        monkeypatch.setattr(mod.requests, "get", fake_get)
+        monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+        return MarketConnector(
+            source_mode="api", config={"api": {"fred_key": key}}
+        )
+
+    def test_api_mode_returns_the_standard_schema(self, monkeypatch) -> None:
+        df = self._connector(monkeypatch).fetch()
+
+        for column in ("timestamp", "brent_crude_usd", "trade_volume_index",
+                       "freight_rate_index", "is_disruption"):
+            assert column in df.columns
+        assert len(df) > 0
+
+    def test_requests_json_not_xml(self, monkeypatch) -> None:
+        """FRED defaults to XML; without file_type=json the parse fails."""
+        from src.ingestion import market_connector as mod
+
+        seen: list[dict] = []
+
+        class _Resp:
+            def raise_for_status(self) -> None: ...
+
+            @staticmethod
+            def json() -> dict:
+                return TestMarketApiMode._observations("x")
+
+        def capture(_url, params=None, **_kw):
+            seen.append(params or {})
+            return _Resp()
+
+        monkeypatch.setattr(mod.requests, "get", capture)
+        MarketConnector(
+            source_mode="api", config={"api": {"fred_key": "k"}}
+        ).fetch_from_api()
+
+        assert seen and all(p.get("file_type") == "json" for p in seen)
+
+    def test_missing_key_is_a_clear_error(self) -> None:
+        c = MarketConnector(source_mode="api", config={"api": {"fred_key": ""}})
+        with pytest.raises(ValueError, match="FRED API key"):
             c.fetch_from_api()
+
+    def test_missing_observations_are_dropped_not_zeroed(self, monkeypatch) -> None:
+        """FRED writes '.' for a gap; reading that as 0.0 would fake a crash."""
+        df = self._connector(monkeypatch).fetch_from_api()
+        assert (df["brent_crude_usd"] > 0).all()
+
+    def test_empty_series_raises(self, monkeypatch) -> None:
+        """An empty series would silently reshape the derived baselines."""
+        from src.ingestion import market_connector as mod
+
+        class _Resp:
+            def raise_for_status(self) -> None: ...
+
+            @staticmethod
+            def json() -> dict:
+                return {"observations": []}
+
+        monkeypatch.setattr(mod.requests, "get", lambda *_a, **_kw: _Resp())
+        monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+        c = MarketConnector(source_mode="api", config={"api": {"fred_key": "k"}})
+        with pytest.raises(RuntimeError, match="no usable observations"):
+            c.fetch_from_api()
+
+    def test_transient_failure_is_retried(self, monkeypatch) -> None:
+        from src.ingestion import market_connector as mod
+
+        attempts = {"n": 0}
+
+        class _Resp:
+            def raise_for_status(self) -> None: ...
+
+            @staticmethod
+            def json() -> dict:
+                return TestMarketApiMode._observations("x")
+
+        def flaky(*_a, **_kw):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise TimeoutError("read timed out")
+            return _Resp()
+
+        monkeypatch.setattr(mod.requests, "get", flaky)
+        monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+        c = MarketConnector(source_mode="api", config={"api": {"fred_key": "k"}})
+
+        assert not c.fetch_from_api().empty
+        assert attempts["n"] >= 3
 
 
 # ---------------------------------------------------------------------------
