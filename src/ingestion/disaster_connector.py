@@ -76,6 +76,26 @@ _AMBEE_EVENT_TYPE_TO_FEATURE: dict[str, str] = {
 }
 
 
+# --- Live GDACS + USGS mode -------------------------------------------------
+#: Feature columns the live hazard path populates.
+_API_FEATURE_COLUMNS: tuple[str, ...] = (
+    "earthquake_severity",
+    "tsunami_risk",
+    "cyclone_severity",
+    "severe_weather_index",
+)
+#: GDACS hazard codes folded into severe_weather_index. Volcanoes are
+#: excluded: they map to no feature this agent scores.
+_GDACS_SEVERE_WEATHER_CODES: frozenset[str] = frozenset({"FL", "WF", "DR"})
+#: Green-inclusive GDACS queries exceed its silent 100-result cap every month
+#: globally, truncating every window and provoking throttling.
+_GDACS_ALERT_LEVELS: str = "Orange;Red"
+#: Default live window. Matches PortWatch's coverage so the shipping and
+#: hazard series line up day for day.
+_API_START_YEAR: int = 2019
+_API_END_YEAR: int = 2026
+
+
 class DisasterConnector(BaseConnector):
     """Daily natural-disaster severity generator for the Hormuz corridor.
 
@@ -212,126 +232,167 @@ class DisasterConnector(BaseConnector):
         return df
 
     def fetch_api(self) -> pd.DataFrame:
-        """Fetch current disaster risk from the Ambee Disasters API.
+        """Build a daily hazard series from GDACS and USGS.
 
-        Queries ``/disasters/latest/by-lat-lng`` for every monitoring point
-        configured under ``monitoring_points[location]`` (``location``
-        defaults to ``"hormuz"``), maps Ambee's two categorical severity
-        fields (``proximity_severity_level``, ``default_alert_levels``) onto
-        a ``[0, 1]`` score via ``severity_mapping`` in config, and takes the
-        worst-case (max) severity per feature column across all points and
-        events. ``tsunami_risk`` has no Ambee equivalent — it is approximated
-        from any sufficiently severe earthquake event (damped by 0.7), per
-        the project's documented design decision; this is a coarse proxy,
-        not a real tsunami signal.
+        Replaces the previous Ambee integration. Ambee held a valid key and
+        returned zero usable events for every region with no error to debug
+        against; it also returned only a *current* snapshot, so the connector
+        produced a single row rather than a series. GDACS and USGS need no
+        credentials, cover 2019 onward, and are already used by the knowledge
+        base extractors — which this method reuses rather than re-querying the
+        APIs itself, so parsing and region scoping stay defined once.
 
-        Earthquake magnitude/depth (and a real USGS-based ``tsunami_risk``)
-        remain on the FRED-style "planned" path noted in the class docs —
-        USGS is unused here because Ambee already covers the chokepoint
-        bounding box end to end for this connector.
+        Feature mapping, each in [0, 1] and taken as the worst case per day:
+
+        * ``earthquake_severity`` — USGS magnitude on a documented scale.
+        * ``tsunami_risk`` — USGS tsunami flag, a real signal rather than the
+          damped-earthquake proxy the Ambee path used.
+        * ``cyclone_severity`` — GDACS tropical-cyclone alert level.
+        * ``severe_weather_index`` — GDACS flood, wildfire and drought alerts.
+
+        Quiet days are genuinely zero: both sources publish complete event
+        lists for their windows, so an absence of events is an absence of
+        hazards, not a gap.
 
         Returns:
-            Single-row DataFrame matching the synthetic-mode schema
-            (``timestamp``, the four feature columns, ``composite_disaster_risk``,
-            ``active_events``, ``is_disruption``).
+            Daily-frequency frame matching the synthetic-mode schema.
 
         Raises:
-            ValueError: If no Ambee API key or no monitoring points are
-                configured — callers (e.g. :class:`~src.orchestrator.Orchestrator`)
-                catch ``ValueError`` and fall back to synthetic.
+            ValueError: If the region's chokepoint settings are missing.
+                Callers such as :class:`~src.orchestrator.Orchestrator` catch
+                ``ValueError`` and fall back to synthetic.
         """
-        api_key = resolve_env_value(self.config.get("api", {}).get("ambee_api_key", ""))
-        if not api_key:
+        chokepoint = self.config.get("chokepoint") or {}
+        region_key = str(self.config.get("region_key") or "")
+        if not chokepoint or not region_key:
             raise ValueError(
-                "Ambee API key not configured — set agents.natural_disaster.api."
-                "ambee_api_key (or AMBEE_API_KEY in .env)."
+                "No chokepoint settings projected for this region; live "
+                "hazard mode needs agents.natural_disaster.chokepoint and "
+                "region_key (set by config_manager.load_config_for_region)."
             )
 
-        location = str(self.config.get("location", "hormuz"))
-        monitoring_points = self.config.get("monitoring_points", {}).get(location, [])
-        if not monitoring_points:
-            raise ValueError(f"No monitoring_points configured for location={location!r}.")
+        from src.extractors.gdacs_extractor import GDACSExtractor
+        from src.extractors.usgs_extractor import USGSExtractor
 
-        severity_cfg = self.config.get("severity_mapping", {}) or {}
-        proximity_map = severity_cfg.get("proximity", _AMBEE_PROXIMITY_MAP)
-        alert_map = severity_cfg.get("alert", _AMBEE_ALERT_MAP)
-        prox_weight = float(severity_cfg.get("proximity_weight", _AMBEE_PROXIMITY_WEIGHT))
-        alert_weight = float(severity_cfg.get("alert_weight", _AMBEE_ALERT_WEIGHT))
-        base_url = self.config.get("api", {}).get("ambee_base_url", "https://api.ambeedata.com")
-
-        feature_maxes: dict[str, float] = {
-            "earthquake_severity": 0.0,
-            "tsunami_risk": 0.0,
-            "cyclone_severity": 0.0,
-            "severe_weather_index": 0.0,
+        api_cfg = self.config.get("api", {}) or {}
+        start_year = int(api_cfg.get("start_year", _API_START_YEAR))
+        end_year = int(api_cfg.get("end_year", _API_END_YEAR))
+        extractor_config = {
+            "extraction": {
+                "chokepoints": {region_key: chokepoint},
+                "rate_limits": {"gdacs": 20, "usgs": 40},
+                # Orange;Red, matching config/settings.yaml's extraction
+                # block. GDACS's class default includes Green, which exceeds
+                # its silent 100-result cap every month globally and gets the
+                # host throttled -- measured, not assumed.
+                "gdacs": {"alert_levels": _GDACS_ALERT_LEVELS,
+                          **(api_cfg.get("gdacs", {}) or {})},
+                "usgs": api_cfg.get("usgs", {}) or {},
+            }
         }
-        active_events: list[str] = []
-        headers = {"x-api-key": api_key, "Content-type": "application/json"}
 
-        for point in monitoring_points:
-            lat, lng, name = point["lat"], point["lng"], point.get("name", "")
+        documents: list[dict] = []
+        for extractor_cls in (USGSExtractor, GDACSExtractor):
             try:
-                response = requests.get(
-                    f"{base_url}/disasters/latest/by-lat-lng",
-                    headers=headers,
-                    params={"lat": lat, "lng": lng},
-                    timeout=30,
+                documents.extend(
+                    extractor_cls(extractor_config).extract_historical(
+                        region_key, start_year=start_year, end_year=end_year
+                    )
                 )
-                response.raise_for_status()
-                events = response.json().get("result", [])
-            except requests.RequestException as exc:
-                logger.error("[DisasterConnector/api] Ambee request failed for %s: %s", name, exc)
+            except Exception as exc:
+                # One source failing must not cost the other its events --
+                # USGS covers seismicity, GDACS covers everything else.
+                logger.error(
+                    "[DisasterConnector] %s failed for %s: %s",
+                    extractor_cls.__name__, region_key, exc,
+                )
+
+        alert_map = (self.config.get("severity_mapping", {}) or {}).get(
+            "alert", _AMBEE_ALERT_MAP
+        )
+        index = pd.date_range(f"{start_year}-01-01", f"{end_year}-12-31", freq="D")
+        df = pd.DataFrame({"timestamp": index})
+        for column in _API_FEATURE_COLUMNS:
+            df[column] = 0.0
+        events_by_day: dict[pd.Timestamp, list[str]] = {}
+
+        for doc in documents:
+            meta = doc.get("metadata") or {}
+            day = pd.to_datetime(str(meta.get("event_date") or ""), errors="coerce")
+            if pd.isna(day):
+                continue
+            day = day.normalize()
+            if day not in df["timestamp"].values:
                 continue
 
-            for event in events:
-                event_type = event.get("event_type", "Misc")
-                feature_col = _AMBEE_EVENT_TYPE_TO_FEATURE.get(event_type, "severe_weather_index")
-                base_sev = proximity_map.get(event.get("proximity_severity_level", "Low"), 0.2)
-                alert_sev = alert_map.get(event.get("default_alert_levels", "Green"), 0.1)
-                severity = round(prox_weight * base_sev + alert_weight * alert_sev, 4)
+            column, score = self._score_event(meta, alert_map)
+            if column is None:
+                continue
+            mask = df["timestamp"] == day
+            # Worst case per day: a severe event is not diluted by mild ones.
+            df.loc[mask, column] = df.loc[mask, column].clip(lower=score)
+            events_by_day.setdefault(day, []).append(
+                str(meta.get("event_type") or column)
+            )
 
-                if severity > feature_maxes[feature_col]:
-                    feature_maxes[feature_col] = severity
-                if event_type == "EQ" and severity > 0.5:
-                    feature_maxes["tsunami_risk"] = max(
-                        feature_maxes["tsunami_risk"], severity * 0.7
-                    )
-                if severity >= 0.35:
-                    active_events.append(
-                        f"{event.get('event_name', event_type)} near {name} "
-                        f"(severity={severity:.2f})"
-                    )
-
-        weights = self.config.get("weights") or _DEFAULT_WEIGHTS
-        composite = float(np.clip(
-            weights["earthquake"] * feature_maxes["earthquake_severity"]
-            + weights["tsunami"] * feature_maxes["tsunami_risk"]
-            + weights["cyclone"] * feature_maxes["cyclone_severity"]
-            + weights["severe_weather"] * feature_maxes["severe_weather_index"],
-            0.0, 1.0,
-        ))
-        max_single = max(feature_maxes.values())
-        is_disruption = (
-            composite >= float(self.config.get("threshold", 0.30))
-            or max_single >= float(self.config.get("single_event_threshold", 0.40))
+        weights = self.config.get("weights", {}) or {}
+        df["composite_disaster_risk"] = (
+            float(weights.get("earthquake", 0.35)) * df["earthquake_severity"]
+            + float(weights.get("tsunami", 0.30)) * df["tsunami_risk"]
+            + float(weights.get("cyclone", 0.20)) * df["cyclone_severity"]
+            + float(weights.get("severe_weather", 0.15)) * df["severe_weather_index"]
+        )
+        df["active_events"] = df["timestamp"].map(
+            lambda d: ", ".join(sorted(set(events_by_day.get(d, []))))
+        )
+        df["is_disruption"] = df["composite_disaster_risk"] >= float(
+            self.config.get("threshold", 0.30)
         )
 
-        df = pd.DataFrame([{
-            "timestamp": pd.Timestamp.utcnow().tz_localize(None),
-            "earthquake_severity": round(feature_maxes["earthquake_severity"], 4),
-            "tsunami_risk": round(feature_maxes["tsunami_risk"], 4),
-            "cyclone_severity": round(feature_maxes["cyclone_severity"], 4),
-            "severe_weather_index": round(feature_maxes["severe_weather_index"], 4),
-            "composite_disaster_risk": round(composite, 4),
-            "active_events": json.dumps(active_events),
-            "is_disruption": is_disruption,
-        }])
         logger.info(
-            "[DisasterConnector/api] Ambee live fetch | location=%s | composite=%.4f | "
-            "is_disruption=%s | events=%d",
-            location, composite, is_disruption, len(active_events),
+            "[DisasterConnector/GDACS+USGS] %s: %d events -> %d days "
+            "[%s .. %s] disruption_days=%d",
+            region_key, len(documents), len(df), index.min().date(),
+            index.max().date(), int(df["is_disruption"].sum()),
         )
         return df
+
+    @staticmethod
+    def _score_event(
+        meta: dict, alert_map: dict
+    ) -> tuple[str | None, float]:
+        """Map one extractor document onto a feature column and a [0,1] score.
+
+        Args:
+            meta: A normalized document's ``metadata``.
+            alert_map: GDACS alert level -> score, from config's
+                ``severity_mapping.alert`` so the live and Ambee-era paths
+                share one severity vocabulary.
+
+        Returns:
+            ``(column, score)``, or ``(None, 0.0)`` for an event that maps to
+            no feature.
+        """
+        source = str(meta.get("source_api") or "")
+
+        if source == "usgs":
+            magnitude = float(meta.get("magnitude") or 0.0)
+            # Linear from the extractor's M4 floor to M9; M9+ saturates.
+            score = min(max((magnitude - 4.0) / 5.0, 0.0), 1.0)
+            if meta.get("tsunami_alert"):
+                return "tsunami_risk", max(score, 0.5)
+            return "earthquake_severity", score
+
+        code = str(meta.get("event_type_code") or "").upper()
+        alert = str(meta.get("alert_level") or "Green").title()
+        score = float(alert_map.get(alert, 0.1))
+        if code == "TC":
+            return "cyclone_severity", score
+        if code == "EQ":
+            return "earthquake_severity", score
+        if code in _GDACS_SEVERE_WEATHER_CODES:
+            return "severe_weather_index", score
+        return None, 0.0
 
     def validate(self, df: pd.DataFrame) -> bool:
         """Schema + range checks; returns True iff all checks pass."""

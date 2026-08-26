@@ -286,6 +286,21 @@ def _project_region_settings(
             "acled_countries"
         ] = countries
 
+    # DisasterConnector receives only agents.natural_disaster, but its live
+    # mode drives the GDACS and USGS extractors, which are scoped by ISO-2
+    # country codes and a bounding box respectively. Project the resolved
+    # chokepoint entry so the connector does not have to re-read the whole
+    # config — the same reason acled_countries is projected above.
+    chokepoint_entry = (
+        merged.get("extraction", {}).get("chokepoints", {}).get(chokepoint_key)
+    )
+    if chokepoint_entry:
+        disaster = merged.setdefault("agents", {}).setdefault(
+            "natural_disaster", {}
+        )
+        disaster["region_key"] = chokepoint_key
+        disaster["chokepoint"] = dict(chokepoint_entry)
+
     if bbox:
         # Replaced wholesale, not appended: a run monitors one region, and
         # settings.yaml's single Hormuz entry would otherwise leak into every

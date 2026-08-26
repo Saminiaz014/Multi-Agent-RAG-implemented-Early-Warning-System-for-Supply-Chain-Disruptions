@@ -217,11 +217,15 @@ class TestDisasterConnector:
         ).fetch()
         assert len(df) == 365
 
-    def test_api_mode_raises_without_ambee_key(self) -> None:
-        """fetch_api() is now implemented (Ambee live scoring); without a
-        configured key it raises ValueError so the orchestrator's existing
-        fallback-to-synthetic path (which catches ValueError) applies."""
-        with pytest.raises(ValueError):
+    def test_api_mode_raises_without_region_settings(self) -> None:
+        """Live mode is GDACS + USGS now, not Ambee, and needs no key.
+
+        What it does need is the region's chokepoint entry (ISO-2 codes for
+        GDACS, a bounding box for USGS), projected by config_manager. Without
+        it the connector raises ValueError, which the orchestrator's existing
+        fallback-to-synthetic path already catches.
+        """
+        with pytest.raises(ValueError, match="chokepoint"):
             DisasterConnector(config={"data_mode": "api"}).fetch()
 
 
