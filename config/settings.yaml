@@ -243,6 +243,7 @@ extraction:
     # gdacs + usgs run behind one wrapper so the monthly cap applies to their
     # combined output. Enabling them individually would bypass it.
     - disaster_combined
+    - portwatch   # monthly chokepoint traffic summaries
     - fred
     - acled
     # aisstream is live-only, not used for historical RAG population
@@ -262,20 +263,24 @@ extraction:
     hormuz:
       countries: ["Iran", "Oman", "United Arab Emirates", "Saudi Arabia", "Qatar", "Bahrain", "Kuwait", "Iraq"]
       iso2: ["IR", "OM", "AE", "SA", "QA", "BH", "KW", "IQ"]
+      portwatch_chokepoint: "Strait of Hormuz"
       bounding_box: { lat_min: 25.0, lat_max: 27.5, lon_min: 55.0, lon_max: 58.0 }
     bab_el_mandeb:
       countries: ["Yemen", "Saudi Arabia", "Egypt", "Eritrea", "Djibouti", "Sudan", "Somalia"]
       iso2: ["YE", "SA", "EG", "ER", "DJ", "SD", "SO"]
+      portwatch_chokepoint: "Bab el-Mandeb Strait"
       # Deliberately the whole Red Sea, not just the strait — see
       # config/regions/bab_el_mandeb.yaml for why the scope is wider here.
       bounding_box: { lat_min: 12.0, lat_max: 30.0, lon_min: 32.0, lon_max: 44.0 }
     panama:
       countries: ["Panama"]
       iso2: ["PA"]
+      portwatch_chokepoint: "Panama Canal"
       bounding_box: { lat_min: 8.8, lat_max: 9.5, lon_min: -80.1, lon_max: -79.4 }
     malacca:
       countries: ["Malaysia", "Indonesia", "Singapore"]
       iso2: ["MY", "ID", "SG"]
+      portwatch_chokepoint: "Malacca Strait"
       bounding_box: { lat_min: 0.5, lat_max: 4.0, lon_min: 99.0, lon_max: 105.0 }
 
   # GDACS has no working server-side geographic filter -- countrycode, iso3 and

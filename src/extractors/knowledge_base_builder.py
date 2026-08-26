@@ -19,6 +19,7 @@ from src.extractors.disaster_combined_extractor import DisasterCombinedExtractor
 from src.extractors.fred_extractor import FREDExtractor
 from src.extractors.gdacs_extractor import GDACSExtractor
 from src.extractors.newsapi_extractor import NewsAPIExtractor
+from src.extractors.portwatch_extractor import PortWatchExtractor
 from src.extractors.reliefweb_extractor import ReliefWebExtractor
 from src.extractors.serpapi_extractor import SerpAPIExtractor
 from src.extractors.usgs_extractor import USGSExtractor
@@ -31,6 +32,9 @@ _EXTRACTOR_CLASSES: dict[str, type] = {
     # GDACS + USGS behind one wrapper, so the per-month cap covers their
     # combined output. Both remain registered for a targeted, uncapped run.
     "disaster_combined": DisasterCombinedExtractor,
+    # Chokepoint traffic history -- the only source describing what the
+    # corridor was actually doing, rather than events happening near it.
+    "portwatch": PortWatchExtractor,
     "gdacs": GDACSExtractor,        # primary natural_disaster source (replaced ambee)
     "usgs": USGSExtractor,          # seismic detail below GDACS's alert bar
     "ambee": AmbeeExtractor,        # retained, disabled: valid key, zero documents

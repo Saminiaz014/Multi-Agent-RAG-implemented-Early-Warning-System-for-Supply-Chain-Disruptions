@@ -11,6 +11,8 @@ to one test case.
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from src.core.config_manager import load_config_for_region
@@ -191,17 +193,28 @@ class TestNewsConnectorRegion:
         assert not connector.fetch().empty
 
 
-def test_api_stubs_report_the_settings_they_resolved() -> None:
-    """Each remaining stub names its region setting, so a gap surfaces there.
+def test_no_connector_api_path_is_still_a_stub() -> None:
+    """Every connector's live path is implemented, and must stay that way.
 
-    Shipping is no longer listed: its API mode is implemented against IMF
-    PortWatch. Its region setting is covered by
-    :func:`test_shipping_api_mode_resolves_a_chokepoint_per_region` below.
+    Phase 11 left four of six raising NotImplementedError. They are now wired
+    to PortWatch, FRED, ACLED, GDACS/USGS and GDELT respectively. A
+    NotImplementedError reappearing here means a live path was reverted to a
+    stub, which would silently drop that domain back to synthetic data.
     """
     config = load_config_for_region("malacca")
-
-    with pytest.raises(NotImplementedError, match=r"Region keywords"):
-        NewsConnector(config=config["agents"]["news_sentiment"]).fetch_api()
+    connectors = [
+        ("shipping", ShippingConnector(config=config["ingestion"]["shipping"]),
+         "fetch_from_api"),
+        ("geopolitical", GeopoliticalConnector(config=config["agents"]["geopolitical"]),
+         "fetch_api"),
+        ("news_sentiment", NewsConnector(config=config["agents"]["news_sentiment"]),
+         "fetch_api"),
+    ]
+    for name, connector, method in connectors:
+        source = inspect.getsource(getattr(connector, method))
+        assert "NotImplementedError" not in source, (
+            f"{name}.{method} has been reverted to a stub"
+        )
 
 
 def test_geopolitical_api_mode_resolves_countries_per_region() -> None:

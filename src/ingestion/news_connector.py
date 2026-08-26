@@ -298,25 +298,33 @@ class NewsConnector(BaseConnector):
         return df
 
     def fetch_api(self) -> pd.DataFrame:
-        """Planned NewsAPI / GDELT → VADER + embeddings + cluster pipeline.
+        """Build a daily news-sentiment series from GDELT.
 
-        Planned implementation:
-            1. Keywords — already resolved into ``self.newsapi_keywords`` at
-               construction, either from an explicit config list or derived
-               from ``self.location_context``.
-            2. Query NewsAPI ``/v2/everything`` and GDELT ``/api/v2/doc``
-               for the past 24h; fallback to Reuters / AP / Bloomberg RSS.
-            3. VADER sentiment per article (``nltk.sentiment.vader``).
-            4. Embed via ``sentence-transformers/all-MiniLM-L6-v2``.
-            5. DBSCAN cluster the embeddings; for each cluster compute
-               ``source_consensus = unique_sources / total_articles``.
-            6. Recency weights: <2d = 1.0, 2-7d = 0.5, >7d = 0.1.
-            7. Aggregate per-day → DataFrame with this connector's schema.
+        GDELT needs no key, reaches back to 2019, and returns a whole
+        multi-year daily series in one request, so a region costs two calls
+        (tone and volume) rather than one per month. Keywords come from
+        ``self.newsapi_keywords``, resolved at construction from an explicit
+        config list or the region's ``location_context``.
+
+        Per-article NLP -- VADER scoring, embeddings, DBSCAN clustering -- is
+        deliberately not done here. GDELT already publishes an aggregate daily
+        tone computed over its whole corpus, which is a broader base than a
+        page of articles this connector could fetch and score itself.
+
+        The cost is ``source_consensus``: clustering was how the original
+        design intended to measure it, and GDELT's timeline endpoints carry no
+        per-source breakdown. The column is therefore omitted rather than
+        faked, and :class:`~src.agents.news_agent.NewsAgent` renormalises its
+        weights over the features present.
+
+        Returns:
+            Daily-frequency frame over the configured historical range.
 
         Raises:
-            NotImplementedError: Wiring stubbed for thesis scope. The message
-                reports the resolved keywords so a region-config gap surfaces
-                here rather than as a silently unfiltered query later.
+            ValueError: If no keywords resolved for this region (a live query
+                would be unfiltered), or if GDELT returned nothing after
+                retries -- it rate-limits hard, and an empty series must not
+                be mistaken for calm coverage.
         """
         if not self.newsapi_keywords:
             raise ValueError(
