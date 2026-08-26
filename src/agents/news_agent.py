@@ -123,9 +123,23 @@ class NewsAgent(BaseAgent):
 
     # ----------------------------------------------------------------- fit
     def fit(self, df: pd.DataFrame) -> None:
-        missing = [c for c in self._feature_columns if c not in df.columns]
-        if missing:
-            raise ValueError(f"NewsAgent: missing columns: {missing}")
+        """Schema check; narrows features to those the source supplies.
+
+        GDELT's timeline endpoints return an aggregate tone per day with no
+        per-source breakdown, so ``source_consensus`` cannot be measured from
+        them. A source may omit a feature and :meth:`detect` renormalises the
+        remaining weights rather than scoring an invented column.
+
+        Raises:
+            ValueError: If ``sentiment_score`` is absent — without it there is
+                no news signal left to score.
+        """
+        present = [c for c in _FEATURE_COLUMNS if c in df.columns]
+        if "sentiment_score" not in present:
+            raise ValueError(
+                f"NewsAgent: sentiment_score is required; got {list(df.columns)}."
+            )
+        self._feature_columns = present
         self._is_fitted = True
         logger.info(
             "[NewsAgent.fit] schema validated | threshold=%.2f | weights=%s",
@@ -156,7 +170,11 @@ class NewsAgent(BaseAgent):
         neg_sent = (
             np.clip(-out["recency_weighted_score"], 0.0, 1.0)
         ).to_numpy()
-        consensus = np.clip(out["source_consensus"], 0.0, 1.0).to_numpy()
+        consensus = (
+            np.clip(out["source_consensus"], 0.0, 1.0).to_numpy()
+            if "source_consensus" in out.columns
+            else None
+        )
         # Negative velocity = sentiment dropping fast = high risk.
         velocity = np.clip(-out["sentiment_velocity"], 0.0, 1.0).to_numpy()
         baseline_vol = out["volume_rolling_30d"].replace(0.0, 1.0).to_numpy()
@@ -165,12 +183,32 @@ class NewsAgent(BaseAgent):
             / self._volume_spike_multiplier, 0.0, 1.0,
         )
 
-        weighted = (
-            self._weights["sentiment"] * neg_sent
-            + self._weights["consensus"] * consensus
-            + self._weights["velocity"] * velocity
-            + self._weights["volume"] * volume_factor
-        )
+        # Renormalise over the components actually available. consensus is
+        # absent for GDELT-sourced data; scoring it as zero would read as
+        # "outlets disagree" rather than "not measured", and silently damp
+        # every score by its 0.25 weight.
+        components = {
+            "sentiment": neg_sent,
+            "consensus": consensus,
+            "velocity": velocity,
+            "volume": volume_factor,
+        }
+        weighted = np.zeros(len(out), dtype=float)
+        used = 0.0
+        for key, values in components.items():
+            if values is None:
+                continue
+            weighted = weighted + self._weights[key] * np.asarray(values)
+            used += self._weights[key]
+        if used <= 0:
+            raise ValueError("NewsAgent: no scoring components available.")
+        if used < 1.0:
+            logger.warning(
+                "[NewsAgent] scoring without %s; weights renormalised over "
+                "%.3f of the original mass.",
+                sorted(k for k, v in components.items() if v is None), used,
+            )
+        weighted = weighted / used
 
         out["neg_sentiment_norm"] = neg_sent
         out["consensus_norm"] = consensus
@@ -192,10 +230,14 @@ class NewsAgent(BaseAgent):
         sent_ok = (
             s["recency_weighted_score"] <= self._neg_threshold
         ).to_numpy()
-        consensus_ok = (
-            s["source_consensus"] >= self._consensus_threshold
-        ).to_numpy()
-        combined = flags & sent_ok & consensus_ok
+        # Without a consensus signal the gate cannot be applied; requiring it
+        # would suppress every flag rather than leaving the remaining
+        # sentiment gate to do the work.
+        combined = flags & sent_ok
+        if "source_consensus" in s.columns:
+            combined = combined & (
+                s["source_consensus"] >= self._consensus_threshold
+            ).to_numpy()
 
         persistent = np.zeros_like(combined)
         n = len(combined)

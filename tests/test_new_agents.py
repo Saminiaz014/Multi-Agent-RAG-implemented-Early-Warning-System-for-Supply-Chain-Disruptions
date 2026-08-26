@@ -359,9 +359,82 @@ class TestNewsConnector:
         ).fetch()
         assert len(df) == 365
 
-    def test_api_mode_raises(self) -> None:
-        with pytest.raises(NotImplementedError):
-            NewsConnector(config={"data_mode": "api"}).fetch()
+    def test_api_mode_needs_keywords(self) -> None:
+        """API mode is GDELT now; without keywords the query is unfiltered."""
+        connector = NewsConnector(
+            config={"data_mode": "api",
+                    "location_context": {"primary_location": "", "topics": []}}
+        )
+        with pytest.raises(ValueError, match="keywords"):
+            connector.fetch()
+
+    @staticmethod
+    def _timeline(n: int, value: float) -> dict:
+        import pandas as _pd
+
+        dates = _pd.date_range("2024-01-01", periods=n, freq="D")
+        return {"timeline": [{"data": [
+            {"date": d.strftime("%Y%m%dT%H%M%SZ"), "value": value} for d in dates
+        ]}]}
+
+    def _patch_gdelt(self, monkeypatch, *, fail_times: int = 0):
+        import src.ingestion.news_connector as mod
+
+        calls = {"n": 0}
+
+        class _Resp:
+            headers = {"content-type": "application/json"}
+
+            def __init__(self, mode: str) -> None:
+                self._mode = mode
+
+            def json(self) -> dict:
+                value = -4.0 if self._mode == "timelinetone" else 120.0
+                return TestNewsConnector._timeline(30, value)
+
+        def fake_get(_url, params=None, **_kw):
+            calls["n"] += 1
+            if calls["n"] <= fail_times:
+                raise TimeoutError("throttled")
+            return _Resp((params or {}).get("mode", ""))
+
+        monkeypatch.setattr(mod.requests, "get", fake_get)
+        monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+        return calls
+
+    def test_api_mode_omits_source_consensus(self, monkeypatch) -> None:
+        """GDELT timelines carry no per-source breakdown.
+
+        Emitting a zeroed source_consensus would read as "outlets disagree"
+        rather than "not measured", and silently damp every score by its
+        0.25 weight.
+        """
+        self._patch_gdelt(monkeypatch)
+        df = NewsConnector(
+            config={"data_mode": "api", "newsapi_keywords": ["Strait of Hormuz"]}
+        ).fetch_api()
+
+        assert "source_consensus" not in df.columns
+        assert (df["sentiment_score"] < 0).all(), "negative tone must stay negative"
+        assert df["article_volume"].between(0.0, 1.0).all()
+
+    def test_api_mode_retries_then_gives_up_loudly(self, monkeypatch) -> None:
+        """A throttled GDELT must fail, never return an empty quiet series."""
+        self._patch_gdelt(monkeypatch, fail_times=99)
+        connector = NewsConnector(
+            config={"data_mode": "api", "newsapi_keywords": ["Strait of Hormuz"]}
+        )
+        with pytest.raises(ValueError, match="rate-limits"):
+            connector.fetch_api()
+
+    def test_api_mode_recovers_from_a_transient_failure(self, monkeypatch) -> None:
+        calls = self._patch_gdelt(monkeypatch, fail_times=1)
+        df = NewsConnector(
+            config={"data_mode": "api", "newsapi_keywords": ["Strait of Hormuz"]}
+        ).fetch_api()
+
+        assert not df.empty
+        assert calls["n"] > 2
 
 
 class TestNewsAgent:
