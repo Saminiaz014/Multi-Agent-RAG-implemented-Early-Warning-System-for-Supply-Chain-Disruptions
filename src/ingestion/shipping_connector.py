@@ -19,11 +19,13 @@ agents can consume regardless of which mode produced the data.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import requests
 import pandas as pd
 from scipy import stats
 
@@ -127,6 +129,27 @@ _MIN_RUN_LENGTH: int = 3
 # label robust against rolling-window edge effects.
 _KNOWN_SHUTDOWN_START: pd.Timestamp = pd.Timestamp("2026-04-01")
 _KNOWN_SHUTDOWN_END: pd.Timestamp = pd.Timestamp("2026-05-31")
+
+# --- IMF PortWatch daily chokepoint transits (no credentials required) ------
+_PORTWATCH_QUERY_URL: str = (
+    "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/"
+    "Daily_Chokepoints_Data/FeatureServer/0/query"
+)
+#: Fields pulled per day. n_total/n_tanker feed the agent-facing columns; the
+#: per-type counts travel for provenance and future features.
+_PORTWATCH_FIELDS: tuple[str, ...] = (
+    "date", "portname", "n_total", "n_tanker", "n_container",
+    "n_dry_bulk", "n_general_cargo", "n_roro", "n_cargo", "capacity",
+)
+#: The layer's maxRecordCount. Truncation is signalled by
+#: ``exceededTransferLimit``, so paging follows that flag, not this number.
+_PORTWATCH_PAGE_SIZE: int = 2000
+#: Only this chokepoint gets the April-May 2026 shutdown label.
+_PORTWATCH_HORMUZ: str = "Strait of Hormuz"
+
+_API_TIMEOUT: int = 60
+_API_ATTEMPTS: int = 3
+_API_BACKOFF_SECONDS: float = 2.0
 
 
 class ShippingConnector(BaseConnector):
@@ -334,6 +357,33 @@ class ShippingConnector(BaseConnector):
             raw.get(_CSV_MA_COLUMN), errors="coerce"
         )
 
+        df = self._derive_daily_features(df, apply_known_shutdown=True)
+        self._report_csv_stats(df)
+        return df
+
+    def _derive_daily_features(
+        self, df: pd.DataFrame, *, apply_known_shutdown: bool
+    ) -> pd.DataFrame:
+        """Derive the agent-facing feature columns from daily vessel counts.
+
+        Shared by :meth:`load_from_csv` and :meth:`fetch_from_api` so both
+        sources produce identical semantics — ``congestion_index`` and
+        ``avg_delay_hours`` are transforms of ``vessel_count`` against its own
+        rolling baseline, not independent measurements, and defining them
+        twice would let the two paths drift apart.
+
+        Args:
+            df: Frame with ``timestamp``, ``vessel_count``, ``tanker_count``
+                and ``vessel_count_7dma``, in any row order.
+            apply_known_shutdown: Whether to force ``is_disruption`` true
+                across the April-May 2026 Hormuz shutdown window. **Only true
+                for Hormuz.** That shutdown is a Hormuz event; applying it to
+                Panama or Malacca would label unrelated days as disrupted and
+                silently corrupt the ground truth.
+
+        Returns:
+            The frame with derived columns, ordered by timestamp.
+        """
         df = df.sort_values("timestamp").reset_index(drop=True)
 
         rolling_mean = df["vessel_count"].rolling(
@@ -362,20 +412,20 @@ class ShippingConnector(BaseConnector):
         delay = _BASE_DELAY_HOURS * (rolling_mean_filled / vessel_floor)
         df["avg_delay_hours"] = delay.clip(lower=_DELAY_MIN, upper=_DELAY_MAX)
 
-        # Ground-truth disruption label: 2σ drop persisting ≥ 3 consecutive
-        # days OR within the known April-May 2026 Hormuz shutdown.
+        # Ground-truth disruption label: 2σ drop persisting ≥ 3 consecutive days.
         threshold = rolling_mean_filled - _ANOMALY_SIGMA * rolling_std_filled
         below = (df["vessel_count"] < threshold).to_numpy()
-        persistent = self._flag_persistent_runs(below, _MIN_RUN_LENGTH)
-        shutdown = df["timestamp"].between(
-            _KNOWN_SHUTDOWN_START, _KNOWN_SHUTDOWN_END
-        ).to_numpy()
-        df["is_disruption"] = persistent | shutdown
+        flags = self._flag_persistent_runs(below, _MIN_RUN_LENGTH)
+        if apply_known_shutdown:
+            flags = flags | df["timestamp"].between(
+                _KNOWN_SHUTDOWN_START, _KNOWN_SHUTDOWN_END
+            ).to_numpy()
+        df["is_disruption"] = flags
 
         # oil_price_usd is provided by the market connector; placeholder here.
         df["oil_price_usd"] = np.nan
 
-        df = df[[
+        return df[[
             "timestamp",
             "vessel_count",
             "tanker_count",
@@ -385,9 +435,6 @@ class ShippingConnector(BaseConnector):
             "oil_price_usd",
             "is_disruption",
         ]]
-
-        self._report_csv_stats(df)
-        return df
 
     def generate_synthetic(self, days: int = 365, seed: int = 42) -> pd.DataFrame:
         """Generate the legacy daily synthetic Hormuz dataset.
@@ -452,36 +499,130 @@ class ShippingConnector(BaseConnector):
         """Backwards-compatible alias for :meth:`generate_synthetic`."""
         return self.generate_synthetic(days=days, seed=seed)
 
-    def fetch_from_api(self) -> pd.DataFrame:
-        """Planned live-AIS integration via the aisstream.io WebSocket API.
+    def _fetch_portwatch_rows(self, chokepoint: str) -> list[dict]:
+        """Page the full daily history for one chokepoint.
 
-        Planned implementation:
-            * Connect to the aisstream.io WebSocket using ``self.api_key``.
-            * Subscribe to vessel position messages filtered by
-              ``self.ais_bounds`` — the active region's box, in the
-              ``[[lat_min, lon_min], [lat_max, lon_max]]`` form aisstream's
-              ``BoundingBoxes`` subscription field already expects.
-            * Aggregate raw AIS positions into daily vessel counts by type
-              (Container / Dry Bulk / General Cargo / Roll-on/roll-off /
-              Tanker) to match the CSV schema emitted by
-              :meth:`load_from_csv`.
+        The feature service caps a response at ``maxRecordCount`` (2,000) and
+        signals truncation with ``exceededTransferLimit``, so paging is driven
+        by that flag rather than by guessing the row count. Requests are
+        retried: the service returns intermittent errors under load, and a
+        dropped page would silently punch a hole in the series.
+
+        Args:
+            chokepoint: Name exactly as spelled in the layer's ``portname``.
+
+        Returns:
+            Raw attribute dicts, one per day.
 
         Raises:
-            NotImplementedError: Always — API mode is not yet wired up. The
-                message reports the resolved bounds so a region-config problem
-                is visible here rather than only once the API lands.
+            RuntimeError: If a page cannot be fetched after retrying, rather
+                than returning a short series that looks like quiet days.
         """
-        bounds_note = (
-            f"Region bounds resolved: {self.ais_bounds}."
-            if self.ais_bounds
-            else "No AIS bounds configured for this region "
-            "(ingestion.shipping.ais_bounds is unset)."
+        rows: list[dict] = []
+        offset = 0
+        while True:
+            payload = None
+            for attempt in range(1, _API_ATTEMPTS + 1):
+                try:
+                    response = requests.get(
+                        _PORTWATCH_QUERY_URL,
+                        params={
+                            "where": f"portname='{chokepoint}'",
+                            "outFields": ",".join(_PORTWATCH_FIELDS),
+                            "orderByFields": "date",
+                            "resultOffset": offset,
+                            "resultRecordCount": _PORTWATCH_PAGE_SIZE,
+                            "returnGeometry": "false",
+                            "f": "json",
+                        },
+                        timeout=_API_TIMEOUT,
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                    if "error" in payload:
+                        raise RuntimeError(payload["error"])
+                    break
+                except Exception as exc:
+                    if attempt == _API_ATTEMPTS:
+                        raise RuntimeError(
+                            f"PortWatch page at offset {offset} for "
+                            f"{chokepoint!r} failed after {_API_ATTEMPTS} "
+                            f"attempts: {exc}"
+                        ) from exc
+                    logger.warning(
+                        "[ShippingConnector/PortWatch] offset=%d attempt %d/%d "
+                        "failed (%s) — retrying",
+                        offset, attempt, _API_ATTEMPTS, exc,
+                    )
+                    time.sleep(_API_BACKOFF_SECONDS * attempt)
+
+            page = [f.get("attributes", {}) for f in payload.get("features", [])]
+            rows.extend(page)
+            if not payload.get("exceededTransferLimit") or not page:
+                return rows
+            offset += len(page)
+
+    def fetch_from_api(self) -> pd.DataFrame:
+        """Fetch daily chokepoint transits from the IMF PortWatch API.
+
+        Same provider as :meth:`load_from_csv`, which reads a static PortWatch
+        export for a single Persian Gulf port. This reads PortWatch's
+        ``Daily_Chokepoints_Data`` layer instead: daily transit counts at the
+        chokepoint itself, for every region, from 2019-01-01 to the present,
+        refreshed daily. No credentials.
+
+        ``n_total`` becomes ``vessel_count`` and ``n_tanker`` becomes
+        ``tanker_count``; the remaining columns are derived by
+        :meth:`_derive_daily_features`, exactly as for the CSV path.
+
+        Returns:
+            Daily-frequency frame in the connector's standard schema.
+
+        Raises:
+            ValueError: If the region has no ``portwatch_chokepoint``
+                configured, or the API returns no rows for it — an empty
+                series here means a name mismatch, not a quiet chokepoint.
+        """
+        chokepoint = str(self.config.get("portwatch_chokepoint") or "").strip()
+        if not chokepoint:
+            raise ValueError(
+                "No portwatch_chokepoint configured for this region. Set "
+                "ingestion.shipping.portwatch_chokepoint in the region "
+                "overlay (config/regions/<region>.yaml)."
+            )
+
+        rows = self._fetch_portwatch_rows(chokepoint)
+        if not rows:
+            raise ValueError(
+                f"PortWatch returned no rows for portname={chokepoint!r}. "
+                "The name must match the layer's spelling exactly, e.g. "
+                "'Strait of Hormuz', 'Bab el-Mandeb Strait'."
+            )
+
+        raw = pd.DataFrame(rows)
+        df = pd.DataFrame()
+        df["timestamp"] = pd.to_datetime(raw["date"])
+        df["vessel_count"] = pd.to_numeric(raw["n_total"], errors="coerce").astype(float)
+        df["tanker_count"] = pd.to_numeric(raw["n_tanker"], errors="coerce").astype(float)
+        df = df.dropna(subset=["timestamp", "vessel_count"])
+        df["vessel_count_7dma"] = (
+            df.sort_values("timestamp")["vessel_count"]
+            .rolling(window=7, min_periods=1).mean()
         )
-        raise NotImplementedError(
-            "API mode not yet implemented. Planned: aisstream.io WebSocket "
-            f"for live AIS data. {bounds_note} "
-            "Set source_mode='csv' or 'synthetic' in config/settings.yaml."
+
+        # The April-May 2026 shutdown is a Hormuz event; labelling another
+        # region's days from it would corrupt that region's ground truth.
+        is_hormuz = chokepoint == _PORTWATCH_HORMUZ
+
+        df = self._derive_daily_features(df, apply_known_shutdown=is_hormuz)
+        logger.info(
+            "[ShippingConnector/PortWatch] %s -> %d days [%s .. %s] "
+            "mean_vessels=%.1f disruption_days=%d",
+            chokepoint, len(df), df["timestamp"].min().date(),
+            df["timestamp"].max().date(), df["vessel_count"].mean(),
+            int(df["is_disruption"].sum()),
         )
+        return df
 
     # Synthetic-schema CSV columns produced by generate_synthetic / save_raw.
     _SYNTHETIC_SCHEMA: tuple[str, ...] = (

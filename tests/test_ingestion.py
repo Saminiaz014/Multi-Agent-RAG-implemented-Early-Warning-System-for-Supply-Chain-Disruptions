@@ -239,15 +239,154 @@ class TestShippingSyntheticMode:
 
 
 class TestShippingApiMode:
-    def test_api_mode_raises_not_implemented_via_fetch(self) -> None:
-        connector = ShippingConnector(source_mode="api", config={})
-        with pytest.raises(NotImplementedError, match="aisstream"):
-            connector.fetch()
+    """API mode reads IMF PortWatch daily chokepoint transits.
 
-    def test_api_mode_raises_not_implemented_direct(self) -> None:
+    Network is mocked throughout — these pin the parsing and the guards, not
+    the live service.
+    """
+
+    @staticmethod
+    def _page(days: int, *, start: str = "2024-01-01", exceeded: bool = False) -> dict:
+        dates = pd.date_range(start, periods=days, freq="D")
+        return {
+            "features": [
+                {
+                    "attributes": {
+                        "date": d.strftime("%Y-%m-%d"),
+                        "portname": "Strait of Hormuz",
+                        "n_total": 80 - i,
+                        "n_tanker": 20,
+                    }
+                }
+                for i, d in enumerate(dates)
+            ],
+            "exceededTransferLimit": exceeded,
+        }
+
+    def _connector(self, monkeypatch, payloads: list[dict], chokepoint="Strait of Hormuz"):
+        from src.ingestion import shipping_connector as mod
+
+        calls = {"n": 0}
+
+        class _Resp:
+            headers = {"content-type": "application/json"}
+
+            def raise_for_status(self) -> None: ...
+
+            def json(self) -> dict:
+                i = min(calls["n"] - 1, len(payloads) - 1)
+                return payloads[i]
+
+        def fake_get(*_a, **_kw):
+            calls["n"] += 1
+            return _Resp()
+
+        monkeypatch.setattr(mod.requests, "get", fake_get)
+        monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+        connector = ShippingConnector(
+            source_mode="api", config={"portwatch_chokepoint": chokepoint}
+        )
+        return connector, calls
+
+    def test_api_mode_returns_the_standard_schema(self, monkeypatch) -> None:
+        connector, _ = self._connector(monkeypatch, [self._page(40)])
+        df = connector.fetch()
+
+        assert len(df) == 40
+        for column in ("timestamp", "vessel_count", "tanker_count",
+                       "avg_delay_hours", "congestion_index", "is_disruption"):
+            assert column in df.columns
+
+    def test_missing_chokepoint_name_is_an_error(self) -> None:
+        """A region without the mapping must say so, not fetch nothing."""
         connector = ShippingConnector(source_mode="api", config={})
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ValueError, match="portwatch_chokepoint"):
             connector.fetch_from_api()
+
+    def test_empty_result_raises_rather_than_returning_a_quiet_series(
+        self, monkeypatch
+    ) -> None:
+        """No rows means a name mismatch — never a chokepoint with no traffic."""
+        connector, _ = self._connector(
+            monkeypatch, [{"features": [], "exceededTransferLimit": False}],
+            chokepoint="Nonexistent Strait",
+        )
+        with pytest.raises(ValueError, match="no rows"):
+            connector.fetch_from_api()
+
+    def test_paging_follows_the_truncation_flag(self, monkeypatch) -> None:
+        """A truncated page must be followed, or the series silently ends early."""
+        connector, calls = self._connector(
+            monkeypatch,
+            [self._page(20, exceeded=True), self._page(10, exceeded=False)],
+        )
+        df = connector.fetch_from_api()
+
+        assert calls["n"] == 2, "second page was not requested"
+        assert len(df) == 30
+
+    def test_transient_failure_is_retried(self, monkeypatch) -> None:
+        from src.ingestion import shipping_connector as mod
+
+        attempts = {"n": 0}
+
+        class _Resp:
+            def raise_for_status(self) -> None: ...
+
+            @staticmethod
+            def json() -> dict:
+                return TestShippingApiMode._page(10)
+
+        def flaky(*_a, **_kw):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise TimeoutError("read timed out")
+            return _Resp()
+
+        monkeypatch.setattr(mod.requests, "get", flaky)
+        monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+        connector = ShippingConnector(
+            source_mode="api", config={"portwatch_chokepoint": "Strait of Hormuz"}
+        )
+
+        assert len(connector.fetch_from_api()) == 10
+        assert attempts["n"] == 3
+
+    def test_persistent_failure_raises_not_a_short_series(self, monkeypatch) -> None:
+        """A dropped page would be a hole in the record, so it must fail loudly."""
+        from src.ingestion import shipping_connector as mod
+
+        monkeypatch.setattr(
+            mod.requests, "get",
+            lambda *_a, **_kw: (_ for _ in ()).throw(TimeoutError("down")),
+        )
+        monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+        connector = ShippingConnector(
+            source_mode="api", config={"portwatch_chokepoint": "Strait of Hormuz"}
+        )
+        with pytest.raises(RuntimeError, match="after 3 attempts"):
+            connector.fetch_from_api()
+
+    def test_known_shutdown_label_is_hormuz_only(self, monkeypatch) -> None:
+        """The Apr-May 2026 shutdown is a Hormuz event.
+
+        Applying it to another chokepoint would mark unrelated days as
+        disrupted and quietly corrupt that region's ground truth.
+        """
+        page = {
+            "features": [
+                {"attributes": {"date": f"2026-04-{d:02d}", "n_total": 30,
+                                "n_tanker": 5}}
+                for d in range(1, 29)
+            ],
+            "exceededTransferLimit": False,
+        }
+        panama, _ = self._connector(monkeypatch, [page], chokepoint="Panama Canal")
+        hormuz, _ = self._connector(monkeypatch, [page], chokepoint="Strait of Hormuz")
+
+        # Flat counts: nothing for the 2-sigma rule to find in either case.
+        assert not panama.fetch_from_api()["is_disruption"].any()
+        assert hormuz.fetch_from_api()["is_disruption"].all()
 
 
 # ---------------------------------------------------------------------------

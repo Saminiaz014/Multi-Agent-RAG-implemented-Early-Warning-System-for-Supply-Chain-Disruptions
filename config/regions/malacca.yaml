@@ -77,3 +77,10 @@ aisstream:
 # No per-region market block — doubly so here: market is passive for this
 # region on evidence grounds (see agents.market above), and the connector's
 # series are global rather than region-scoped anyway.
+
+# IMF PortWatch chokepoint name, as spelled in the Daily_Chokepoints_Data
+# feature layer. Drives ShippingConnector.fetch_from_api(); the layer carries
+# daily transit counts per chokepoint from 2019-01-01 to the present.
+ingestion:
+  shipping:
+    portwatch_chokepoint: "Malacca Strait"

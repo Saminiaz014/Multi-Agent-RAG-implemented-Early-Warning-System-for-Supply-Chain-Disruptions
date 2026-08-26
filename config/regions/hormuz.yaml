@@ -77,3 +77,10 @@ aisstream:
 # "Global/Persian Gulf" — these are not region-scoped inputs. Inventing
 # per-region FRED series IDs here would fabricate data sources the pipeline
 # does not use.
+
+# IMF PortWatch chokepoint name, as spelled in the Daily_Chokepoints_Data
+# feature layer. Drives ShippingConnector.fetch_from_api(); the layer carries
+# daily transit counts per chokepoint from 2019-01-01 to the present.
+ingestion:
+  shipping:
+    portwatch_chokepoint: "Strait of Hormuz"

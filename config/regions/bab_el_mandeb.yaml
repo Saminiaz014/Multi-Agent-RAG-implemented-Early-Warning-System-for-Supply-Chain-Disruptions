@@ -90,3 +90,10 @@ aisstream:
   bbox: [[11.8, 42.6], [13.4, 44.1]]
 
 # No per-region market block — see hormuz.yaml's closing note.
+
+# IMF PortWatch chokepoint name, as spelled in the Daily_Chokepoints_Data
+# feature layer. Drives ShippingConnector.fetch_from_api(); the layer carries
+# daily transit counts per chokepoint from 2019-01-01 to the present.
+ingestion:
+  shipping:
+    portwatch_chokepoint: "Bab el-Mandeb Strait"

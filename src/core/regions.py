@@ -34,6 +34,25 @@ AGENT_KEYS: tuple[str, ...] = (
     "news_sentiment",
 )
 
+#: Agents dormant across the whole project, not merely passive in some regions.
+#:
+#: A *passive* agent is a per-region evidence judgement — the domain is real but
+#: has no documented driver for that chokepoint, and could become active if
+#: evidence appeared. A *dormant* agent is a project-scope decision: it is not
+#: being worked on, and no region may activate it.
+#:
+#: ``routing`` is dormant. It was already passive in all four regions (no
+#: viable sea alternate into the Persian Gulf; only weak, minority diversion
+#: evidence for Panama and Malacca), so no run ever exercised it, and no data
+#: source in the pipeline feeds its features with anything but synthetic
+#: values. Enforced by :func:`_validate_registry` so it cannot be switched back
+#: on region-by-region without a deliberate edit here.
+#:
+#: The :class:`~src.agents.routing_agent.RoutingAgent` class and its connector
+#: are intentionally left in the tree: they are tested, and reviving the domain
+#: should be a config decision, not a rewrite.
+DORMANT_AGENTS: frozenset[str] = frozenset({"routing"})
+
 
 @dataclass(frozen=True)
 class RegionConfig:
@@ -270,6 +289,15 @@ def _validate_registry() -> None:
             raise ValueError(
                 f"Region {key!r} lists passive_reasons for active agent(s) "
                 f"{sorted(mislabelled)}."
+            )
+        activated_dormant = sorted(
+            name for name in DORMANT_AGENTS if region.agents.get(name, False)
+        )
+        if activated_dormant:
+            raise ValueError(
+                f"Region {key!r} activates dormant agent(s) {activated_dormant}. "
+                f"Dormant agents are out of project scope and have no real data "
+                f"source; remove from DORMANT_AGENTS first if reviving one."
             )
 
 

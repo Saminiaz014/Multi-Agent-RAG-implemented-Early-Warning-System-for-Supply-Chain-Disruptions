@@ -192,15 +192,37 @@ class TestNewsConnectorRegion:
 
 
 def test_api_stubs_report_the_settings_they_resolved() -> None:
-    """Each stub names its region setting, so a config gap surfaces there."""
+    """Each remaining stub names its region setting, so a gap surfaces there.
+
+    Shipping is no longer listed: its API mode is implemented against IMF
+    PortWatch. Its region setting is covered by
+    :func:`test_shipping_api_mode_resolves_a_chokepoint_per_region` below.
+    """
     config = load_config_for_region("malacca")
 
-    with pytest.raises(NotImplementedError, match=r"Region bounds resolved"):
-        ShippingConnector(config=config["ingestion"]["shipping"]).fetch_from_api()
     with pytest.raises(NotImplementedError, match=r"Region ACLED countries"):
         GeopoliticalConnector(config=config["agents"]["geopolitical"]).fetch_api()
     with pytest.raises(NotImplementedError, match=r"Region keywords"):
         NewsConnector(config=config["agents"]["news_sentiment"]).fetch_api()
+
+
+def test_shipping_api_mode_resolves_a_chokepoint_per_region() -> None:
+    """Every region must map to a distinct PortWatch chokepoint name.
+
+    A missing or duplicated name would silently give a region another
+    region's vessel traffic — the same class of failure as the GDACS
+    country filter that returned identical global results for all four.
+    """
+    seen: dict[str, str] = {}
+    for region in list_regions():
+        config = load_config_for_region(region)
+        name = config["ingestion"]["shipping"].get("portwatch_chokepoint")
+
+        assert name, f"{region}: no portwatch_chokepoint configured"
+        assert name not in seen.values(), (
+            f"{region} shares chokepoint {name!r} with {seen}"
+        )
+        seen[region] = name
 
 
 def test_orchestrator_wiring_carries_region_settings() -> None:

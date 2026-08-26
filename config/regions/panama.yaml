@@ -74,3 +74,10 @@ aisstream:
   bbox: [[8.8, -80.1], [9.5, -79.4]]
 
 # No per-region market block — see hormuz.yaml's closing note.
+
+# IMF PortWatch chokepoint name, as spelled in the Daily_Chokepoints_Data
+# feature layer. Drives ShippingConnector.fetch_from_api(); the layer carries
+# daily transit counts per chokepoint from 2019-01-01 to the present.
+ingestion:
+  shipping:
+    portwatch_chokepoint: "Panama Canal"
