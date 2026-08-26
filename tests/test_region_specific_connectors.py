@@ -200,10 +200,22 @@ def test_api_stubs_report_the_settings_they_resolved() -> None:
     """
     config = load_config_for_region("malacca")
 
-    with pytest.raises(NotImplementedError, match=r"Region ACLED countries"):
-        GeopoliticalConnector(config=config["agents"]["geopolitical"]).fetch_api()
     with pytest.raises(NotImplementedError, match=r"Region keywords"):
         NewsConnector(config=config["agents"]["news_sentiment"]).fetch_api()
+
+
+def test_geopolitical_api_mode_resolves_countries_per_region() -> None:
+    """ACLED mode is implemented; each region must scope to its own countries.
+
+    An unscoped query would pull every conflict on earth into whichever
+    region ran first -- the same failure the GDACS country filter produced.
+    """
+    for region in list_regions():
+        config = load_config_for_region(region)
+        connector = GeopoliticalConnector(config=config["agents"]["geopolitical"])
+
+        assert connector.acled_countries == config["extraction"]["countries"]
+        assert connector.acled_countries, f"{region}: empty country list"
 
 
 def test_shipping_api_mode_resolves_a_chokepoint_per_region() -> None:

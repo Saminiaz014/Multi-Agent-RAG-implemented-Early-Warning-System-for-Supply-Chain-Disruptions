@@ -88,10 +88,55 @@ class TestGeopoliticalConnector:
         assert len(df) == 365
         assert df["composite_geopolitical_risk"].between(0.0, 1.0).all()
 
-    def test_api_mode_raises(self) -> None:
+    def test_api_mode_needs_countries(self) -> None:
+        """API mode is implemented against ACLED; without a country list a
+        live query would have no filter, so it fails loudly rather than
+        pulling every conflict on earth."""
         connector = GeopoliticalConnector(config={"data_mode": "api"})
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ValueError, match="acled_countries"):
             connector.fetch()
+
+    def test_api_mode_does_not_emit_sanctions(self, monkeypatch) -> None:
+        """ACLED carries no sanctions data, and the column must stay absent.
+
+        Emitting a zeroed or interpolated sanctions_severity would read as
+        "no sanctions activity" rather than "not measured", and it is the
+        agent's highest-weighted feature.
+        """
+        import src.ingestion.geopolitical_connector as mod
+
+        events = [
+            {"event_date": f"2024-01-{d:02d}", "event_type": et, "fatalities": 1}
+            for d in range(1, 11)
+            for et in ("Battles", "Protests", "Strategic developments")
+        ]
+        monkeypatch.setattr(
+            mod.GeopoliticalConnector, "_acled_config", lambda self: {}
+        )
+
+        class _Stub:
+            def __init__(self, _cfg) -> None: ...
+
+            def _fetch_events(self, country, year, limit=0):
+                return events
+
+        monkeypatch.setattr(
+            "src.extractors.acled_extractor.ACLEDExtractor", _Stub
+        )
+        connector = GeopoliticalConnector(
+            config={
+                "data_mode": "api",
+                "acled_countries": ["Yemen"],
+                "api": {"start_year": 2024, "end_year": 2024},
+            }
+        )
+        df = connector.fetch_api()
+
+        assert "sanctions_severity" not in df.columns
+        for column in ("military_activity_index", "diplomatic_incident_score",
+                       "regime_stability_index"):
+            assert column in df.columns
+            assert df[column].between(0.0, 1.0).all()
 
 
 class TestGeopoliticalAgent:

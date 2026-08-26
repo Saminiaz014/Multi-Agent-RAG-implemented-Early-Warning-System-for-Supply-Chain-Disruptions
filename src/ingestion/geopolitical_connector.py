@@ -121,6 +121,28 @@ _SCENARIOS: tuple[_Scenario, ...] = (
 )
 
 
+# --- Live ACLED mode --------------------------------------------------------
+#: ACLED event categories mapped onto the three features it can support.
+#: sanctions_severity has no ACLED analogue and is deliberately absent.
+_ACLED_MILITARY_TYPES: frozenset[str] = frozenset(
+    {"Battles", "Explosions/Remote violence"}
+)
+#: ACLED's category for agreements, arrests and non-violent transfers of
+#: territory -- the closest the dataset comes to a diplomatic incident.
+_ACLED_DIPLOMATIC_TYPES: frozenset[str] = frozenset({"Strategic developments"})
+#: Civil unrest, inverted into regime_stability_index.
+_ACLED_UNREST_TYPES: frozenset[str] = frozenset({"Protests", "Riots"})
+
+#: Mirrors GeopoliticalAgent's weights with sanctions (0.35) removed and the
+#: remainder renormalised, so connector and agent agree on the scale.
+_API_COMPOSITE_WEIGHTS: dict[str, float] = {
+    "military": 0.25,
+    "diplomatic": 0.25,
+    "stability": 0.15,
+}
+_ACLED_RATE_LIMIT: int = 20
+
+
 class GeopoliticalConnector(BaseConnector):
     """Daily geopolitical-risk signal generator for the Hormuz corridor.
 
@@ -164,6 +186,18 @@ class GeopoliticalConnector(BaseConnector):
                 "[GeopoliticalConnector] no acled_countries configured; "
                 "only data_mode='api' needs them."
             )
+
+        # Live-ACLED settings. Defaults match the extraction historical range
+        # so the live series lines up with the knowledge base's coverage.
+        api_cfg: dict = self.config.get("api", {}) or {}
+        self.api_start_year: int = int(api_cfg.get("start_year", 2018))
+        self.api_end_year: int = int(api_cfg.get("end_year", 2026))
+        #: Per country-year cap. Hitting it means that year is truncated, so
+        #: it is logged rather than passed off as a complete year.
+        self.api_events_per_year: int = int(api_cfg.get("events_per_year", 5000))
+        self.api_disruption_threshold: float = float(
+            api_cfg.get("disruption_threshold", 0.5)
+        )
 
     # ------------------------------------------------------------------ fetch
     def fetch(self) -> pd.DataFrame:
@@ -265,36 +299,169 @@ class GeopoliticalConnector(BaseConnector):
         return df
 
     # ----------------------------------------------------------- api mode
-    def fetch_api(self) -> pd.DataFrame:
-        """Planned ACLED + OpenSanctions integration.
+    @staticmethod
+    def _normalised_intensity(counts: pd.Series) -> pd.Series:
+        """Scale a daily count series into [0, 1] against its own p95.
 
-        Planned implementation:
-            * ACLED (``api.acleddata.com``) — filter armed-conflict events to
-              ``self.acled_countries`` (the active region's country list, so
-              Panama does not pull Gulf events); daily-aggregate severity by
-              event_type weights → ``military_activity_index``.
-            * OpenSanctions API — extract new sanctions designations
-              targeting maritime / oil entities → ``sanctions_severity``.
-            * Diplomatic incidents derived from event_type tagging plus
-              key actor pairs; regime stability inferred from rolling
-              event volume.
+        A percentile anchor rather than the maximum: one exceptional day would
+        otherwise compress every ordinary day toward zero and flatten the
+        signal the agent is looking for. Days above the p95 clip at 1.0.
+        """
+        anchor = float(counts.quantile(0.95))
+        if not np.isfinite(anchor) or anchor <= 0:
+            # No events at all, or a degenerate series — genuinely flat, and
+            # a zeroed series is the honest representation of that.
+            return pd.Series(0.0, index=counts.index)
+        return (counts / anchor).clip(0.0, 1.0)
+
+    def fetch_api(self) -> pd.DataFrame:
+        """Build a daily geopolitical series from ACLED conflict events.
+
+        Three of the four features come from ACLED event categories, daily
+        aggregated over the region's countries and scaled to [0, 1]:
+
+        * ``military_activity_index`` — Battles and Explosions/Remote
+          violence, weighted so a fatal event counts more than a bloodless
+          one.
+        * ``diplomatic_incident_score`` — Strategic developments, ACLED's
+          category for agreements, arrests and non-violent transfers of
+          territory. The closest genuine analogue to a diplomatic incident
+          that the dataset carries.
+        * ``regime_stability_index`` — inverse of Protest and Riot intensity;
+          higher means calmer.
+
+        ``sanctions_severity`` is **not** produced. ACLED carries no sanctions
+        data, OpenSanctions' API is paywalled and publishes current
+        designations rather than a time series, and sanctions are discrete
+        events, so any daily "severity" curve would be a modelling artefact
+        rather than a measurement. :class:`~src.agents.geopolitical_agent
+        .GeopoliticalAgent` renormalises its weights over the features present
+        instead of scoring an invented column.
+
+        Returns:
+            Daily-frequency frame over the configured historical range.
 
         Raises:
-            NotImplementedError: Always — wiring stubbed for thesis scope. The
-                message reports the resolved country list so a region-config
-                gap surfaces here rather than as a silent empty query later.
+            ValueError: If the region has no ``acled_countries`` configured,
+                or ACLED returns nothing for all of them — an empty result
+                means a credential or country-name problem, not a peaceful
+                decade.
         """
-        countries_note = (
-            f"Region ACLED countries: {self.acled_countries}."
-            if self.acled_countries
-            else "No acled_countries configured for this region — a live "
-            "query would have no country filter."
+        if not self.acled_countries:
+            raise ValueError(
+                "No acled_countries configured for this region; a live query "
+                "would have no country filter. Set agents.geopolitical."
+                "acled_countries, or use data_mode='synthetic'."
+            )
+
+        from src.extractors.acled_extractor import ACLEDExtractor
+
+        # The extractor owns ACLED's OAuth lifecycle; re-implementing the
+        # token exchange here would be a second thing to keep working.
+        extractor = ACLEDExtractor(self._acled_config())
+        events: list[dict] = []
+        for country in self.acled_countries:
+            for year in range(self.api_start_year, self.api_end_year + 1):
+                batch = extractor._fetch_events(
+                    country, year, limit=self.api_events_per_year
+                )
+                if len(batch) >= self.api_events_per_year:
+                    # Same silent-truncation trap as the extractors: a capped
+                    # page is indistinguishable from a complete one.
+                    logger.warning(
+                        "[GeopoliticalConnector] %s/%d hit the %d-event cap — "
+                        "that year is incomplete; raise events_per_year.",
+                        country, year, self.api_events_per_year,
+                    )
+                events.extend(batch)
+
+        if not events:
+            raise ValueError(
+                f"ACLED returned no events for {self.acled_countries} over "
+                f"{self.api_start_year}-{self.api_end_year}. Check "
+                "ACLED_USERNAME / ACLED_PASSWORD and the country spellings."
+            )
+
+        raw = pd.DataFrame(events)
+        raw["timestamp"] = pd.to_datetime(raw["event_date"], errors="coerce")
+        raw = raw.dropna(subset=["timestamp"])
+        raw["fatalities"] = pd.to_numeric(
+            raw.get("fatalities"), errors="coerce"
+        ).fillna(0.0)
+        # A fatal event weighs more than a bloodless one, with diminishing
+        # returns: log1p keeps a single mass-casualty day from dominating.
+        raw["weight"] = 1.0 + np.log1p(raw["fatalities"])
+
+        daily_index = pd.date_range(
+            raw["timestamp"].min().normalize(),
+            raw["timestamp"].max().normalize(),
+            freq="D",
         )
-        raise NotImplementedError(
-            "API mode not yet implemented. Planned: ACLED + OpenSanctions "
-            f"(see docstring). {countries_note} "
-            "Set data_mode='synthetic' or 'csv' in config."
+        df = pd.DataFrame({"timestamp": daily_index})
+
+        def _daily(types: set[str], weighted: bool) -> pd.Series:
+            subset = raw[raw["event_type"].isin(types)]
+            grouped = (
+                subset.groupby(subset["timestamp"].dt.normalize())["weight"].sum()
+                if weighted
+                else subset.groupby(subset["timestamp"].dt.normalize()).size()
+            )
+            return grouped.reindex(daily_index, fill_value=0.0).astype(float)
+
+        military = _daily(_ACLED_MILITARY_TYPES, weighted=True)
+        diplomatic = _daily(_ACLED_DIPLOMATIC_TYPES, weighted=False)
+        unrest = _daily(_ACLED_UNREST_TYPES, weighted=False)
+
+        df["military_activity_index"] = self._normalised_intensity(military).to_numpy()
+        df["diplomatic_incident_score"] = self._normalised_intensity(
+            diplomatic
+        ).to_numpy()
+        df["regime_stability_index"] = (
+            1.0 - self._normalised_intensity(unrest)
+        ).to_numpy()
+
+        # Mirrors the agent's renormalisation: a weighted mean over the three
+        # available features, so the connector's own composite stays on the
+        # same scale as a four-feature one.
+        weights = _API_COMPOSITE_WEIGHTS
+        df["composite_geopolitical_risk"] = (
+            weights["military"] * df["military_activity_index"]
+            + weights["diplomatic"] * df["diplomatic_incident_score"]
+            + weights["stability"] * (1.0 - df["regime_stability_index"])
+        ) / sum(weights.values())
+
+        df["flagged_incidents"] = ""
+        df["is_disruption"] = (
+            df["composite_geopolitical_risk"] >= self.api_disruption_threshold
         )
+
+        logger.info(
+            "[GeopoliticalConnector/ACLED] %d events over %s -> %d days "
+            "[%s .. %s] disruption_days=%d (no sanctions_severity: ACLED "
+            "carries none)",
+            len(raw), self.acled_countries, len(df),
+            df["timestamp"].min().date(), df["timestamp"].max().date(),
+            int(df["is_disruption"].sum()),
+        )
+        return df
+
+    def _acled_config(self) -> dict:
+        """Config shaped as :class:`ACLEDExtractor` expects it.
+
+        The connector receives ``agents.geopolitical``; the extractor wants
+        credentials under ``api_keys``. Reading the environment directly here
+        would be a second credential path to keep in step.
+        """
+        api_cfg = self.config.get("api", {}) or {}
+        return {
+            "api_keys": {
+                "acled_username": api_cfg.get("acled_username")
+                or "${ACLED_USERNAME}",
+                "acled_password": api_cfg.get("acled_password")
+                or "${ACLED_PASSWORD}",
+            },
+            "extraction": {"rate_limits": {"acled": _ACLED_RATE_LIMIT}},
+        }
 
     # ----------------------------------------------------------- validate
     def validate(self, df: pd.DataFrame) -> bool:

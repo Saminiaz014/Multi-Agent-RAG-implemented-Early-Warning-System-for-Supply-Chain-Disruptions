@@ -90,10 +90,23 @@ class GeopoliticalAgent(BaseAgent):
 
     # ----------------------------------------------------------------- fit
     def fit(self, df: pd.DataFrame) -> None:
-        """Schema check only; weighted composite has no learned parameters."""
-        missing = [c for c in self._feature_columns if c not in df.columns]
-        if missing:
-            raise ValueError(f"GeopoliticalAgent: missing columns: {missing}")
+        """Schema check only; weighted composite has no learned parameters.
+
+        Narrows ``_feature_columns`` to those the source actually supplies.
+        A source may legitimately omit one — ACLED carries no sanctions data —
+        and :meth:`_weighted_composite` renormalises the remaining weights.
+        At least one scoring feature is still required.
+
+        Raises:
+            ValueError: If none of :data:`_FEATURE_COLUMNS` is present.
+        """
+        present = [c for c in _FEATURE_COLUMNS if c in df.columns]
+        if not present:
+            raise ValueError(
+                f"GeopoliticalAgent: none of {list(_FEATURE_COLUMNS)} present; "
+                f"got {list(df.columns)}."
+            )
+        self._feature_columns = present
         self._is_fitted = True
         logger.info(
             "[GeopoliticalAgent.fit] schema validated | threshold=%.2f | weights=%s",
@@ -112,18 +125,72 @@ class GeopoliticalAgent(BaseAgent):
             df[f"{col}_deviation"] = df[col] - df[f"{col}_baseline"]
         return df
 
+    def _weighted_composite(self, out: pd.DataFrame) -> pd.Series:
+        """Weighted sum over the features actually present, renormalised.
+
+        ACLED — the only free source that covers this domain — carries no
+        sanctions data, and no free source publishes a daily sanctions
+        severity series. Rather than invent the highest-weighted feature,
+        a source that omits one contributes the rest, and the remaining
+        weights are rescaled to sum to 1.
+
+        Rescaling is proportional, so relative importance is preserved: with
+        sanctions (0.35) absent, military and diplomatic go 0.25 -> 0.385 and
+        stability 0.15 -> 0.231. A score stays comparable across sources
+        because it is always a weighted mean over [0, 1] features, never a
+        partial sum that would read as artificially calm.
+
+        Args:
+            out: Frame carrying at least one of :data:`_FEATURE_COLUMNS`.
+
+        Returns:
+            The composite in [0, 1], before sigmoid compression.
+
+        Raises:
+            ValueError: If no scoring feature is present at all.
+        """
+        # stability is inverted: a stable regime lowers risk.
+        terms: dict[str, tuple[str, pd.Series]] = {
+            "sanctions": ("sanctions_severity", None),
+            "military": ("military_activity_index", None),
+            "diplomatic": ("diplomatic_incident_score", None),
+            "stability": ("regime_stability_index", None),
+        }
+
+        raw = pd.Series(0.0, index=out.index)
+        used = 0.0
+        absent: list[str] = []
+        for key, (column, _) in terms.items():
+            if column not in out.columns or out[column].isna().all():
+                absent.append(column)
+                continue
+            values = out[column]
+            if key == "stability":
+                values = 1.0 - values
+            raw = raw + self._weights[key] * values
+            used += self._weights[key]
+
+        if used <= 0:
+            raise ValueError(
+                "GeopoliticalAgent: no scoring features present in the input "
+                f"(expected any of {list(_FEATURE_COLUMNS)})."
+            )
+        if absent:
+            # Loud, not silent: a genuinely missing column and a source that
+            # never supplies one look identical here, and only one is fine.
+            logger.warning(
+                "[GeopoliticalAgent] scoring without %s; weights renormalised "
+                "over %.3f of the original mass.", sorted(absent), used,
+            )
+        return (raw / used).astype(float)
+
     # --------------------------------------------------------------- detect
     def detect(self, data: pd.DataFrame) -> pd.DataFrame:  # type: ignore[override]
         """Weighted composite score with sigmoid compression."""
         if not self._is_fitted:
             raise RuntimeError("GeopoliticalAgent.detect called before fit().")
         out = data.copy()
-        raw = (
-            self._weights["sanctions"] * out["sanctions_severity"]
-            + self._weights["military"] * out["military_activity_index"]
-            + self._weights["diplomatic"] * out["diplomatic_incident_score"]
-            + self._weights["stability"] * (1.0 - out["regime_stability_index"])
-        )
+        raw = self._weighted_composite(out)
         # Sigmoid compression centred at 0.5 with gain 6 so a raw score of
         # 0.5 maps to 0.5 and extremes saturate gracefully.
         anomaly_score = 1.0 / (1.0 + np.exp(-6.0 * (raw - 0.5)))
