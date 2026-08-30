@@ -1,0 +1,53 @@
+region,method,kind,family,auc,f1,fpr,alert_rate,not_applicable,agents,n_agents
+bab_el_mandeb,B1 rolling z,unsupervised,baseline,0.5240010771871949,0.1375,0.11088295687885011,0.1039671682626539,,,
+bab_el_mandeb,B2 MA crossover,unsupervised,baseline,0.5813697108425623,0.3863080684596577,0.17659137577002054,0.22571819425444598,,,
+bab_el_mandeb,B3 isolation forest,unsupervised,baseline,0.4999074292254351,0.41040462427745666,0.6283367556468172,0.612859097127223,,,
+bab_el_mandeb,B4 EWMA deviation,unsupervised,baseline,0.5397212778133099,0.26735218508997427,0.19096509240246407,0.19835841313269495,,,
+bab_el_mandeb,B5 AR residual,unsupervised,baseline,0.5087942235836672,0.07457627118644068,0.08213552361396304,0.06976744186046512,,,
+bab_el_mandeb,B6 CUSUM,unsupervised,baseline,0.26283367556468173,0.49813200498132004,0.7371663244353183,0.7647058823529411,,,
+bab_el_mandeb,B7 logistic regression,supervised,baseline,,,,,no positive examples in the training window,,
+bab_el_mandeb,B8 random forest,supervised,baseline,,,,,no positive examples in the training window,,
+bab_el_mandeb,Tier 1,multi-agent,tier,0.5483261520853671,0.45897079276773295,0.6365503080082136,0.6497948016415869,,shipping,1.0
+bab_el_mandeb,Tier 2,multi-agent,tier,0.5565018345844414,0.4425385934819897,0.43121149897330596,0.4637482900136799,,"shipping,market",2.0
+bab_el_mandeb,Tier 3,multi-agent,tier,0.4049382300467903,0.3390894819466248,0.5852156057494866,0.5376196990424077,,"shipping,market,geopolitical",3.0
+bab_el_mandeb,Tier 4,multi-agent,tier,0.4048793213720673,0.3411580594679186,0.5872689938398358,0.5403556771545828,,"shipping,market,geopolitical,natural_disaster",4.0
+bab_el_mandeb,Tier 5,multi-agent,tier,0.4048793213720673,0.3411580594679186,0.5872689938398358,0.5403556771545828,,"shipping,market,geopolitical,natural_disaster",4.0
+hormuz,B1 rolling z,unsupervised,baseline,0.4792227223577338,0.11162790697674418,0.11705685618729098,0.1121751025991792,,,
+hormuz,B2 MA crossover,unsupervised,baseline,0.4702517162471396,0.008849557522123894,0.15384615384615385,0.12722298221614228,,,
+hormuz,B3 isolation forest,unsupervised,baseline,0.4336384439359267,0.08461538461538462,0.1939799331103679,0.17373461012311903,,,
+hormuz,B4 EWMA deviation,unsupervised,baseline,0.495637086026102,0.10810810810810811,0.12876254180602006,0.12175102599179206,,,
+hormuz,B5 AR residual,unsupervised,baseline,0.49251892272487235,0.08411214953271028,0.12040133779264214,0.11080711354309165,,,
+hormuz,B6 CUSUM,unsupervised,baseline,0.9576659038901603,0.0,0.0,0.0,,,
+hormuz,B7 logistic regression,supervised,baseline,0.9675484698367991,0.6818181818181818,0.020066889632107024,0.11901504787961696,,,
+hormuz,B8 random forest,supervised,baseline,0.7465046395252345,0.37815126050420167,0.10033444816053512,0.1436388508891929,,,
+hormuz,Tier 1,multi-agent,tier,0.3266653255211608,0.03418803418803419,0.16220735785953178,0.1381668946648427,,shipping,1.0
+hormuz,Tier 2,multi-agent,tier,0.3573314557296251,0.09090909090909091,0.12876254180602006,0.11901504787961696,,"shipping,market",2.0
+hormuz,Tier 3,multi-agent,tier,0.3378555083360575,0.08615384615384615,0.2976588628762542,0.26265389876880985,,"shipping,market,geopolitical",3.0
+hormuz,Tier 4,multi-agent,tier,0.3381824125531219,0.08641975308641975,0.2959866220735786,0.2612859097127223,,"shipping,market,geopolitical,natural_disaster",4.0
+hormuz,Tier 5,multi-agent,tier,0.3381824125531219,0.08641975308641975,0.2959866220735786,0.2612859097127223,,"shipping,market,geopolitical,natural_disaster",4.0
+malacca,B1 rolling z,unsupervised,baseline,,,,0.10259917920656635,,,
+malacca,B2 MA crossover,unsupervised,baseline,,,,0.058823529411764705,,,
+malacca,B3 isolation forest,unsupervised,baseline,,,,0.2079343365253078,,,
+malacca,B4 EWMA deviation,unsupervised,baseline,,,,0.06839945280437756,,,
+malacca,B5 AR residual,unsupervised,baseline,,,,0.11080711354309165,,,
+malacca,B6 CUSUM,unsupervised,baseline,,,,0.0,,,
+malacca,B7 logistic regression,supervised,baseline,,,,,no positive examples in the training window,,
+malacca,B8 random forest,supervised,baseline,,,,,no positive examples in the training window,,
+malacca,Tier 1,multi-agent,tier,,,,0.3009575923392613,,shipping,1.0
+malacca,Tier 2,multi-agent,tier,,,,0.2612859097127223,,"shipping,market",2.0
+malacca,Tier 3,multi-agent,tier,,,,0.33105335157318744,,"shipping,market,geopolitical",3.0
+malacca,Tier 4,multi-agent,tier,,,,0.32694938440492477,,"shipping,market,geopolitical,natural_disaster",4.0
+malacca,Tier 5,multi-agent,tier,,,,0.32694938440492477,,"shipping,market,geopolitical,natural_disaster",4.0
+panama,B1 rolling z,unsupervised,baseline,0.48413981910383624,0.15384615384615385,0.09466437177280551,0.09863013698630137,,,
+panama,B2 MA crossover,unsupervised,baseline,0.5227044323025564,0.19166666666666668,0.11703958691910499,0.12465753424657534,,,
+panama,B3 isolation forest,unsupervised,baseline,0.813536023287782,0.4353312302839117,0.1703958691910499,0.23013698630136986,,,
+panama,B4 EWMA deviation,unsupervised,baseline,0.5095126430939481,0.14516129032258066,0.13941480206540446,0.13561643835616438,,,
+panama,B5 AR residual,unsupervised,baseline,0.508224653166838,0.07111111111111111,0.11703958691910499,0.10410958904109589,,,
+panama,B6 CUSUM,unsupervised,baseline,0.14522519608635887,0.37203495630461925,0.8657487091222031,0.8931506849315068,,,
+panama,B7 logistic regression,supervised,baseline,,,,,no positive examples in the training window,,
+panama,B8 random forest,supervised,baseline,,,,,no positive examples in the training window,,
+panama,Tier 1,multi-agent,tier,0.9054049371021959,0.7142857142857143,0.17728055077452667,0.33287671232876714,,shipping,1.0
+panama,Tier 2,multi-agent,tier,0.8368931141632687,0.5792682926829268,0.14457831325301204,0.2452054794520548,,"shipping,market",2.0
+panama,Tier 3,multi-agent,tier,0.8282179533089212,0.572289156626506,0.1514629948364888,0.25068493150684934,,"shipping,market,geopolitical",3.0
+panama,Tier 4,multi-agent,tier,0.8282179533089212,0.572289156626506,0.1514629948364888,0.25068493150684934,,"shipping,market,geopolitical,natural_disaster",4.0
+panama,Tier 5,multi-agent,tier,0.8407397567258488,0.5739644970414202,0.15834767641996558,0.2589041095890411,,"shipping,market,geopolitical,natural_disaster,news_sentiment",5.0
