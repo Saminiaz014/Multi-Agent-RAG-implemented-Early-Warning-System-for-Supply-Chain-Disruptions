@@ -19,6 +19,8 @@ from src.agents.shipping_agent import ShippingAgent
 from src.aggregation.risk_engine import RiskLevel
 from src.orchestrator import Orchestrator
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 _CONFIG = {
     "weights": {"shipping": 0.4, "market": 0.3, "geopolitical": 0.3},
     "thresholds": {"risk_critical": 0.8, "risk_high": 0.7, "risk_medium": 0.4},
@@ -128,6 +130,16 @@ _REAL_DATA_PRESENT = all(
 )
 
 
+def _configured_thresholds() -> dict:
+    """Risk bands from config/settings.yaml, the single definition."""
+    import yaml
+
+    settings = yaml.safe_load(
+        (_PROJECT_ROOT / "config" / "settings.yaml").read_text(encoding="utf-8")
+    )
+    return dict(settings.get("thresholds", {}))
+
+
 def _hybrid_config(shipping_mode: str = "csv", market_mode: str = "csv") -> dict:
     """Build a config dict that wires up real or synthetic ingestion."""
     return {
@@ -144,11 +156,12 @@ def _hybrid_config(shipping_mode: str = "csv", market_mode: str = "csv") -> dict
             },
         },
         "weights": {"shipping": 0.4, "market": 0.3, "geopolitical": 0.3},
-        "thresholds": {
-            "risk_critical": 0.8,
-            "risk_high": 0.6,
-            "risk_medium": 0.4,
-        },
+        # Read from settings.yaml rather than restated here. These bands are
+        # calibrated against the composite-score distribution, and a second
+        # hardcoded copy silently kept the old scale when that calibration
+        # changed -- this test went on asserting against bands no running
+        # pipeline used.
+        "thresholds": _configured_thresholds(),
     }
 
 

@@ -207,11 +207,26 @@ weights:
   routing: 0.15
   news_sentiment: 0.10
 
+# Risk-band boundaries on the composite score. Calibrated empirically against
+# the distribution of composite scores on *calm* days (label-negative) across
+# all four regions, 2019-2026: 9,183 days, pooled.
+#
+# Recalibrated when ShippingAgent stopped normalising its isolation-forest
+# score against each scored batch. Batch min-max forced every window onto
+# [0, 1] by its own extremes, so the old boundaries (0.8/0.6/0.4) were tuned
+# to a compressed, window-relative distribution. With absolute scores the calm
+# median rose to ~0.47, which put most ordinary days at MEDIUM or worse under
+# the old bands. These are the same *quantiles* of calm behaviour as before,
+# expressed on the new scale -- not a loosening.
+#
+#   risk_medium   = p60 of calm days  -> ~60% of calm days read LOW
+#   risk_high     = p85 of calm days
+#   risk_critical = p97 of calm days
 thresholds:
-  risk_critical: 0.8
-  risk_high: 0.6
-  risk_medium: 0.4
-  risk_low: 0.2
+  risk_critical: 0.90
+  risk_high: 0.69
+  risk_medium: 0.51
+  risk_low: 0.30
 
 rag:
   collection_name: "disruption_cases"

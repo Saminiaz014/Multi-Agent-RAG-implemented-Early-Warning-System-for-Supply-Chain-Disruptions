@@ -50,6 +50,21 @@ _TREND_COLUMN: str = "vessel_count_trend"
 _DEFAULT_LOCATION: str = "Strait of Hormuz"
 _REAL_DATA_LOCATION: str = "Shuaiba Port, Persian Gulf"
 
+#: Duration signal. A sustained shift is measured against a *trailing* long
+#: baseline, because a rolling one adapts to the new level and reads a settled
+#: disruption as calm.
+_LEVEL_WINDOW: int = 30
+_LEVEL_BASELINE: int = 365
+#: Shortfall scoring 1.0. A 40% sustained drop is full strength.
+_LEVEL_FULL_SCALE: float = 0.40
+#: Shortfall below which a day does not count toward persistence at all.
+#: Without a floor, ordinary variation around the baseline accumulates.
+_LEVEL_MIN_SHORTFALL: float = 0.10
+#: Days over which persistence is measured. A dip has to hold to score: this
+#: signal exists to sustain an alert through a disruption, not to add a second
+#: way of reacting to one bad week.
+_LEVEL_PERSISTENCE_DAYS: int = 14
+
 _FEATURE_ELEVATION_Z: float = 1.5
 _PERSISTENCE_DAYS: int = 2
 _MIN_FEATURES_ELEVATED: int = 2
@@ -100,6 +115,11 @@ class ShippingAgent(BaseAgent):
         super().__init__(name="shipping", config=dict(config or {}))
         self._scaler: StandardScaler | None = None
         self._iforest: IsolationForest | None = None
+        #: Fit-time isolation-forest score range. Normalising against this
+        #: rather than the scored batch keeps a score comparable across
+        #: windows, which is what lets a sustained shift stay flagged.
+        self._iforest_low: float = 0.0
+        self._iforest_high: float = 1.0
         self._feature_columns: list[str] = list(_FEATURE_COLUMNS)
         self._extra_features: list[str] = []
         self._contamination: float = float(self.config.get("contamination", 0.1))
@@ -171,6 +191,15 @@ class ShippingAgent(BaseAgent):
             random_state=42,
             n_estimators=200,
         ).fit(scaled)
+
+        train_scores = -self._iforest.decision_function(scaled)
+        # Percentiles, not min/max: one extreme training row would otherwise
+        # set the ceiling and compress everything beneath it.
+        self._iforest_low = float(np.percentile(train_scores, 5))
+        self._iforest_high = float(np.percentile(train_scores, 95))
+        if self._iforest_high - self._iforest_low < 1e-9:
+            self._iforest_high = self._iforest_low + 1.0
+
         self._is_fitted = True
         logger.info(
             "[ShippingAgent.fit] fitted scaler+IsolationForest on %d rows | "
@@ -221,6 +250,11 @@ class ShippingAgent(BaseAgent):
             out.insert(0, "timestamp", pd.to_datetime(df["timestamp"]).values)
         if "is_disruption" in df.columns:
             out["is_disruption"] = df["is_disruption"].astype(bool).values
+        # Unscaled counts travel alongside the standardised features: the
+        # duration score needs the raw level, not a z-score against a baseline
+        # that has already absorbed the shift.
+        if "vessel_count" in df.columns:
+            out["_raw_vessel_count"] = df["vessel_count"].to_numpy()
         logger.info(
             "[ShippingAgent.preprocess] scaled %d rows over %d features %s",
             len(out),
@@ -228,6 +262,50 @@ class ShippingAgent(BaseAgent):
             active,
         )
         return out
+
+    @staticmethod
+    def level_shift_score(vessel_count: pd.Series) -> pd.Series:
+        """Score how far traffic sits below its own trailing annual baseline.
+
+        The shock detectors cannot hold a flag across a sustained disruption.
+        Two of the three features they read -- ``congestion_index`` and
+        ``avg_delay_hours`` -- are derived from ``vessel_count`` against a
+        30-day rolling baseline, so once traffic settles lower that baseline
+        follows it down and both return to calm values. Measured on the
+        evaluation set, their correlation with a sustained-disruption label is
+        -0.06 and -0.05: no signal at all, leaving one useful feature of three.
+
+        **This score is not evidence of detection skill against a
+        shipping-derived label.** It is computed from the series such a label
+        is built from and will predict one nearly by construction. It earns
+        its place operationally -- an alert should persist while the
+        disruption does -- not evaluatively.
+
+        Args:
+            vessel_count: Daily transit counts, ordered by date.
+
+        Returns:
+            Score in [0, 1]; 0 when traffic is at or above baseline.
+        """
+        rolling = vessel_count.rolling(
+            _LEVEL_WINDOW, min_periods=max(_LEVEL_WINDOW // 3, 2)
+        ).mean()
+        baseline = (
+            vessel_count.shift(_LEVEL_WINDOW)
+            .rolling(_LEVEL_BASELINE, min_periods=_LEVEL_BASELINE // 4)
+            .median()
+        )
+        shortfall = (baseline - rolling) / baseline.replace(0.0, np.nan)
+        magnitude = (shortfall / _LEVEL_FULL_SCALE).clip(0.0, 1.0).fillna(0.0)
+
+        # Persistence gate: the fraction of the trailing fortnight that also
+        # sat meaningfully below baseline. A one-off dip scores near zero
+        # however deep; a shift that holds reaches full strength.
+        below = (shortfall > _LEVEL_MIN_SHORTFALL).fillna(False).astype(float)
+        persistence = below.rolling(
+            _LEVEL_PERSISTENCE_DAYS, min_periods=_LEVEL_PERSISTENCE_DAYS
+        ).mean().fillna(0.0)
+        return (magnitude * persistence).clip(0.0, 1.0)
 
     # --------------------------------------------------------------- detect
     def detect(self, data: pd.DataFrame) -> pd.DataFrame:  # type: ignore[override]
@@ -254,19 +332,41 @@ class ShippingAgent(BaseAgent):
         scaled = data[active].to_numpy()
         iforest_raw = self._iforest.decision_function(scaled)
         iforest_score = -iforest_raw  # higher = more anomalous
-        denom = iforest_score.max() - iforest_score.min()
-        iforest_norm = (
-            (iforest_score - iforest_score.min()) / denom
-            if denom > 1e-9
-            else np.zeros_like(iforest_score)
+
+        # Normalised against the training range, not this batch's own range.
+        # Batch min-max destroys the signal a sustained disruption carries:
+        # when every day in a window is anomalous, rescaling by that window's
+        # extremes maps its least-anomalous day to 0 and its most to 1, so a
+        # uniformly disrupted month and a uniformly calm one both span [0, 1].
+        # Anchoring to the fit-time distribution makes scores absolute.
+        span = self._iforest_high - self._iforest_low
+        iforest_norm = np.clip(
+            (iforest_score - self._iforest_low) / span, 0.0, 1.0
         )
 
         max_abs_z = np.max(np.abs(scaled), axis=1)
         max_z_norm = np.minimum(max_abs_z / self._z_threshold, 1.0)
 
-        combined = self._if_weight * iforest_norm + self._zscore_weight * max_z_norm
+        shock = self._if_weight * iforest_norm + self._zscore_weight * max_z_norm
+
+        # max(), not a weighted blend. The two answer different questions --
+        # "did something just change?" and "are we still below normal?" -- and
+        # are meant to be true at different times. Averaging lets a calm shock
+        # detector drag down an active duration signal through the middle of a
+        # disruption, the same dilution the tier ablation showed when
+        # averaging agents together.
+        if "_raw_vessel_count" in data.columns:
+            duration = self.level_shift_score(
+                pd.Series(data["_raw_vessel_count"].to_numpy())
+            ).to_numpy()
+            combined = np.maximum(shock, duration)
+        else:
+            duration = np.zeros_like(shock)
+            combined = shock
 
         out = data.copy()
+        out["shock_score"] = shock
+        out["duration_score"] = duration
         for idx, feat in enumerate(active):
             out[_ZSCORE_NAME_MAP[feat]] = scaled[:, idx]
         out["isolation_score"] = iforest_norm
