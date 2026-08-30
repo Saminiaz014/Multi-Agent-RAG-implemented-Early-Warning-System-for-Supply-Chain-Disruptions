@@ -113,6 +113,107 @@ def graph_tiers(results: pd.DataFrame) -> None:
         plt.close(fig)
 
 
+#: Bar colour by how circular a method is with the label. A ranking that
+#: shows only height invites reading the most label-adjacent method as the
+#: best one, which is exactly backwards.
+_CIRC_COLOUR = {
+    "high": "#e53935", "medium": "#fb8c00", "low": "#43a047",
+    "n/a": "#90a4ae", "unknown": "#90a4ae",
+}
+
+
+def graph_region_rankings(results: pd.DataFrame) -> None:
+    """One ranking per region, coloured by circularity with the label."""
+    scored = results.dropna(subset=["auc"])
+    for region in sorted(scored["region"].unique()):
+        rows = scored[scored.region == region].sort_values("auc")
+        colours = [_CIRC_COLOUR.get(c, "#90a4ae") for c in rows["circularity"]]
+
+        fig, ax = plt.subplots(figsize=(11, 7))
+        ax.barh(range(len(rows)), rows["auc"], color=colours, alpha=0.9)
+        ax.set_yticks(range(len(rows)))
+        ax.set_yticklabels(rows["method"], fontsize=9)
+        ax.axvline(0.5, color="black", linestyle="--", linewidth=1)
+        ax.set_xlim(0, 1.05)
+        ax.set_xlabel("AUC (dashed = chance)", fontweight="bold")
+        ax.set_title(
+            f"Method ranking — {region}\n"
+            "colour = circularity with the label, not quality",
+            fontweight="bold",
+        )
+        for i, value in enumerate(rows["auc"]):
+            ax.text(value + 0.01, i, f"{value:.3f}", va="center", fontsize=8)
+        handles = [plt.Rectangle((0, 0), 1, 1, color=_CIRC_COLOUR[k])
+                   for k in ("high", "medium", "low", "n/a")]
+        ax.legend(handles, ["high circularity", "medium", "low", "control/oracle"],
+                  loc="lower right", fontsize=8)
+        ax.grid(axis="x", alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(_G_METHOD / f"C_ranking_{region}.png", dpi=200)
+        plt.close(fig)
+
+
+def graph_heatmap(results: pd.DataFrame) -> None:
+    """AUC across every method and region, matplotlib only (no seaborn)."""
+    scored = results.dropna(subset=["auc"])
+    methods = sorted(scored["method"].unique())
+    regions = sorted(results["region"].unique())
+    grid = np.full((len(methods), len(regions)), np.nan)
+    for i, method in enumerate(methods):
+        for j, region in enumerate(regions):
+            match = scored[(scored.method == method) & (scored.region == region)]
+            if not match.empty:
+                grid[i, j] = match["auc"].mean()
+
+    fig, ax = plt.subplots(figsize=(8, 10))
+    masked = np.ma.masked_invalid(grid)
+    cmap = plt.get_cmap("RdYlGn").copy()
+    cmap.set_bad("#eceff1")
+    image = ax.imshow(masked, cmap=cmap, vmin=0.0, vmax=1.0, aspect="auto")
+    ax.set_xticks(range(len(regions)))
+    ax.set_xticklabels(regions, rotation=30, ha="right")
+    ax.set_yticks(range(len(methods)))
+    ax.set_yticklabels(methods, fontsize=9)
+    for i in range(len(methods)):
+        for j in range(len(regions)):
+            label = "n/a" if np.isnan(grid[i, j]) else f"{grid[i, j]:.2f}"
+            ax.text(j, i, label, ha="center", va="center", fontsize=8)
+    ax.set_title("AUC by method and region\n"
+                 "(malacca: no positives, AUC undefined)",
+                 fontweight="bold")
+    fig.colorbar(image, ax=ax, label="AUC")
+    fig.tight_layout()
+    fig.savefig(_G_METHOD / "D_auc_heatmap.png", dpi=200)
+    plt.close(fig)
+
+
+def graph_f1_fpr(results: pd.DataFrame) -> None:
+    """F1 against FPR per region: the operating-point trade-off."""
+    scored = results.dropna(subset=["f1", "fpr"])
+    regions = sorted(scored["region"].unique())
+    if not regions:
+        return
+    fig, axes = plt.subplots(1, len(regions), figsize=(6 * len(regions), 5.5),
+                             squeeze=False)
+    for ax, region in zip(axes[0], regions):
+        rows = scored[scored.region == region]
+        for _, row in rows.iterrows():
+            ax.scatter(row["f1"], row["fpr"], s=90, alpha=0.85,
+                       color=_CIRC_COLOUR.get(row["circularity"], "#90a4ae"))
+            ax.annotate(row["method"], (row["f1"], row["fpr"]),
+                        fontsize=7, alpha=0.8,
+                        xytext=(4, 3), textcoords="offset points")
+        ax.set_xlabel("F1", fontweight="bold")
+        ax.set_ylabel("FPR", fontweight="bold")
+        ax.set_title(region, fontweight="bold")
+        ax.grid(alpha=0.3)
+    fig.suptitle("Operating point: F1 vs false-positive rate (top-left is better)",
+                 fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(_G_METHOD / "E_f1_vs_fpr.png", dpi=200)
+    plt.close(fig)
+
+
 def write_report(results: pd.DataFrame) -> None:
     """Report the measured findings, including the unflattering ones."""
     scored = results.dropna(subset=["auc"])
@@ -238,6 +339,9 @@ def main() -> int:
     _G_TIER.mkdir(parents=True, exist_ok=True)
     results = _load()
     graph_method_auc(results)
+    graph_region_rankings(results)
+    graph_heatmap(results)
+    graph_f1_fpr(results)
     graph_alert_rate(results)
     graph_tiers(results)
     write_report(results)

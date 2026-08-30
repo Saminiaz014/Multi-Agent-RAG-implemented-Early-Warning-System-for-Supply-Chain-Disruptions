@@ -1,53 +1,77 @@
-region,method,kind,family,auc,f1,fpr,alert_rate,not_applicable,agents,n_agents
-bab_el_mandeb,B1 rolling z,unsupervised,baseline,0.5240010771871949,0.1375,0.11088295687885011,0.1039671682626539,,,
-bab_el_mandeb,B2 MA crossover,unsupervised,baseline,0.5813697108425623,0.3863080684596577,0.17659137577002054,0.22571819425444598,,,
-bab_el_mandeb,B3 isolation forest,unsupervised,baseline,0.4999074292254351,0.41040462427745666,0.6283367556468172,0.612859097127223,,,
-bab_el_mandeb,B4 EWMA deviation,unsupervised,baseline,0.5397212778133099,0.26735218508997427,0.19096509240246407,0.19835841313269495,,,
-bab_el_mandeb,B5 AR residual,unsupervised,baseline,0.5087942235836672,0.07457627118644068,0.08213552361396304,0.06976744186046512,,,
-bab_el_mandeb,B6 CUSUM,unsupervised,baseline,0.26283367556468173,0.49813200498132004,0.7371663244353183,0.7647058823529411,,,
-bab_el_mandeb,B7 logistic regression,supervised,baseline,,,,,no positive examples in the training window,,
-bab_el_mandeb,B8 random forest,supervised,baseline,,,,,no positive examples in the training window,,
-bab_el_mandeb,Tier 1,multi-agent,tier,0.6789813848587875,0.5528846153846154,0.7351129363449692,0.8043775649794802,,shipping,1.0
-bab_el_mandeb,Tier 2,multi-agent,tier,0.6201821119601441,0.5109489051094891,0.5462012320328542,0.6032831737346102,,"shipping,market",2.0
-bab_el_mandeb,Tier 3,multi-agent,tier,0.44863163564143127,0.43967828418230565,0.6940451745379876,0.6867305061559508,,"shipping,market,geopolitical",3.0
-bab_el_mandeb,Tier 4,multi-agent,tier,0.44853906486686634,0.44113667117726657,0.6817248459958932,0.6771545827633378,,"shipping,market,geopolitical,natural_disaster",4.0
-bab_el_mandeb,Tier 5,multi-agent,tier,0.44853906486686634,0.44113667117726657,0.6817248459958932,0.6771545827633378,,"shipping,market,geopolitical,natural_disaster",4.0
-hormuz,B1 rolling z,unsupervised,baseline,0.4792227223577338,0.11162790697674418,0.11705685618729098,0.1121751025991792,,,
-hormuz,B2 MA crossover,unsupervised,baseline,0.4702517162471396,0.008849557522123894,0.15384615384615385,0.12722298221614228,,,
-hormuz,B3 isolation forest,unsupervised,baseline,0.4336384439359267,0.08461538461538462,0.1939799331103679,0.17373461012311903,,,
-hormuz,B4 EWMA deviation,unsupervised,baseline,0.495637086026102,0.10810810810810811,0.12876254180602006,0.12175102599179206,,,
-hormuz,B5 AR residual,unsupervised,baseline,0.49251892272487235,0.08411214953271028,0.12040133779264214,0.11080711354309165,,,
-hormuz,B6 CUSUM,unsupervised,baseline,0.9576659038901603,0.0,0.0,0.0,,,
-hormuz,B7 logistic regression,supervised,baseline,0.9675484698367991,0.6818181818181818,0.020066889632107024,0.11901504787961696,,,
-hormuz,B8 random forest,supervised,baseline,0.7465046395252345,0.37815126050420167,0.10033444816053512,0.1436388508891929,,,
-hormuz,Tier 1,multi-agent,tier,0.5023449090954811,0.03404255319148936,0.16387959866220736,0.13953488372093023,,shipping,1.0
-hormuz,Tier 2,multi-agent,tier,0.46507154173058063,0.07142857142857142,0.13879598662207357,0.12448700410396717,,"shipping,market",2.0
-hormuz,Tier 3,multi-agent,tier,0.40023134759976864,0.14057507987220447,0.26421404682274247,0.24623803009575923,,"shipping,market,geopolitical",3.0
-hormuz,Tier 4,multi-agent,tier,0.4007719968818367,0.14012738853503184,0.26588628762541805,0.2476060191518468,,"shipping,market,geopolitical,natural_disaster",4.0
-hormuz,Tier 5,multi-agent,tier,0.4007719968818367,0.14012738853503184,0.26588628762541805,0.2476060191518468,,"shipping,market,geopolitical,natural_disaster",4.0
-malacca,B1 rolling z,unsupervised,baseline,,,,0.10259917920656635,,,
-malacca,B2 MA crossover,unsupervised,baseline,,,,0.058823529411764705,,,
-malacca,B3 isolation forest,unsupervised,baseline,,,,0.2079343365253078,,,
-malacca,B4 EWMA deviation,unsupervised,baseline,,,,0.06839945280437756,,,
-malacca,B5 AR residual,unsupervised,baseline,,,,0.11080711354309165,,,
-malacca,B6 CUSUM,unsupervised,baseline,,,,0.0,,,
-malacca,B7 logistic regression,supervised,baseline,,,,,no positive examples in the training window,,
-malacca,B8 random forest,supervised,baseline,,,,,no positive examples in the training window,,
-malacca,Tier 1,multi-agent,tier,,,,0.17783857729138167,,shipping,1.0
-malacca,Tier 2,multi-agent,tier,,,,0.18057455540355677,,"shipping,market",2.0
-malacca,Tier 3,multi-agent,tier,,,,0.25718194254445964,,"shipping,market,geopolitical",3.0
-malacca,Tier 4,multi-agent,tier,,,,0.25718194254445964,,"shipping,market,geopolitical,natural_disaster",4.0
-malacca,Tier 5,multi-agent,tier,,,,0.25718194254445964,,"shipping,market,geopolitical,natural_disaster",4.0
-panama,B1 rolling z,unsupervised,baseline,0.48413981910383624,0.15384615384615385,0.09466437177280551,0.09863013698630137,,,
-panama,B2 MA crossover,unsupervised,baseline,0.5227044323025564,0.19166666666666668,0.11703958691910499,0.12465753424657534,,,
-panama,B3 isolation forest,unsupervised,baseline,0.813536023287782,0.4353312302839117,0.1703958691910499,0.23013698630136986,,,
-panama,B4 EWMA deviation,unsupervised,baseline,0.5095126430939481,0.14516129032258066,0.13941480206540446,0.13561643835616438,,,
-panama,B5 AR residual,unsupervised,baseline,0.508224653166838,0.07111111111111111,0.11703958691910499,0.10410958904109589,,,
-panama,B6 CUSUM,unsupervised,baseline,0.14522519608635887,0.37203495630461925,0.8657487091222031,0.8931506849315068,,,
-panama,B7 logistic regression,supervised,baseline,,,,,no positive examples in the training window,,
-panama,B8 random forest,supervised,baseline,,,,,no positive examples in the training window,,
-panama,Tier 1,multi-agent,tier,0.9087490903210157,0.7220779220779221,0.16695352839931152,0.3232876712328767,,shipping,1.0
-panama,Tier 2,multi-agent,tier,0.8837632408829952,0.6200607902735562,0.1342512908777969,0.2465753424657534,,"shipping,market",2.0
-panama,Tier 3,multi-agent,tier,0.876352966997424,0.6116207951070336,0.1342512908777969,0.24383561643835616,,"shipping,market,geopolitical",3.0
-panama,Tier 4,multi-agent,tier,0.876352966997424,0.6116207951070336,0.1342512908777969,0.24383561643835616,,"shipping,market,geopolitical,natural_disaster",4.0
-panama,Tier 5,multi-agent,tier,0.8840000462059168,0.6127167630057804,0.1566265060240964,0.26986301369863014,,"shipping,market,geopolitical,natural_disaster,news_sentiment",5.0
+region,method,kind,family,circularity,auc,f1,fpr,alert_rate,not_applicable,agents,n_agents
+bab_el_mandeb,M0 random,control,baseline,n/a,0.5036186757329922,0.20189274447949526,0.08418891170431211,0.09986320109439124,,,
+bab_el_mandeb,M1 always alert,control,baseline,n/a,0.5,0.0,0.0,0.0,,,
+bab_el_mandeb,M2 never alert,control,baseline,n/a,0.5,0.0,0.0,0.0,,,
+bab_el_mandeb,M3 persistence,unsupervised,baseline,high,0.9606405897599893,0.7843803056027164,0.23408624229979466,0.4719562243502052,,,
+bab_el_mandeb,M8 matrix profile,unsupervised,baseline,low,0.4853275322314605,0.09803921568627451,0.09650924024640657,0.08481532147742818,,,
+bab_el_mandeb,ORACLE label t-1,oracle,baseline,n/a,0.9969241256269566,0.9959016393442623,0.002053388090349076,0.3337893296853625,,,
+bab_el_mandeb,B1 rolling z,unsupervised,baseline,medium,0.5240010771871949,0.1375,0.11088295687885011,0.1039671682626539,,,
+bab_el_mandeb,B2 MA crossover,unsupervised,baseline,medium,0.5813697108425623,0.3863080684596577,0.17659137577002054,0.22571819425444598,,,
+bab_el_mandeb,B3 isolation forest,unsupervised,baseline,low,0.4999074292254351,0.41040462427745666,0.6283367556468172,0.612859097127223,,,
+bab_el_mandeb,B4 EWMA deviation,unsupervised,baseline,medium,0.5397212778133099,0.26735218508997427,0.19096509240246407,0.19835841313269495,,,
+bab_el_mandeb,B5 AR residual,unsupervised,baseline,low,0.5087942235836672,0.07457627118644068,0.08213552361396304,0.06976744186046512,,,
+bab_el_mandeb,B6 CUSUM,unsupervised,baseline,high,0.26283367556468173,0.49813200498132004,0.7371663244353183,0.7647058823529411,,,
+bab_el_mandeb,B7 logistic regression,supervised,baseline,medium,,,,,no positive examples in the training window,,
+bab_el_mandeb,B8 random forest,supervised,baseline,medium,,,,,no positive examples in the training window,,
+bab_el_mandeb,Tier 1,multi-agent,tier,high,0.6789813848587875,0.5528846153846154,0.7351129363449692,0.8043775649794802,,shipping,1.0
+bab_el_mandeb,Tier 2,multi-agent,tier,high,0.6201821119601441,0.5109489051094891,0.5462012320328542,0.6032831737346102,,"shipping,market",2.0
+bab_el_mandeb,Tier 3,multi-agent,tier,high,0.44863163564143127,0.43967828418230565,0.6940451745379876,0.6867305061559508,,"shipping,market,geopolitical",3.0
+bab_el_mandeb,Tier 4,multi-agent,tier,high,0.44853906486686634,0.44113667117726657,0.6817248459958932,0.6771545827633378,,"shipping,market,geopolitical,natural_disaster",4.0
+bab_el_mandeb,Tier 5,multi-agent,tier,high,0.44853906486686634,0.44113667117726657,0.6817248459958932,0.6771545827633378,,"shipping,market,geopolitical,natural_disaster",4.0
+hormuz,M0 random,control,baseline,n/a,0.525611688083084,0.1650485436893204,0.09364548494983277,0.09986320109439124,,,
+hormuz,M1 always alert,control,baseline,n/a,0.5,0.0,0.0,0.0,,,
+hormuz,M2 never alert,control,baseline,n/a,0.5,0.0,0.0,0.0,,,
+hormuz,M3 persistence,unsupervised,baseline,high,0.8507807981492191,0.503448275862069,0.14046822742474915,0.21477428180574556,,,
+hormuz,M8 matrix profile,unsupervised,baseline,low,0.5961286996756103,0.22727272727272727,0.10367892976588629,0.11901504787961696,,,
+hormuz,ORACLE label t-1,oracle,baseline,n/a,0.9862134433072648,0.9774436090225563,0.005016722408026756,0.18194254445964433,,,
+hormuz,B1 rolling z,unsupervised,baseline,medium,0.4792227223577338,0.11162790697674418,0.11705685618729098,0.1121751025991792,,,
+hormuz,B2 MA crossover,unsupervised,baseline,medium,0.4702517162471396,0.008849557522123894,0.15384615384615385,0.12722298221614228,,,
+hormuz,B3 isolation forest,unsupervised,baseline,low,0.4336384439359267,0.08461538461538462,0.1939799331103679,0.17373461012311903,,,
+hormuz,B4 EWMA deviation,unsupervised,baseline,medium,0.495637086026102,0.10810810810810811,0.12876254180602006,0.12175102599179206,,,
+hormuz,B5 AR residual,unsupervised,baseline,low,0.49251892272487235,0.08411214953271028,0.12040133779264214,0.11080711354309165,,,
+hormuz,B6 CUSUM,unsupervised,baseline,high,0.9576659038901603,0.0,0.0,0.0,,,
+hormuz,B7 logistic regression,supervised,baseline,medium,0.9675484698367991,0.6818181818181818,0.020066889632107024,0.11901504787961696,,,
+hormuz,B8 random forest,supervised,baseline,medium,0.7465046395252345,0.37815126050420167,0.10033444816053512,0.1436388508891929,,,
+hormuz,Tier 1,multi-agent,tier,high,0.5023449090954811,0.03404255319148936,0.16387959866220736,0.13953488372093023,,shipping,1.0
+hormuz,Tier 2,multi-agent,tier,high,0.46507154173058063,0.07142857142857142,0.13879598662207357,0.12448700410396717,,"shipping,market",2.0
+hormuz,Tier 3,multi-agent,tier,high,0.40023134759976864,0.14057507987220447,0.26421404682274247,0.24623803009575923,,"shipping,market,geopolitical",3.0
+hormuz,Tier 4,multi-agent,tier,high,0.4007719968818367,0.14012738853503184,0.26588628762541805,0.2476060191518468,,"shipping,market,geopolitical,natural_disaster",4.0
+hormuz,Tier 5,multi-agent,tier,high,0.4007719968818367,0.14012738853503184,0.26588628762541805,0.2476060191518468,,"shipping,market,geopolitical,natural_disaster",4.0
+malacca,M0 random,control,baseline,n/a,,,,0.09986320109439124,,,
+malacca,M1 always alert,control,baseline,n/a,,,,0.0,,,
+malacca,M2 never alert,control,baseline,n/a,,,,0.0,,,
+malacca,M3 persistence,unsupervised,baseline,high,,,,0.049247606019151846,,,
+malacca,M8 matrix profile,unsupervised,baseline,low,,,,0.106703146374829,,,
+malacca,ORACLE label t-1,oracle,baseline,n/a,,,,0.0,,,
+malacca,B1 rolling z,unsupervised,baseline,medium,,,,0.10259917920656635,,,
+malacca,B2 MA crossover,unsupervised,baseline,medium,,,,0.058823529411764705,,,
+malacca,B3 isolation forest,unsupervised,baseline,low,,,,0.2079343365253078,,,
+malacca,B4 EWMA deviation,unsupervised,baseline,medium,,,,0.06839945280437756,,,
+malacca,B5 AR residual,unsupervised,baseline,low,,,,0.11080711354309165,,,
+malacca,B6 CUSUM,unsupervised,baseline,high,,,,0.0,,,
+malacca,B7 logistic regression,supervised,baseline,medium,,,,,no positive examples in the training window,,
+malacca,B8 random forest,supervised,baseline,medium,,,,,no positive examples in the training window,,
+malacca,Tier 1,multi-agent,tier,high,,,,0.17783857729138167,,shipping,1.0
+malacca,Tier 2,multi-agent,tier,high,,,,0.18057455540355677,,"shipping,market",2.0
+malacca,Tier 3,multi-agent,tier,high,,,,0.25718194254445964,,"shipping,market,geopolitical",3.0
+malacca,Tier 4,multi-agent,tier,high,,,,0.25718194254445964,,"shipping,market,geopolitical,natural_disaster",4.0
+malacca,Tier 5,multi-agent,tier,high,,,,0.25718194254445964,,"shipping,market,geopolitical,natural_disaster",4.0
+panama,M0 random,control,baseline,n/a,0.5104598643856346,0.13513513513513514,0.09982788296041308,0.1,,,
+panama,M1 always alert,control,baseline,n/a,0.5,0.0,0.0,0.0,,,
+panama,M2 never alert,control,baseline,n/a,0.5,0.0,0.0,0.0,,,
+panama,M3 persistence,unsupervised,baseline,high,0.9725652369785951,0.8111111111111111,0.11187607573149742,0.28904109589041094,,,
+panama,M8 matrix profile,unsupervised,baseline,low,0.459246381499151,0.06451612903225806,0.10499139414802065,0.09315068493150686,,,
+panama,ORACLE label t-1,oracle,baseline,n/a,0.9957837101040788,0.9932885906040269,0.0017211703958691911,0.20410958904109588,,,
+panama,B1 rolling z,unsupervised,baseline,medium,0.48413981910383624,0.15384615384615385,0.09466437177280551,0.09863013698630137,,,
+panama,B2 MA crossover,unsupervised,baseline,medium,0.5227044323025564,0.19166666666666668,0.11703958691910499,0.12465753424657534,,,
+panama,B3 isolation forest,unsupervised,baseline,low,0.813536023287782,0.4353312302839117,0.1703958691910499,0.23013698630136986,,,
+panama,B4 EWMA deviation,unsupervised,baseline,medium,0.5095126430939481,0.14516129032258066,0.13941480206540446,0.13561643835616438,,,
+panama,B5 AR residual,unsupervised,baseline,low,0.508224653166838,0.07111111111111111,0.11703958691910499,0.10410958904109589,,,
+panama,B6 CUSUM,unsupervised,baseline,high,0.14522519608635887,0.37203495630461925,0.8657487091222031,0.8931506849315068,,,
+panama,B7 logistic regression,supervised,baseline,medium,,,,,no positive examples in the training window,,
+panama,B8 random forest,supervised,baseline,medium,,,,,no positive examples in the training window,,
+panama,Tier 1,multi-agent,tier,high,0.9087490903210157,0.7220779220779221,0.16695352839931152,0.3232876712328767,,shipping,1.0
+panama,Tier 2,multi-agent,tier,high,0.8837632408829952,0.6200607902735562,0.1342512908777969,0.2465753424657534,,"shipping,market",2.0
+panama,Tier 3,multi-agent,tier,high,0.876352966997424,0.6116207951070336,0.1342512908777969,0.24383561643835616,,"shipping,market,geopolitical",3.0
+panama,Tier 4,multi-agent,tier,high,0.876352966997424,0.6116207951070336,0.1342512908777969,0.24383561643835616,,"shipping,market,geopolitical,natural_disaster",4.0
+panama,Tier 5,multi-agent,tier,high,0.8840000462059168,0.6127167630057804,0.1566265060240964,0.26986301369863014,,"shipping,market,geopolitical,natural_disaster,news_sentiment",5.0

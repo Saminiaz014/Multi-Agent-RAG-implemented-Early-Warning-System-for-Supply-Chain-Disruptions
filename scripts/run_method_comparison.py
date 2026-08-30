@@ -66,6 +66,41 @@ _TIER_ORDER: tuple[str, ...] = (
 )
 
 
+#: How closely a method's own statistic resembles the label's construction.
+#:
+#: The label is "30-day mean of vessel_count at least 20% below its trailing
+#: 365-day median, sustained 14+ days". A method computing the same statistic
+#: predicts it largely by construction, so its score measures overlap with the
+#: label definition rather than detection skill. This is recorded per method
+#: so a ranking cannot silently be topped by the most circular entry.
+#:
+#:   high   - reads vessel_count against a trailing long baseline: the label's
+#:            own statistic, differing only in smoothing or thresholding
+#:   medium - reads vessel_count against a short/rolling baseline, or fits on
+#:            the label directly
+#:   low    - reads other features, or the shape rather than the level
+#:   n/a    - controls and oracles, which are reference points not methods
+_CIRCULARITY: dict[str, str] = {
+    "M0 random": "n/a",
+    "M1 always alert": "n/a",
+    "M2 never alert": "n/a",
+    "ORACLE label t-1": "n/a",
+    "M3 persistence": "high",
+    "M8 matrix profile": "low",
+    "B1 rolling z": "medium",
+    "B2 MA crossover": "medium",
+    "B3 isolation forest": "low",
+    "B4 EWMA deviation": "medium",
+    "B5 AR residual": "low",
+    "B6 CUSUM": "high",
+    "B7 logistic regression": "medium",
+    "B8 random forest": "medium",
+}
+#: Tiers 1+ include the shipping agent's level-shift feature, which is the
+#: label's statistic; tiers beyond 1 dilute it with non-shipping agents.
+_TIER_CIRCULARITY = "high"
+
+
 # --------------------------------------------------------------- utilities
 def _load(region: str) -> tuple[pd.DataFrame, dict]:
     frame = pd.read_csv(_CACHE / f"{region}.csv", parse_dates=["timestamp"])
@@ -215,7 +250,95 @@ def b8_random_forest(train, test, features):
     return model.predict_proba(joined)[:, 1]
 
 
+def m0_random(train, test, features):
+    """Trivial control: seeded noise. A working harness must score this ~0.5."""
+    rng = np.random.default_rng(42)
+    return rng.uniform(0.0, 1.0, len(train) + len(test))
+
+
+def m1_always(train, test, features):
+    """Trivial control: constant 1. Alerts every day."""
+    return np.ones(len(train) + len(test))
+
+
+def m2_never(train, test, features):
+    """Trivial control: constant 0. Alerts never."""
+    return np.zeros(len(train) + len(test))
+
+
+def m3_persistence(train, test, features):
+    """Yesterday's *observed traffic* shortfall, carried forward one day.
+
+    Persistence on the feature, not on the label. A persistence baseline that
+    reads ``y_true.shift(1)`` scores near 1.0 here and means nothing: the label
+    marks runs of 14+ sustained days, so yesterday's answer gives away today's,
+    and no detector has yesterday's ground truth at inference — that is the
+    thing being detected. See :func:`oracle_label_persistence` for the version
+    that does use it, reported separately as a ceiling.
+    """
+    joined = pd.concat([train, test])
+    values = _primary(joined)
+    baseline = values.rolling(365, min_periods=90).median()
+    shortfall = ((baseline - values) / baseline).fillna(0.0)
+    return shortfall.shift(1).fillna(0.0).to_numpy()
+
+
+def m8_matrix_profile(train, test, features, window: int = 14):
+    """1-NN distance from each subsequence to its nearest non-trivial match.
+
+    A subsequence with no close match anywhere else in the series is unusual.
+    Implemented directly rather than via ``stumpy`` (not installed): the
+    z-normalised sliding windows are compared by matrix product, which is
+    tractable at this length, and the alternative of quietly substituting an
+    IsolationForest would have duplicated B3 under a second name.
+
+    Trivial matches are excluded — adjacent windows overlap and would
+    otherwise be every subsequence's nearest neighbour at distance ~0.
+    """
+    joined = pd.concat([train, test])
+    values = _primary(joined).to_numpy(dtype=float)
+    n = len(values) - window + 1
+    if n < window * 2:
+        return np.zeros(len(joined))
+
+    # Sliding windows, z-normalised so shape is compared rather than level.
+    windows = np.lib.stride_tricks.sliding_window_view(values, window)
+    mean = windows.mean(axis=1, keepdims=True)
+    std = windows.std(axis=1, keepdims=True)
+    normed = (windows - mean) / np.where(std > 1e-9, std, 1.0)
+
+    # Squared Euclidean distance via the inner-product identity.
+    sq = (normed ** 2).sum(axis=1)
+    dist = sq[:, None] + sq[None, :] - 2.0 * (normed @ normed.T)
+    np.fill_diagonal(dist, np.inf)
+
+    # Exclusion zone: neighbours within one window overlap the query.
+    idx = np.arange(n)
+    dist[np.abs(idx[:, None] - idx[None, :]) < window] = np.inf
+
+    profile = np.sqrt(np.clip(dist.min(axis=1), 0.0, None))
+    # Windows are anchored at their start; pad the tail to full length.
+    return np.concatenate([profile, np.full(len(joined) - n, profile[-1])])
+
+
+def oracle_label_persistence(train, test, features):
+    """Yesterday's ground truth. Not a method — a ceiling.
+
+    Reported to show what perfect one-day-lagged knowledge would score, so the
+    real methods can be read against an upper bound rather than only against
+    chance. Any method approaching this is either excellent or leaking.
+    """
+    joined = pd.concat([train, test])
+    return joined["y_true"].astype(float).shift(1).fillna(0.0).to_numpy()
+
+
 BASELINES = {
+    "M0 random": (m0_random, "control"),
+    "M1 always alert": (m1_always, "control"),
+    "M2 never alert": (m2_never, "control"),
+    "M3 persistence": (m3_persistence, "unsupervised"),
+    "M8 matrix profile": (m8_matrix_profile, "unsupervised"),
+    "ORACLE label t-1": (oracle_label_persistence, "oracle"),
     "B1 rolling z": (b1_rolling_z, "unsupervised"),
     "B2 MA crossover": (b2_ma_crossover, "unsupervised"),
     "B3 isolation forest": (b3_isolation_forest, "unsupervised"),
@@ -328,7 +451,9 @@ def main() -> int:
                 scores = fn(train, test, features)
             except _NotTrainable as exc:
                 rows.append({"region": region, "method": name, "kind": kind,
-                             "family": "baseline", "auc": np.nan, "f1": np.nan,
+                             "family": "baseline",
+                             "circularity": _CIRCULARITY.get(name, "unknown"),
+                             "auc": np.nan, "f1": np.nan,
                              "fpr": np.nan, "alert_rate": np.nan,
                              "not_applicable": str(exc)})
                 print(f"   {name:<24} n/a — {exc}")
@@ -341,7 +466,9 @@ def main() -> int:
                 y_test, scores[-len(test):], scores[: len(train)]
             )
             rows.append({"region": region, "method": name, "kind": kind,
-                         "family": "baseline", **metrics})
+                         "family": "baseline",
+                         "circularity": _CIRCULARITY.get(name, "unknown"),
+                         **metrics})
             print(f"   {name:<24} AUC={metrics['auc']!s:<7.7} "
                   f"F1={metrics['f1']!s:<6.6} alert_rate={metrics['alert_rate']:.2f}")
 
@@ -356,6 +483,7 @@ def main() -> int:
             )
             rows.append({"region": region, "method": f"Tier {tier}", "kind": "multi-agent",
                          "family": "tier", "agents": ",".join(used),
+                         "circularity": _TIER_CIRCULARITY,
                          "n_agents": len(used), **metrics})
             print(f"   Tier {tier} ({len(used)} agents){'':<7} AUC={metrics['auc']!s:<7.7} "
                   f"F1={metrics['f1']!s:<6.6} alert_rate={metrics['alert_rate']:.2f} "
