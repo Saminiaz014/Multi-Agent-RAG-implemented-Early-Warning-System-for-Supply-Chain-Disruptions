@@ -46,3 +46,12 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Thesis writing (FAPS LaTeX template + local drafts) — never commit/push
+thesis/
+
+# Generated evaluation matrices (rebuilt by scripts from the knowledge base)
+data/eval/
+
+# Pre-migration knowledge-base snapshots
+data/knowledge_base/live_extracted_backup.pre_*.json
