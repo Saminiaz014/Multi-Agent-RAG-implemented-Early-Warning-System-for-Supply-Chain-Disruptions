@@ -55,3 +55,5 @@ data/eval/
 
 # Pre-migration knowledge-base snapshots
 data/knowledge_base/live_extracted_backup.pre_*.json
+
+docs/

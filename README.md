@@ -94,18 +94,18 @@ The Strait of Hormuz is one of the world's most critical maritime chokepoints, c
 
 ## Data Sources
 
-Each of the six agents is backed by a free, public data source. Every source has a CSV and a `synthetic` mode, so the full pipeline runs locally with **no API keys required at this stage** — the live API integrations below are wired in config (`agents.<name>.api` / `ingestion.<name>.api`) and stubbed in code (`NotImplementedError` with planned-integration docstrings). All keys are optional and blank by default.
+Five of the six agents are wired to a live, free public API (Phase 13). Each connector still keeps its `csv` and `synthetic` modes, so the full pipeline runs offline with no keys; `synthetic` remains the mode that carries ground-truth labels for reproducible evaluation.
 
-| Agent | Source(s) | Access | Notes |
+| Agent | Live source | Access | Notes |
 |---|---|---|---|
-| **Shipping** | [aisstream.io](https://aisstream.io) | Free WebSocket AIS | Live vessel positions/arrivals, bounding-box filtered to the Shuaiba / Hormuz corridor |
+| **Shipping** | [IMF PortWatch](https://portwatch.imf.org) Daily Chokepoints (ArcGIS FeatureServer) | **No credentials** | Daily transits per chokepoint, 2019–2026, all four regions. Primary evidence-grade source — captures the Apr–May 2026 Hormuz shutdown directly |
 | **Market** | [FRED API](https://fred.stlouisfed.org/docs/api/fred/) | Free (key) | Brent Crude `DCOILBRENTEU`, Freight PPI `PCU4831114831111`, Freight Services Index `PCUATFREIATFREI` |
-| **Geopolitical** | [ACLED](https://acleddata.com), [OpenSanctions](https://www.opensanctions.org), [GDELT](https://www.gdeltproject.org) | ACLED/OpenSanctions (key), GDELT (no key) | Conflict events · sanctions data · global event database |
-| **Natural Disaster** | [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/), [NOAA IBTrACS](https://www.ncei.noaa.gov/products/international-best-track-archive) | No key | Earthquakes (GeoJSON, no key) · cyclones (public-domain CSV, North-Indian basin) |
-| **Routing** | [aisstream.io](https://aisstream.io) | Free WebSocket AIS | Vessel positions with Hormuz / Cape-of-Good-Hope bounding-box filters for rerouting detection |
-| **News Sentiment** | [GDELT DOC API](https://www.gdeltproject.org/), [NewsAPI.org](https://newsapi.org) | GDELT (no key), NewsAPI (free dev tier) | GDELT tone scores (no key) · NewsAPI free tier (1,000 req/day) |
+| **Geopolitical** | [ACLED](https://acleddata.com) | Free (OAuth) | Battles/Explosions → `military_activity_index`, Strategic developments → `diplomatic_incident_score`, Protests/Riots → inverse `regime_stability_index`. **`sanctions_severity` is deliberately not produced** — see Phase 13 |
+| **Natural Disaster** | [GDACS](https://www.gdacs.org) + [USGS](https://earthquake.usgs.gov/fdsnws/event/1/) | **No credentials** | GDACS Orange/Red alerts (cyclone, flood, wildfire, drought) + USGS magnitude and tsunami flag. Replaced the dead Ambee path |
+| **News Sentiment** | [GDELT DOC API v2](https://api.gdeltproject.org/api/v2/doc/doc) | **No credentials** | Tone scores. The agent renormalises over features actually present, so a region GDELT does not answer for is scored on the rest rather than on zeros |
+| **Routing** | — | — | **Dormant** (`DORMANT_AGENTS` in `src/core/regions.py`). No free source produces evidence-grade rerouting data; `fetch_api()` still raises `NotImplementedError` by design. A region config that activates it fails loudly |
 
-> All sources are currently exercised in `synthetic` mode for reproducible, label-bearing evaluation; flip `data_mode` / `source_mode` to `csv` to use downloaded extracts, or `api` once keys are supplied.
+> Set `source_mode` / `data_mode` to `api` per connector to use the live sources above, `csv` for downloaded extracts, or `synthetic` for the labelled fallback. Keys are only needed for FRED and ACLED; the other three live sources are keyless.
 
 ---
 
@@ -1372,6 +1372,8 @@ def query_gated(
 
 ### `DisasterConnector.fetch_api()` — live Ambee scoring
 
+> ⚠️ **Superseded in Phase 13.** The Ambee path is dead: the key is valid but the endpoint returns zero documents for every region and window tested. `DisasterConnector.fetch_api()` now reads **GDACS + USGS** instead — see [Phase 13](#phase-13--live-data-wiring). `AmbeeExtractor` is retained but disabled in `_EXTRACTOR_CLASSES`. The description below is kept as a record of what was tried.
+
 Previously raised `NotImplementedError` unconditionally. Now, when `agents.natural_disaster.data_mode: "api"`:
 
 1. Queries Ambee `/disasters/latest/by-lat-lng` for every point in `monitoring_points[location]` (`location` defaults to `"hormuz"`; 4 chokepoints × 2–3 points each are pre-configured).
@@ -1391,6 +1393,11 @@ Verified against the live API: returns a schema-valid row and correctly flagged 
 | ACLED | Legacy email+key auth retired in favour of OAuth | Library rewrite required; no historical data without registered credentials |
 
 SerpAPI is the only one of the five with no such cap, which is why it carried the entire 2007–2024 historical backfill.
+
+> **Updated in Phase 13.** Two rows above have since been resolved, and one got worse:
+> - **ACLED** — OAuth was implemented (`ACLEDExtractor` owns the token lifecycle), so ACLED now serves both the knowledge base and the live geopolitical connector.
+> - **Ambee** — the 30-day cap turned out to be the lesser problem; the endpoint returns *zero* documents even inside the window. Replaced by GDACS + USGS, both keyless and both historical.
+> - **PortWatch** and **GDACS/USGS** were added precisely because they have no cap and need no credentials, which is what made a 2019–2026 evaluation set possible.
 
 ### Test Coverage (Phase 7)
 
@@ -1985,12 +1992,147 @@ risk provenance, and explanation composition/caching/refusal handling.
 
 ---
 
+## Phase 13 — Live Data Wiring
+
+> **Summary.** Every connector that has a credible free source now reads a real API instead of a stub. Five of six agents moved from `synthetic`/`csv` to live data — shipping to **IMF PortWatch**, market to **FRED**, geopolitical to **ACLED**, natural disaster to **GDACS + USGS**, news to **GDELT**. The sixth, routing, was made **dormant** rather than faked. The through-line of this phase is that a feature is either measured or absent; nothing is invented to fill a column.
+
+### The dormancy decision (routing)
+
+`RoutingConnector.fetch_api()` still raises `NotImplementedError`, and that is now a recorded decision rather than an unfinished task. `src/core/regions.py` declares:
+
+```python
+DORMANT_AGENTS: frozenset[str] = frozenset({"routing"})
+```
+
+A *passive* agent is one with no evidence in a given region. A *dormant* agent is a project-scope decision: no free source produces evidence-grade rerouting data, so the agent is not scored anywhere. `validate_region()` raises if a region config activates a dormant agent, so reviving one is a deliberate edit to `DORMANT_AGENTS`, not an accidental YAML toggle.
+
+### Renormalisation over present features
+
+Two agents gained the same capability, for the same reason: a live source may not carry every feature the synthetic schema defined.
+
+- **`GeopoliticalAgent`** — ACLED has no sanctions data. OpenSanctions is paywalled and publishes current designations rather than a time series, and sanctions are discrete events, so any daily "sanctions severity" curve would be a modelling artefact. `sanctions_severity` is therefore **not produced**, and the agent renormalises its weights over the three features ACLED does support.
+- **`NewsAgent`** — same treatment when GDELT does not answer for a region.
+
+The alternative — scoring a missing column as zero — would read as "no sanctions risk" rather than "not measured", and would quietly drag the composite down.
+
+### Connector-by-connector
+
+| Connector | Source | Credentials | Notes |
+|---|---|---|---|
+| `shipping_connector.py` | IMF PortWatch `Daily_Chokepoints_Data` FeatureServer | None | Daily transits per chokepoint, all four regions. `n_total` / `n_tanker` feed the agent; per-type counts travel for provenance |
+| `market_connector.py` | FRED `api.stlouisfed.org/fred` | Key | Brent daily; freight PPI and services monthly, forward-filled to daily |
+| `geopolitical_connector.py` | ACLED (via `ACLEDExtractor`'s OAuth) | OAuth | Per-country, per-year event fetch; warns on hitting the per-year cap, since a capped page is indistinguishable from a complete one |
+| `disaster_connector.py` | GDACS `geteventlist` + USGS `fdsnws` | None | GDACS restricted to `Orange;Red` — green-inclusive queries exceed GDACS's silent 100-result cap every month |
+| `news_connector.py` | GDELT DOC API v2 | None | Tone scores |
+| `routing_connector.py` | — | — | Dormant, see above |
+
+> **Naming trap.** `ShippingConnector` and `MarketConnector` each carry two similarly named methods. `fetch_from_api()` is the real live path and is what `fetch()` dispatches to in `api` mode. `fetch_api()` is a leftover convenience hook that logs a warning and **silently returns synthetic data**. Call `fetch()` (or `fetch_and_validate()`), never `fetch_api()` directly, or you will get generated numbers while believing they are live. Several docstrings in these two modules still describe `api` mode as an unimplemented aisstream.io stub and are themselves out of date.
+
+### New extractors
+
+| Extractor | Purpose |
+|---|---|
+| `gdacs_extractor.py` | GDACS event list — the primary natural-disaster source |
+| `usgs_extractor.py` | Seismic detail below GDACS's alert bar |
+| `disaster_combined_extractor.py` | Wraps GDACS + USGS behind one interface so the monthly cap applies to their combined output. Enabling them individually would bypass it |
+| `portwatch_extractor.py` | Monthly chokepoint traffic summaries for the knowledge base |
+
+`AmbeeExtractor` is retained but disabled: the key is valid and the endpoint returns zero documents. `ReliefWebExtractor` remains a fallback pending an approved `appname`.
+
+### Retired region keys
+
+`red_sea` and `suez` were folded into `bab_el_mandeb`, leaving four live regions (`hormuz`, `bab_el_mandeb`, `panama`, `malacca`). `RETIRED_REGION_ALIASES` in `src/core/regions.py` maps the old keys so historical knowledge-base documents still resolve, and `scripts/migrate_retired_region_keys.py` migrates stored documents. Migrated documents keep their original text — which still names Suez — so the distinction stays visible to anyone reading them.
+
+---
+
+## Phase 14 — Sustained-Shift Detection and Risk-Band Recalibration
+
+> **Summary.** The shock detectors could not hold a flag across a long disruption: an isolation forest normalised against each scored batch treats a month-long shutdown as the new normal after a few days. `ShippingAgent` gained a duration signal, and the risk bands were recalibrated onto the resulting absolute scale.
+
+### `ShippingAgent.level_shift_score()`
+
+A sustained shift is measured against a **trailing** long-window baseline rather than the batch being scored, so a shutdown that persists for weeks keeps scoring instead of being absorbed into the reference distribution. A 40 % sustained drop scores 1.0.
+
+Batch min-max normalisation was removed for the same reason: it forced every window onto `[0, 1]` by its own extremes, destroying exactly the signal a sustained disruption carries.
+
+### Recalibrated risk bands
+
+With absolute rather than window-relative scores, the calm-day median rose to ≈0.47, which put most ordinary days at MEDIUM or worse under the old `0.8 / 0.6 / 0.4` boundaries. The bands were re-expressed as the **same quantiles of calm behaviour** on the new scale — a re-scaling, not a loosening:
+
+```yaml
+thresholds:
+  risk_critical: 0.90   # p97 of calm days
+  risk_high:     0.69   # p85
+  risk_medium:   0.51   # p60  -> ~60% of calm days read LOW
+  risk_low:      0.30
+```
+
+Calibrated against 9,183 pooled label-negative days across all four regions, 2019–2026.
+
+---
+
+## Phase 15 — Measured Method Comparison and Agent Ablation
+
+> **Summary.** A three-script harness that scores the pipeline against baselines on **real connector features**, not generated ones. The motivating observation is blunt: an evaluation on `np.random.normal` cannot distinguish a good detector from a bad one, because there is no signal to find and every AUC lands at 0.5 by construction.
+
+### `scripts/build_eval_dataset.py`
+
+Assembles the per-region evaluation set by merging the live connectors on a daily index — PortWatch transits, FRED market series, GDACS/USGS hazards, ACLED events. `news_sentiment` is included when GDELT answers and omitted when it does not; **the column set per region is recorded in the manifest**, so a later run cannot quietly compare a five-feature region against a four-feature one.
+
+Ground truth is the shipping connector's `is_disruption` (a 2σ persistent drop in transits, plus the pinned Apr–May 2026 Hormuz shutdown). Its known weakness travels with the data in the manifest rather than in a comment.
+
+### `scripts/run_method_comparison.py`
+
+Three design decisions carry most of the weight:
+
+- **One temporal split, applied to everyone.** The last 30 % of each region's series is the test window; nothing is fitted on it. A supervised model scored on its own training rows would post an inflated number that is not comparable with an unsupervised detector. The split is temporal, not random — shuffling days of a time series leaks the future into the past.
+- **Tiers build real agents.** A tier is a set of agent classes, each fitted and run, with the composite being the weighted mean of their scores under the project's own weights. Approximating a tier by averaging "the first N feature columns" would measure nothing: the first two columns of these frames are both shipping features, so a Tier 2 built that way contains no market signal despite its label.
+- **Trivial controls and circularity tagging.** Added so a method that merely re-derives the label is visibly marked as such rather than celebrated. A matrix-profile baseline was included alongside.
+
+### `scripts/report_method_comparison.py`
+
+Reads `eval/method_comparison_results.csv` and emits the graphs and written findings. Nothing is asserted that the CSV does not contain, and the findings are written from what the numbers show rather than from what the architecture predicts.
+
+---
+
+## Reference Documents
+
+Two long-form references live in `docs/` (see the note on `docs/` under *Repository hygiene* below):
+
+| Document | Contents |
+|---|---|
+| `docs/THESIS_BRIEF.md` | The writing brief — what each thesis chapter must establish and which artefact supplies the evidence |
+| `docs/SCORING_REFERENCE.md` | End-to-end walkthrough of how a raw feature becomes a composite risk score and a band |
+| `docs/DASHBOARD_USAGE.md` | Running and reading the two-page dashboard |
+| `docs/REGION_USAGE_GUIDE.md` | Adding and operating a region |
+
+### Repository hygiene
+
+Two directories are deliberately kept out of the repository, and one of them does not currently work as intended:
+
+- **`thesis/`** — the FAPS LaTeX template and thesis drafts. Gitignored with an explicit *"never commit/push"* note. The compiled `FAPS-Thesis.pdf` and all LaTeX build artefacts live here and are not versioned.
+- **`docs/`** — listed in `.gitignore`, **but all 16 files under it are already tracked**, so the ignore rule has no effect. `.gitignore` only applies to untracked files. To actually stop versioning them, the files must first be removed from the index:
+
+  ```bash
+  git rm -r --cached docs/
+  ```
+
+  Until that is run, the entries above remain in the repository and edits to them will still be committed. Left as-is deliberately for now — the reference documents are useful to have versioned.
+
+---
+
 ## Project Structure
 
 ```
 supply-chain-dss/
 ├── config/
-│   └── settings.yaml           # agent toggles, weights, thresholds, RAG, API, logging
+│   ├── settings.yaml           # base config: agent toggles, weights, thresholds, RAG, API, logging
+│   ├── optimized_weights.yaml  # Phase 4 — Optuna-tuned weights (weight_mode: optimized)
+│   └── regions/                # Phase 11 — per-region overrides, merged onto settings.yaml
+│       ├── hormuz.yaml
+│       ├── bab_el_mandeb.yaml  # absorbs the retired red_sea / suez keys
+│       ├── panama.yaml
+│       └── malacca.yaml
 ├── data/
 │   ├── raw/                    # raw CSV ingestion data (populate per connector)
 │   │   ├── shipping_hormuz.csv # synthetic Hormuz dataset (Phase 1 artefact)
@@ -2000,14 +2142,25 @@ supply-chain-dss/
 │       ├── disruption_cases.json   # the 10 historical RAG cases
 │       └── decision_labels.json    # Phase 9a — auditable ground-truth action labels for the 10 cases
 ├── src/
+│   ├── core/                    # Phase 11 — region abstraction
+│   │   ├── regions.py          # RegionConfig registry, DORMANT_AGENTS, RETIRED_REGION_ALIASES, validate_region()
+│   │   └── config_manager.py   # base + per-region config merging
 │   ├── ingestion/
 │   │   ├── base_connector.py   # ABC for all data source connectors
-│   │   ├── shipping_connector.py # synthetic Hormuz AIS data with ground-truth disruptions
-│   │   └── market_connector.py # synthetic Brent / trade volume / freight data, lag-aligned to shipping
+│   │   ├── shipping_connector.py    # IMF PortWatch chokepoint transits (live) / CSV / synthetic
+│   │   ├── market_connector.py      # FRED Brent + freight (live) / CSV / synthetic
+│   │   ├── geopolitical_connector.py # ACLED conflict events (live); no sanctions_severity by design
+│   │   ├── disaster_connector.py    # GDACS + USGS (live); replaced the dead Ambee path
+│   │   ├── news_connector.py        # GDELT DOC API v2 (live)
+│   │   └── routing_connector.py     # dormant — fetch_api() raises NotImplementedError by design
 │   ├── agents/
 │   │   ├── base_agent.py       # ABC + DetectionResult dataclass
-│   │   ├── shipping_agent.py   # IsolationForest + Z-score detector for Hormuz vessel data (Phase 2)
-│   │   └── market_agent.py     # Rolling Z-score detector for Brent / trade volume / freight (Phase 2)
+│   │   ├── shipping_agent.py   # IsolationForest + Z-score + level_shift_score() duration signal (Phase 14)
+│   │   ├── market_agent.py     # Rolling Z-score detector for Brent / trade volume / freight (Phase 2)
+│   │   ├── geopolitical_agent.py # renormalises weights over features ACLED actually supplies
+│   │   ├── disaster_agent.py   # sparse hazard severity
+│   │   ├── news_agent.py       # renormalises over present features when GDELT is silent
+│   │   └── routing_agent.py    # present but dormant
 │   ├── aggregation/
 │   │   └── risk_engine.py      # weighted composite risk scoring
 │   ├── explainability/
@@ -2020,11 +2173,15 @@ supply-chain-dss/
 │   │   ├── base_extractor.py        # ABC: rate limiting, ${VAR} env-var resolution, doc normalization
 │   │   ├── newsapi_extractor.py     # current news (news_sentiment), ~30-day lookback cap
 │   │   ├── serpapi_extractor.py     # date-unbounded Google News — historical RAG backfill (10 cases x 2007-2024)
-│   │   ├── ambee_extractor.py       # natural_disaster, primary source (replaces reliefweb)
+│   │   ├── gdacs_extractor.py       # Phase 13 — natural_disaster primary (Orange/Red alerts only)
+│   │   ├── usgs_extractor.py        # Phase 13 — seismic detail below GDACS's alert bar
+│   │   ├── disaster_combined_extractor.py # Phase 13 — GDACS+USGS behind one monthly cap
+│   │   ├── portwatch_extractor.py   # Phase 13 — monthly chokepoint traffic summaries
+│   │   ├── ambee_extractor.py       # retained but DISABLED — valid key, zero documents
 │   │   ├── reliefweb_extractor.py   # natural_disaster fallback (needs an approved appname)
 │   │   ├── fred_extractor.py        # market signals around known disruption windows
 │   │   ├── acled_extractor.py       # geopolitical conflict events, OAuth via the `acled` client
-│   │   ├── aisstream_monitor.py     # live-only AIS WebSocket monitor (shipping/routing)
+│   │   ├── aisstream_monitor.py     # live-only AIS WebSocket monitor (unused while routing is dormant)
 │   │   └── knowledge_base_builder.py # orchestrates all extractors -> dedupe -> ChromaDB upsert
 │   ├── api/
 │   │   └── endpoints.py        # FastAPI — 10 endpoints: /health /predict /explain /agents /agents/toggle /weights /weights/switch /optimization/results /populate /status (Phase 8)
@@ -2036,7 +2193,13 @@ supply-chain-dss/
 │   │   └── pages/                   # thin multipage shims (1_Decision_View.py, 2_Analysis_View.py)
 │   └── orchestrator.py         # main pipeline runner; RAG block now calls query_gated() (Phase 7)
 ├── scripts/
-│   └── populate_knowledge_base.py  # CLI: python scripts/populate_knowledge_base.py [--extractors a,b,c]
+│   ├── populate_knowledge_base.py  # CLI: python scripts/populate_knowledge_base.py [--extractors a,b,c] [--region r]
+│   ├── build_eval_dataset.py       # Phase 15 — assemble the real per-region evaluation set + manifest
+│   ├── run_method_comparison.py    # Phase 15 — temporal-split method comparison and agent ablation
+│   ├── report_method_comparison.py # Phase 15 — graphs + findings from method_comparison_results.csv
+│   ├── migrate_retired_region_keys.py   # Phase 13 — migrate red_sea/suez KB docs to bab_el_mandeb
+│   ├── run_disaster_extraction_2018_2026.py # Phase 13 — GDACS+USGS historical backfill
+│   └── run_abc_extraction_2018_2026.py      # Phase 13 — ACLED+FRED historical backfill
 ├── tests/
 │   ├── test_agents.py
 │   ├── test_ingestion.py       # shipping + market connector schema, ranges, separation, cross-source correlation
@@ -2153,7 +2316,7 @@ Opens at `http://localhost:8501`. The first load takes ~1 minute (split generati
 pytest tests/ -v
 ```
 
-The full suite is **243 tests / 243 passing** across 13 collected test files (`test_fred_api.py` is a standalone diagnostic, not collected by pytest). Run the agent evaluations with output:
+The full suite is **420 tests / 420 passing** across 23 collected test files, in ~3m35s (`test_fred_api.py` is a standalone diagnostic script and contributes no test items). Verified on the project venv; run it with `.venv/Scripts/python -m pytest -q`. Run the agent evaluations with output:
 
 ```bash
 pytest tests/test_agents.py::test_shipping_agent_evaluation -v -s
