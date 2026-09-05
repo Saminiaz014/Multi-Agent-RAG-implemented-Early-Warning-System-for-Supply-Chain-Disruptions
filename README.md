@@ -1,2063 +1,219 @@
 # Multi-Agent RAG-Implemented Early Warning System for Supply Chain Disruptions
 
-A thesis-grade **Decision Support System (DSS)** for detecting, explaining, and contextualising supply chain disruptions in the **Strait of Hormuz** maritime corridor. The system combines multi-agent anomaly detection, SHAP-based explainability, and retrieval-augmented generation (RAG) for historical precedent retrieval — producing structured, interpretable alerts rather than raw predictions.
+A **Decision Support System (DSS)** that detects, explains, and contextualises disruptions at four maritime chokepoints. Six domain agents monitor heterogeneous external signals; a weighted aggregation layer fuses them into a composite risk score; a SHAP surrogate attributes that score to input features; and a retrieval layer grounds it in comparable historical events.
 
-> **Branch note (`phase-11-4region`):** this branch starts from commit `cc5e507`
-> ("Dashboard map: replace CesiumJS globe with keyless MapLibre GL JS"), predating
-> Phase 8 onward and the entire EVAL01 synthetic benchmark harness (region
-> registry, scenario generator, 5-region ablation study). That benchmark work is
-> preserved for reference — not deleted — as a static snapshot under
-> [`docs/eval01-archived/`](docs/eval01-archived/), and remains fully intact on
-> `main` (tagged `eval01-archived`) if this branch's Phase 11 work needs to
-> build on it later rather than alongside it.
+> ### The measured claim
+>
+> The claim is **not** "this detects disruptions better than existing methods." The evaluation in [§4](#4-evaluation) does not support that, and it was deliberately built to expose the fact. The defensible claim is narrower:
+>
+> **A multi-agent architecture with explicit per-domain weighting produces interpretable, auditable, decision-ready alerts — attribution to a named domain, a SHAP feature breakdown, and a retrieved historical precedent — which single-model detectors cannot produce, at a detection cost this evaluation quantifies honestly rather than hides.**
+>
+> The contribution is not a better detector. It is **an evaluation methodology that catches its own circularity**, plus a diagnosed mechanism for why multi-domain fusion underperforms on a single-domain label ([§4.7](#47-root-cause-analysis--why-hormuz-sits-at-chance)).
 
----
-
-## Research Context
-
-The Strait of Hormuz is one of the world's most critical maritime chokepoints, carrying approximately 20% of global oil trade. Disruptions — caused by geopolitical tensions, sanctions, vessel incidents, or market shocks — propagate rapidly across global supply chains. This system provides decision-makers with:
-
-- **Early warning** from multi-source signal monitoring
-- **Explainability** — which features drove the anomaly score
-- **Historical grounding** — which past disruption events are most analogous
-- **Risk classification** — composite HIGH / MEDIUM / LOW risk levels with configurable thresholds
+| | |
+|---|---|
+| **Regions** | Hormuz · Bab el-Mandeb · Panama · Malacca (2019–2026) |
+| **Test suite** | 420 passed / 0 failed |
+| **Headline result** | Panama Tier 1 **AUC 0.909** · Hormuz Tier 1 **AUC 0.502** (chance) |
+| **Central negative finding** | Adding agents **reduces** AUC in every evaluable region |
+| **Source of record** | [`docs/THESIS_BRIEF.md`](docs/THESIS_BRIEF.md) · [`docs/SCORING_REFERENCE.md`](docs/SCORING_REFERENCE.md) |
+| **Build history** | [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md) — the former phase-by-phase README body |
 
 ---
 
-## Pipeline Architecture
+## Contents
+
+- [1. Problem and Scope](#1-problem-and-scope)
+- [2. Research Questions](#2-research-questions)
+- [3. Methodology](#3-methodology)
+  - [3.1 Research design](#31-research-design) · [3.2 Requirements](#32-design-requirements) · [3.3 Architecture](#33-system-architecture) · [3.4 Detection models](#34-detection-models) · [3.5 Evidence discipline](#35-evidence-discipline) · [3.6 Weighting](#36-weight-determination) · [3.7 Aggregation](#37-risk-aggregation) · [3.8 Explainability & RAG](#38-explainability-and-retrieval) · [3.9 Implementation](#39-implementation)
+- [4. Evaluation](#4-evaluation)
+  - [4.1 Design](#41-evaluation-design) · [4.2 Data](#42-dataset-and-ground-truth) · [4.3 Baselines](#43-baselines-tiers-and-circularity) · [4.4 Metrics](#44-metrics) · [4.5 Results](#45-results) · [4.6 Negative finding](#46-the-central-negative-finding) · [4.7 Root cause](#47-root-cause-analysis--why-hormuz-sits-at-chance) · [4.8 Rejected hypotheses](#48-hypotheses-tested-and-rejected) · [4.9 Optimization](#49-weight-optimization-results) · [4.10 Validity](#410-threats-to-validity--what-cannot-be-claimed) · [4.11 Defects](#411-known-defects-and-open-issues)
+- [Project Structure](#project-structure) · [Installation](#installation) · [Running](#running)
+
+> **On `Phase N` tags.** Sections 1–4 describe the system as it is. The reference sections that follow them (Project Structure, Installation, Configuration) still carry `Phase N` annotations recording *when* a file, dependency or config key was introduced. Those are pointers into [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md), not part of the current structure.
+
+---
+
+## 1. Problem and Scope
+
+Maritime chokepoints concentrate global trade risk into a handful of narrow corridors. A disruption at one propagates across supply chains within days, and the decision-maker's problem is not obtaining data — vessel transits, commodity prices, conflict events and news are all available — but converting scattered, heterogeneous, largely unstructured signals into a judgement that can be acted on and defended.
+
+Purely predictive systems are insufficient here. A risk score with no attribution cannot be audited, cannot be argued with, and gives a manager no basis for choosing between "do nothing" and "reroute a fleet." This system is therefore built around **attribution, precedent and auditability** as first-class outputs, not as post-hoc decoration on a classifier.
+
+### Domain
+
+| Region | Display | Lat / Lon | Documented driver in window |
+|---|---|---|---|
+| `hormuz` | Strait of Hormuz | 26.50 / 56.50 | Geopolitical — sanctions, military activity; ~20 % of global oil trade |
+| `bab_el_mandeb` | Bab el-Mandeb | 12.58 / 43.33 | Security campaign — Houthi attacks, Cape of Good Hope diversion |
+| `panama` | Panama Canal | 9.08 / −79.68 | Hydrological — Gatún Lake drought |
+| `malacca` | Strait of Malacca | 2.50 / 101.80 | **None documented** — used as a control |
+
+---
+
+## 2. Research Questions
+
+| SRQ | Question | Answered by | Verdict |
+|---|---|---|---|
+| **SRQ1** | Can multi-domain signals detect chokepoint disruption? | `scripts/run_method_comparison.py` | Partially — Panama yes (0.909), Hormuz no (0.502) |
+| **SRQ2** | Does agent diversity add value over fewer agents? | Tier ablation · `notebooks/evaluation.py` METRIC 3 | **No — refuted on real data** ([§4.6](#46-the-central-negative-finding)) |
+| **SRQ3** | Can the score be explained faithfully? | `src/explainability/shap_explainer.py` · METRIC 2 | Yes, with a stated surrogate caveat |
+| **SRQ4** | Does weight optimization improve on hand-tuning? | `src/optimization/` · METRIC 5 | Unresolved — blocked by [§4.11](#411-known-defects-and-open-issues) |
+| **SRQ5** | Would a decision-maker be led to the correct action? | `src/evaluation/decision_effectiveness.py` · METRIC 8 | Not currently citable — see [§4.11](#411-known-defects-and-open-issues) |
+
+---
+
+# 3. Methodology
+
+## 3.1 Research design
+
+The work follows **Design Science Research**: an artifact is built to address a practical problem, then evaluated against criteria fixed in advance. The artifact is the DSS; the evaluation is the method comparison in [§4](#4-evaluation).
+
+The methodological commitment that shapes everything below is that **an evaluation must be able to fail**. Three design decisions enforce this — a temporal split applied identically to every method, tiers that instantiate real agent classes rather than column averages, and an explicit circularity rating attached to every method. Each is described in [§4.1](#41-evaluation-design). They are what allow the negative results in [§4.6](#46-the-central-negative-finding) to be trusted rather than explained away.
+
+## 3.2 Design requirements
+
+Derived from the problem statement in [§1](#1-problem-and-scope):
+
+| # | Requirement | Realised by |
+|---|---|---|
+| R1 | Separate ingestion, detection, and decision support so each can change independently | Layered architecture, [§3.3](#33-system-architecture) |
+| R2 | Handle heterogeneous structured and unstructured sources | Six connectors behind one ABC |
+| R3 | Attribute every score to a named domain | Per-agent breakdown in `RiskEngine` |
+| R4 | Attribute every score to named input features | SHAP surrogate, [§3.8](#38-explainability-and-retrieval) |
+| R5 | Ground alerts in comparable past events | RAG retrieval, [§3.8](#38-explainability-and-retrieval) |
+| R6 | Keep every number auditable by a domain expert | No end-to-end learned model, [§3.4](#34-detection-models) |
+| R7 | Degrade gracefully when a source or agent is unavailable | Weight renormalisation, [§3.7](#37-risk-aggregation) |
+
+## 3.3 System architecture
+
+### Analysis
+
+The pipeline is a strict one-way flow. Each stage has a single responsibility and a defined output contract, so a stage can be replaced without touching its neighbours — the property that made it possible to swap five connectors from synthetic to live data without changing a single agent.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      Raw Signals                        │
-│     (AIS vessel data · oil futures · incident feeds)    │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────┐
-│                  Ingestion Layer                        │
-│   BaseConnector ABC → domain-specific connectors        │
-│   fetch() · validate() · fetch_and_validate()           │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────┐
-│              Multi-Agent Detection Layer                │
-│   BaseAgent ABC → ShippingAgent · MarketAgent · ...     │
-│   Isolation Forest (shipping) · Z-score (market)        │
-│   Each agent produces: anomaly_scores + anomaly_flags   │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────┐
-│              Risk Aggregation Engine                    │
-│   Weighted average of per-agent anomaly scores          │
-│   Config-driven weights · RiskLevel enum (HIGH/MED/LOW) │
-└────────────┬──────────────────────┬─────────────────────┘
-             │                      │
-             ▼                      ▼
-┌────────────────────┐   ┌──────────────────────────────┐
-│  SHAP Explainer    │   │    RAG Context Retriever     │
-│  TreeExplainer /   │   │  ChromaDB + sentence-         │
-│  KernelExplainer   │   │  transformers (local, no API) │
-│  top-N feature     │   │  top-k similar historical     │
-│  contributions     │   │  disruption cases             │
-└────────┬───────────┘   └──────────────┬───────────────┘
-         │                              │
-         └──────────────┬───────────────┘
-                        ▼
-┌─────────────────────────────────────────────────────────┐
-│                  Decision Output                        │
-│  { composite_score, risk_level, agent_scores,           │
-│    shap_contributions, historical_precedents }          │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────┐
-│                   FastAPI Layer  (Phase 8)              │
-│  GET  /health · /agents · /weights · /status            │
-│  GET  /optimization/results                             │
-│  POST /predict · /explain · /populate                   │
-│  POST /agents/toggle · /weights/switch                  │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────┐
-│            Streamlit Dashboard  (Phase 9b)              │
-│  Page 1 · Decision View — status words, action badge,   │
-│           MapLibre 3-D map, LLM risk narrative          │
-│  Page 2 · Analysis View — all 8 evaluation metrics,     │
-│           range explorer, per-chart JPEG export         │
-└─────────────────────────────────────────────────────────┘
+connector (ingestion)      raw domain frame, daily index
+    ↓
+agent.fit()                schema check and/or model calibration
+agent.preprocess()         scaling · rolling baselines · derived columns
+agent.detect()             per-row anomaly_score ∈ [0,1] + is_anomaly
+agent.validate()           per-row `validated` flag (false-positive suppression)
+agent.output()             contiguous anomaly windows (structured reports)
+    ↓
+RiskEngine.compute_risk()  composite risk + level + per-agent breakdown
+    ↓
+SHAP surrogate · RAG retrieval · Streamlit dashboard
+    ↓
+Optuna optimizer · evaluation harnesses
 ```
 
----
+### Implementation
 
-## Data Sources
+| Layer | Responsibility | Code |
+|---|---|---|
+| **1 — Ingestion** | Fetch, validate, and normalise each domain to a daily index | `src/ingestion/*_connector.py`, all extending `BaseConnector` |
+| **2 — Detection** | Per-domain anomaly scoring | `src/agents/*_agent.py`, all extending `BaseAgent` |
+| **3 — Aggregation** | Fuse agent scores into a composite risk + level | `src/aggregation/risk_engine.py` |
+| **4 — Explainability** | Attribute the composite to input features | `src/explainability/shap_explainer.py` |
+| **5 — Retrieval** | Ground the alert in historical precedent | `src/rag/context_retriever.py` |
+| **6 — Presentation** | Decision view and analysis view | `src/dashboard/`, `src/api/endpoints.py` |
 
-Five of the six agents are wired to a live, free public API (Phase 13). Each connector still keeps its `csv` and `synthetic` modes, so the full pipeline runs offline with no keys; `synthetic` remains the mode that carries ground-truth labels for reproducible evaluation.
+Each connector retains `csv` and `synthetic` modes alongside `api`. `synthetic` is the only mode carrying ground-truth labels, which is why the optimizer and the 8-metric suite still use it.
+
+### Layer 1 in detail — live data sources
+
+Five of the six agents read a live, free public API; the sixth is dormant by decision ([§3.5](#35-evidence-discipline)).
 
 | Agent | Live source | Access | Notes |
 |---|---|---|---|
-| **Shipping** | [IMF PortWatch](https://portwatch.imf.org) Daily Chokepoints (ArcGIS FeatureServer) | **No credentials** | Daily transits per chokepoint, 2019–2026, all four regions. Primary evidence-grade source — captures the Apr–May 2026 Hormuz shutdown directly |
+| **Shipping** | [IMF PortWatch](https://portwatch.imf.org) Daily Chokepoints (ArcGIS FeatureServer) | **No credentials** | Daily transits per chokepoint, 2019–2026, all four regions. The evidence-grade backbone of the evaluation set |
 | **Market** | [FRED API](https://fred.stlouisfed.org/docs/api/fred/) | Free (key) | Brent Crude `DCOILBRENTEU`, Freight PPI `PCU4831114831111`, Freight Services Index `PCUATFREIATFREI` |
-| **Geopolitical** | [ACLED](https://acleddata.com) | Free (OAuth) | Battles/Explosions → `military_activity_index`, Strategic developments → `diplomatic_incident_score`, Protests/Riots → inverse `regime_stability_index`. **`sanctions_severity` is deliberately not produced** — see Phase 13 |
-| **Natural Disaster** | [GDACS](https://www.gdacs.org) + [USGS](https://earthquake.usgs.gov/fdsnws/event/1/) | **No credentials** | GDACS Orange/Red alerts (cyclone, flood, wildfire, drought) + USGS magnitude and tsunami flag. Replaced the dead Ambee path |
-| **News Sentiment** | [GDELT DOC API v2](https://api.gdeltproject.org/api/v2/doc/doc) | **No credentials** | Tone scores. The agent renormalises over features actually present, so a region GDELT does not answer for is scored on the rest rather than on zeros |
-| **Routing** | — | — | **Dormant** (`DORMANT_AGENTS` in `src/core/regions.py`). No free source produces evidence-grade rerouting data; `fetch_api()` still raises `NotImplementedError` by design. A region config that activates it fails loudly |
+| **Geopolitical** | [ACLED](https://acleddata.com) | Free (OAuth) | Battles/Explosions → `military_activity_index`; Strategic developments → `diplomatic_incident_score`; Protests/Riots → inverse `regime_stability_index` |
+| **Natural Disaster** | [GDACS](https://www.gdacs.org) + [USGS](https://earthquake.usgs.gov/fdsnws/event/1/) | **No credentials** | GDACS Orange/Red alerts only — green-inclusive queries exceed GDACS's silent 100-result cap every month. USGS supplies magnitude and the tsunami flag |
+| **News Sentiment** | [GDELT DOC API v2](https://api.gdeltproject.org/api/v2/doc/doc) | **No credentials** | Tone scores. Answered for Panama only in the evaluation window |
+| **Routing** | — | — | **Dormant** — no free source supplies evidence-grade rerouting data |
 
-> Set `source_mode` / `data_mode` to `api` per connector to use the live sources above, `csv` for downloaded extracts, or `synthetic` for the labelled fallback. Keys are only needed for FRED and ACLED; the other three live sources are keyless.
+**Two deliberate absences, each an affirmative finding rather than a gap:**
 
----
+- **`sanctions_severity` is not produced.** ACLED carries no sanctions data; OpenSanctions is paywalled and publishes current designations rather than a time series; and sanctions are discrete events, so any daily "severity" curve would be a modelling artefact. `GeopoliticalAgent` renormalises its weights over the three features ACLED does supply. Scoring the missing column as zero would read as *"no sanctions risk"* rather than *"not measured."*
+- **`NewsAgent` renormalises the same way** when GDELT does not answer for a region.
 
-## Phase 0 — Project Scaffolding
+> **Naming trap.** `ShippingConnector` and `MarketConnector` each carry two similarly named methods. `fetch_from_api()` is the real live path and is what `fetch()` dispatches to in `api` mode. `fetch_api()` is a leftover convenience hook that logs a warning and **silently returns synthetic data**. Call `fetch()` or `fetch_and_validate()`, never `fetch_api()` directly. Several docstrings in these two modules still describe `api` mode as an unimplemented aisstream.io stub and are themselves out of date.
 
-> **Summary.** Project scaffold + ABCs + skeleton modules.
-> Adds: `config/settings.yaml`, `main.py` entrypoint, `src/orchestrator.py`, `BaseConnector` and `BaseAgent` ABCs (with `DetectionResult` dataclass), `RiskEngine` with weighted aggregation and `RiskLevel` enum, SHAP explainer wrapper, ChromaDB RAG retriever, FastAPI `/predict` `/explain` `/health` endpoints, and the initial 16-test suite (`tests/test_agents.py`, `test_risk_engine.py`, `test_scenarios.py`).
+## 3.4 Detection models
 
-This session delivered the **complete project scaffold** — every module is independently importable and tested, forming the foundation for domain-specific agent and connector implementations.
+### Analysis
 
-### Core Infrastructure
+**There is no end-to-end learned model, and this is a deliberate design position rather than an unfinished component.** The only fitted models in the entire scoring path are two Isolation Forests and their scalers. Everything else is explicit arithmetic — weighted composites, rolling z-scores, a sigmoid.
 
-| Module | File | Description |
-|--------|------|-------------|
-| Config system | `config/settings.yaml` | All tunable parameters — agent weights, detection thresholds, RAG settings, API host/port, logging config |
-| Entrypoint | `main.py` | Loads YAML config, wires dual-sink logging (console + file), runs pipeline |
-| Orchestrator | `src/orchestrator.py` | Registers agents, sequences detection → aggregation stages, returns structured output dict |
+The consequence is that every number the system produces traces to a formula a domain expert can read and dispute. That is the property the decision-support claim rests on. A gradient-boosted model over the same features would very likely score better on the metrics in [§4.5](#45-results) and would forfeit exactly the thing this system exists to provide.
 
-### Abstract Base Classes
+The RandomForest in `src/explainability/` is a **post-hoc surrogate**. It explains the score; it never produces it.
 
-| Class | File | Enforced Contract |
-|---|---|---|
-| `BaseConnector` | `src/ingestion/base_connector.py` | `fetch()`, `validate()`, `fetch_and_validate()` — schema validation built in |
-| `BaseAgent` | `src/agents/base_agent.py` | `fit()`, `detect()`, `fit_detect()` — plus `DetectionResult` dataclass |
+### Implementation
 
-Both use Python's `ABC` / `@abstractmethod` pattern, ensuring domain implementations cannot be instantiated without satisfying the full interface.
-
-### Risk Aggregation
-
-`src/aggregation/risk_engine.py` — `RiskEngine` takes a list of `DetectionResult` objects, applies configurable per-agent weights, computes a weighted mean composite score, and maps it to a `RiskLevel` enum (`HIGH ≥ 0.7`, `MEDIUM ≥ 0.4`, `LOW` otherwise). Unknown agents are skipped with a warning; non-unit weights are auto-renormalised.
-
-### SHAP Explainability
-
-`src/explainability/shap_explainer.py` — `ShapExplainer` wraps any fitted sklearn estimator. It auto-selects `TreeExplainer` for tree-based models (e.g., Isolation Forest) and falls back to `KernelExplainer` with a 50-sample background for other models. Exposes `explain()` returning raw SHAP values and sorted mean-absolute contributions, and `top_features(n)` for quick reporting.
-
-### RAG Context Retrieval
-
-`src/rag/context_retriever.py` — `ContextRetriever` uses a local persistent **ChromaDB** collection and **sentence-transformers** (`all-MiniLM-L6-v2`) for embedding. `load_knowledge_base()` indexes JSON case files incrementally (skips already-indexed IDs). `retrieve(query_text)` returns the top-k most semantically similar historical disruption cases with cosine distances. Fully local — no external API keys.
-
-### FastAPI Endpoints
-
-`src/api/endpoints.py` — Three routes:
-- `POST /predict` — accepts feature vector + agent name, returns composite score and risk level
-- `POST /explain` — returns SHAP top features and RAG context (wired to pipeline in next phase)
-- `GET /health` — liveness probe
-
-### Test Suite
-
-| Test file | Coverage |
+| Agent | Model |
 |---|---|
-| `tests/test_agents.py` | ABC enforcement, `DetectionResult` shape/type, correct flag logic |
-| `tests/test_risk_engine.py` | HIGH/MEDIUM/LOW boundary cases, unknown-agent skipping, weight renormalisation |
-| `tests/test_scenarios.py` | End-to-end orchestrator runs with synthetic normal vs. disrupted Hormuz signal data |
+| `shipping` | Isolation Forest (200 trees, seed 42) + per-feature z-score + level-shift duration score |
+| `market` | Rolling 30-day trailing z-scores, weighted mean of \|z\| |
+| `geopolitical` | Weighted linear composite → sigmoid (gain 6, centre 0.5) |
+| `natural_disaster` | Weighted composite + single-event max override |
+| `routing` | Isolation Forest (200 trees, seed 42) + transit-ratio z-score — **dormant** |
+| `news_sentiment` | Weighted composite of four normalised components |
+| **aggregation** | Renormalised weighted mean + non-linear agreement bonus |
 
----
+Per-agent formulas: [`docs/SCORING_REFERENCE.md`](docs/SCORING_REFERENCE.md).
 
-## Phase 1 — Data Ingestion
+## 3.5 Evidence discipline
 
-> **Summary.** Two synthetic data connectors with shared ground truth.
-> Adds: `src/ingestion/shipping_connector.py` (365-day Hormuz dataset with three injected disruption scenarios — Moderate Tension days 60-74, Major Blockage days 150-170, Brief Incident days 280-290) and `src/ingestion/market_connector.py` (Brent / trade volume / freight rate signals lag-aligned to shipping with 2-day propagation and mean-reverting tails). Welch t = 10.04 on vessel_count separation, Pearson r = 0.746 between shipping vessel_count and market trade_volume_index in disruption windows. 30 new ingestion tests; 46/46 total passing.
+### Analysis
 
-This session delivered the **first two concrete data connectors** — a synthetic Strait of Hormuz shipping signal generator and a temporally aligned market signal generator. Together they give detection agents a reproducible, multi-source dataset with shared ground-truth disruption labels, enabling cross-agent validation without depending on live AIS or market feeds.
+An agent can be off for three distinct reasons, and conflating them would misrepresent the system's coverage. Each exclusion below is an **affirmative finding about the evidence**, not missing data:
 
-### Shipping Connector
+- **Active** — built, run, and weighted.
+- **Passive** — a per-region evidence judgement. The domain is real, but no documented driver exists at that chokepoint in the observation window. It would activate if evidence appeared.
+- **Dormant** — a project-scope decision (`DORMANT_AGENTS`). No region may activate it; enforced at registry validation.
 
-`src/ingestion/shipping_connector.py` — `ShippingConnector` extends `BaseConnector` and produces a 365-day daily-frequency DataFrame with:
-
-| Column | Type | Description |
-|---|---|---|
-| `timestamp` | datetime | Daily index starting 2025-01-01 |
-| `vessel_count` | int | Tankers transiting the strait (baseline 60-80) |
-| `avg_delay_hours` | float | Mean transit delay in hours (baseline 2-8) |
-| `congestion_index` | float | Corridor saturation, 0=free → 1=gridlock (baseline 0.1-0.4) |
-| `oil_price_usd` | float | Brent reference price (baseline $70-85/bbl) |
-| `is_disruption` | bool | Ground-truth label — **NOT** an input feature |
-
-Baseline normal-period values track published Strait of Hormuz traffic statistics; daily Gaussian noise prevents flat-line series.
-
-### Injected Disruption Scenarios
-
-Three disruptions are seeded into every generated dataset, each with a gradual ramp-up and decay so the resulting series resembles real incident progression rather than step functions:
-
-| Scenario | Window | Vessel Drop | Delay Multiplier | Congestion | Oil Premium |
-|---|---|---|---|---|---|
-| Moderate Tension | days 60-74 | 20-35% | 2-3× | 0.50-0.70 | +10-15% |
-| Major Blockage | days 150-170 | 50-70% | 4-6× | 0.70-0.95 | +25-40% |
-| Brief Incident | days 280-290 | 10-20% | 1.5-2× | 0.40-0.60 | +5-10% |
-
-Per-scenario magnitudes are sampled once via the seeded RNG so each disruption has a coherent character; intensity is then scaled per-day to produce the ramp/decay shape. Total labelled disruption days ≈ 47 of 365.
-
-### Public Methods (Shipping)
-
-| Method | Purpose |
-|---|---|
-| `generate_dataset(days, seed)` | Produce the full DataFrame; reproducible by seed |
-| `fetch()` | Base-class hook — reads `days`/`seed` from `self.config` |
-| `validate(df)` | Schema + range checks (no NaN, congestion in [0,1], vessel_count ≥ 0, ~46 disruption days) |
-| `save_raw(path)` | Generate + validate + write CSV (default `data/raw/shipping_hormuz.csv`) |
-| `to_signal_records(df)` | Convert to unified signal schema: `{timestamp, source, feature, value, location}` |
-
-### Statistical Validation
-
-The connector prints a Welch t-statistic separating normal vs. disrupted `vessel_count` distributions on every generation. With seed 42, the 365-day dataset produces:
-
-```
-[ShippingConnector] vessel_count separation — normal mean=70.05 (n=318), disruption mean=46.32 (n=47), Welch t=10.04
-```
-
-A t-statistic above 5 confirms the injected disruptions are clearly separable from normal traffic — a precondition for downstream Isolation Forest training.
-
-### Market Connector
-
-`src/ingestion/market_connector.py` — `MarketConnector` extends `BaseConnector` and produces a 365-day daily-frequency DataFrame with three market signals temporally aligned to the shipping connector's disruption windows:
-
-| Column | Type | Description |
-|---|---|---|
-| `timestamp` | datetime | Daily index aligned with shipping data |
-| `brent_crude_usd` | float | Brent crude price (baseline $75-82/bbl), reacts to disruptions with a 1-2 day lag |
-| `trade_volume_index` | float | Normalised trade throughput in `[0, 1]` (baseline ~0.85), drops during disruptions |
-| `freight_rate_index` | float | Composite freight rate (baseline 100-120), spikes during disruptions |
-| `is_disruption` | bool | Ground-truth label — **identical** to the shipping connector's flag for cross-agent validation |
-
-**Information-propagation lag.** Market features lag the underlying shipping disruption by `lag_days` (default 2, configurable per call). The shipping window starts at day `s`; the market envelope starts at day `s + lag_days`, so traders observe price/volume anomalies after the physical event begins — mirroring real-world signal propagation.
-
-**Mean-reverting tails.** After the window closes, the disruption envelope decays exponentially with persistence factor 0.7 (~30% decay per day) instead of snapping back to baseline. This produces realistic post-disruption dynamics where prices and freight rates remain elevated for several days before fully settling.
-
-**Aligned scenarios.** The default `disruption_periods` argument seeds severity-scaled responses for the same three windows used by the shipping connector: Moderate Tension (severity 0.45, days 60-74), Major Blockage (severity 1.00, days 150-170), and Brief Incident (severity 0.25, days 280-290). Severity controls the magnitude of the Brent uplift (up to +20%), the trade-volume drop (up to −0.45), and the freight-rate spike (up to +50%).
-
-### Public Methods (Market)
-
-| Method | Purpose |
-|---|---|
-| `generate_dataset(days, seed, disruption_periods, lag_days)` | Produce the full DataFrame; reproducible by seed; disruption windows and lag both configurable |
-| `fetch()` | Base-class hook — reads `days`, `seed`, and `lag_days` from `self.config` |
-| `validate(df)` | Schema + range checks (no NaN, `trade_volume_index` in [0, 1], positive prices and freight) |
-| `save_raw(path)` | Generate + validate + write CSV (default `data/raw/market_data.csv`) |
-| `to_signal_records(df)` | Convert to unified signal schema: `{timestamp, source, feature, value, location}` |
-
-### Cross-Source Correlation
-
-Because both connectors share the same disruption windows, market signals confirm shipping anomalies. With seed 42, the Pearson correlation between shipping `vessel_count` and market `trade_volume_index` over the 47 ground-truth disruption days is:
-
-```
-[test] vessel_count <-> trade_volume_index Pearson r (disruption days, n=47): 0.746
-```
-
-A correlation above 0.5 confirms the two synthetic sources are mutually consistent during disruption windows — the precondition for meaningful multi-agent validation.
-
-### Test Coverage (Phase 1)
-
-| Test file | Coverage |
-|---|---|
-| `tests/test_ingestion.py` | 30 tests: 14 for `ShippingConnector` (schema, NaN/range checks, ~46 disruption days, scenario window placement, Welch t > 5, seed reproducibility, `validate()` happy/sad path, unified-signal JSON schema, CSV persistence) + 16 for `MarketConnector` (schema, baseline ranges, ground-truth alignment with shipping, lagged response peak, mean-reverting decay, seed reproducibility, validate happy/sad path, signal-record schema, CSV persistence, and the cross-source Pearson r > 0.5 correlation check) |
-
-All 30 ingestion tests pass alongside the 16 prior-week tests — **46/46 total**.
-
----
-
-## Phase 2 — Detection Agents
-
-> **Summary.** First two concrete detection agents wired to the Week-2 datasets.
-> Adds: `src/agents/shipping_agent.py` (Isolation Forest + Z-score fallback with leak-free fit on non-disruption rows, persistence + multi-feature validation, **TPR = 0.936 / FPR = 0.003**) and `src/agents/market_agent.py` (trailing 30-day rolling Z-scores, oil-led validation gate, **TPR = 0.809 / FPR = 0.022**). Both expose `run_dataframe` + `to_detection_result` for `RiskEngine` integration. 8 new agent tests; 54/54 total passing.
-
-This session delivered the **first two concrete detection agents** of the multi-agent pipeline — `ShippingAgent` (physical-flow side: vessel counts, transit delays, corridor congestion) and `MarketAgent` (price-side: Brent crude, trade volume, freight rates) — both wired to the synthetic Strait of Hormuz datasets produced in Phase 1. Together they form a two-channel early-warning system: the shipping agent fires first on the physical event, and the market agent corroborates it 1-2 days later as the price reaction propagates. Both agents conform to the same `BaseAgent` ABC, emit the same dict schema, and slot into the existing `RiskEngine.aggregate()` call site without any orchestrator changes.
-
-| Agent | File | Detection Strategy | TPR | FPR |
+| Agent | Hormuz | Panama | Bab el-Mandeb | Malacca |
 |---|---|---|---|---|
-| `ShippingAgent` | `src/agents/shipping_agent.py` | Isolation Forest (multivariate) + Z-score fallback | **0.936** | **0.003** |
-| `MarketAgent` | `src/agents/market_agent.py` | Rolling 30-day Z-scores (per-feature) | **0.809** | **0.022** |
+| shipping | active | active | active | active |
+| market | active | active | active | **passive** |
+| geopolitical | active | **passive** | active | active |
+| natural_disaster | active | active | **passive** | active |
+| routing | **dormant** | **dormant** | **dormant** | **dormant** |
+| news_sentiment | active | active | active | active |
 
-The two strategies are deliberately different — see [Why a Different Detection Strategy](#why-a-different-detection-strategy) below for the design rationale. The rest of this section documents the shipping agent first (since it is the lead indicator), then the market agent.
+**Exclusion reasons:**
 
-### Why the Shipping Agent Matters
+- **market / Malacca** — all four documented Malacca events carry a null market field. Removed as a data-standards violation, not on plausibility grounds.
+- **geopolitical / Panama** — the documented disruption is purely hydrological.
+- **natural_disaster / Bab el-Mandeb** — the documented event is a security campaign; `disaster_relevance: none`.
+- **routing / all four** — uniform muting. `fetch_api()` is a `NotImplementedError` stub, so the agent only ever emitted synthetic values.
 
-Anomaly detection in a single dimension is brittle: a one-day vessel-count dip is more likely a port maintenance event than a strait closure, and a single elevated delay reading can be weather noise. The shipping agent's design directly attacks both failure modes:
+**The asymmetry worth writing up:** Bab el-Mandeb's routing evidence is the *strongest in the benchmark* — 85 % of large containerships diverted via the Cape of Good Hope, +3,500–4,000 nm and +10–14 days per voyage, a documented percentage rather than an extrapolation — and routing is muted there *in spite of* that, because no free source supplies it as a time series.
 
-- **Multivariate primary detection** — Isolation Forest sees `vessel_count`, `avg_delay_hours`, and `congestion_index` jointly. A coordinated drop across all three is a far stronger disruption signal than any one feature alone.
-- **Univariate fallback** — A Z-score channel captures extreme single-feature spikes the forest may smooth over (rare, sharp events that don't match any historical isolation pattern).
-- **Two-stage validation** — Even a strong score is suppressed unless (a) it persists ≥ 2 days and (b) ≥ 2 of 3 features are elevated. This is the part that turns a noisy classifier into a usable early-warning signal.
+**Consequence that must be stated:** with routing dormant everywhere, no evaluation can measure routing's contribution in any region. Evaluation results alone cannot settle whether to re-enable it.
 
-The result is a deterministic, config-driven, leakage-free detector that the rest of the pipeline (SHAP, RAG, risk engine) can build on without re-tuning.
+### Implementation
 
-### Architectural Placement
+`src/core/regions.py` holds the registry. `DORMANT_AGENTS` is a module-level `frozenset`; per-region activation lives in each `RegionConfig` and is overlaid from `config/regions/*.yaml`. Registry validation raises if a region config activates a dormant agent, so reviving routing is a deliberate edit to `DORMANT_AGENTS` rather than an accidental YAML toggle. Passive agents are simply absent from a region's active set and are handled by the renormalisation in [§3.7](#37-risk-aggregation).
 
-`src/agents/shipping_agent.py` — `ShippingAgent` extends `BaseAgent`. It satisfies the abstract contract (`fit()`, `detect()`) and adds four pipeline-specific methods (`preprocess`, `validate`, `output`, `run`) plus two adapters (`run_dataframe`, `to_detection_result`) that bridge to the existing `RiskEngine` aggregation path. The agent is **stateless across `run()` invocations** — only the fitted `StandardScaler` and `IsolationForest` are retained, both produced by `fit()`.
+## 3.6 Weight determination
 
-```
-              ┌────────────────────┐
-              │  Raw shipping CSV  │
-              └─────────┬──────────┘
-                        ▼
-            ┌─────────────────────────┐
-            │   ShippingAgent.fit()   │   ← fit on is_disruption == False rows
-            │  (StandardScaler + IF)  │     to prevent leakage
-            └─────────────┬───────────┘
-                          ▼
-            ┌──────────────────────────┐
-            │  preprocess(data)        │   select features · ffill ·
-            │  → scaled DataFrame      │     scaler.transform → z-space
-            └──────────────┬───────────┘
-                           ▼
-            ┌──────────────────────────┐
-            │  detect(scaled)          │   IsolationForest.decision_function
-            │  → anomaly_score [0,1]   │   + max|z| / z_threshold
-            │  → is_anomaly bool       │   combined: 0.7·IF + 0.3·z_norm
-            └──────────────┬───────────┘
-                           ▼
-            ┌──────────────────────────┐
-            │  validate(signals)       │   ≥ 2-day run AND ≥ 2 of 3
-            │  → validated bool        │   features with |z| > 1.5
-            └──────────────┬───────────┘
-                           ▼
-            ┌──────────────────────────┐
-            │  output(validated)       │   group consecutive validated days
-            │  → List[dict] per window │   → unified anomaly-report schema
-            └──────────────────────────┘
-```
+### Analysis
 
-### Configuration (`config/settings.yaml`)
+Weights exist at three layers, all searchable by the optimizer:
 
-Read from `agents.shipping` — every numeric is overridable per call without touching code:
-
-| Key | Default | Effect |
-|---|---|---|
-| `contamination` | `0.10` | Expected anomaly fraction the Isolation Forest budgets for. Higher → more sensitive, more false positives. The evaluation harness uses `0.13` (≈ 47/365 ground-truth rate) for a tight match to the synthetic prior. |
-| `threshold` | `0.65` | Minimum **combined** score to set `is_anomaly=True`. The evaluation harness uses `0.55` to give the validation stage room to filter rather than relying on a hard pre-validation cutoff. |
-| `z_threshold` | `3.0` | Used twice — (1) as the Z-score normalisation cap so a single feature ≥ 3σ saturates the secondary score, and (2) reserved for downstream univariate-fallback decisions. |
-
-Internal-only constants (top of `shipping_agent.py`):
-
-| Constant | Value | Purpose |
-|---|---|---|
-| `_FEATURE_COLUMNS` | `(vessel_count, avg_delay_hours, congestion_index)` | The three scored features. `oil_price_usd` is intentionally excluded — it lives in the market agent. |
-| `_LOCATION` | `"Strait of Hormuz"` | Stamped on every output dict for downstream geographic indexing. |
-| `_FEATURE_ELEVATION_Z` | `1.5` | Per-feature elevation cutoff for the multi-feature validation check. |
-| `_PERSISTENCE_DAYS` | `2` | Minimum run length for the persistence check. |
-| `_MIN_FEATURES_ELEVATED` | `2` | Minimum number of features that must be elevated on a row for it to clear validation. |
-
-### Method-by-Method Walkthrough
-
-#### `fit(df)` — Train scaler + forest with no leakage
-
-```python
-if "is_disruption" in df.columns:
-    train = df.loc[~df["is_disruption"].astype(bool)]   # 318 normal rows
-features = train[FEATURES].ffill().dropna()
-self._scaler  = StandardScaler().fit(features)
-self._iforest = IsolationForest(
-    contamination=0.13, random_state=42, n_estimators=200
-).fit(scaler.transform(features))
-```
-
-The crucial detail: when ground truth is available, **disruption rows are excluded from the fit** so neither the scaler's mean/variance nor the forest's isolation paths can be polluted by the very anomalies they're meant to detect. In production (no `is_disruption` column), the agent fits on the entire training window and trusts the contamination prior to absorb baseline outliers. `n_estimators=200` (up from sklearn's 100) trades a fraction of a second for noticeably more stable scores on the 365-row dataset.
-
-#### `preprocess(data)` — Project new data into the trained z-space
-
-Selects the three features, forward-fills short gaps (sensor dropouts), drops residual NaNs, and applies the *fitted* scaler. The `timestamp` column is preserved for downstream window labelling and `is_disruption` is carried through unchanged so the same frame can flow into evaluation. This method **never refits** — calling it before `fit()` raises `RuntimeError`.
-
-#### `detect(data)` — Hybrid score, [0, 1] normalised
-
-```python
-iforest_norm = (-decision_function - min) / (max - min)         # IF in [0,1]
-max_z_norm   = min(max(|z|) / z_threshold, 1.0)                 # Z in [0,1]
-anomaly_score = 0.7 * iforest_norm + 0.3 * max_z_norm
-is_anomaly    = anomaly_score >= threshold
-```
-
-`decision_function` returns higher values for "more normal", so we negate before normalising. Min-max normalisation is computed *over the detection window* — this is intentional: it means the highest-scoring row in a given run always saturates at 1.0, giving downstream consumers a stable upper bound. The 70/30 weight favours the multivariate signal but lets a single extreme feature drag a row over the line. The output frame retains the per-feature z-scores as `vessel_count_zscore`, `delay_zscore`, `congestion_zscore` so SHAP and the validation stage can reason about them directly.
-
-#### `validate(signals)` — Two-stage false-positive suppression
-
-```python
-# (1) Persistence: each True must sit in a run of length >= 2
-runs = identify_consecutive_anomalies(is_anomaly)
-persistent = mask where run_length >= 2
-
-# (2) Multi-feature: at least 2 of 3 features must show |z| > 1.5
-elevated   = sum(|z_i| > 1.5 for i in features)
-feature_ok = elevated >= 2
-
-validated = persistent AND feature_ok
-```
-
-The persistence check is implemented as an in-place run-length scan rather than a `rolling().sum()` because we need the **forward** condition too (a row at the start of a 5-day disruption must still be marked persistent on day 1, not day 2). The multi-feature check is what kills "vessel count dipped because Eid al-Fitr"-style false positives — a single-feature dip alone, however statistically extreme, will not survive validation. Both gates are AND'd, so a row clears validation only if it is both persistent and broad-based.
-
-#### `output(validated_signals)` — Window-level structured reports
-
-Consecutive validated days are collapsed into anomaly windows. For each window the agent emits:
-
-```python
-{
-  "agent": "shipping",
-  "anomaly_score": float,           # max combined score across the window
-  "confidence": float,              # mean (features_elevated / 3) over window
-  "signals": {
-    "vessel_count_zscore": float,   # max |z| in the window
-    "delay_zscore":        float,
-    "congestion_zscore":   float,
-  },
-  "start_timestamp": "YYYY-MM-DD",
-  "end_timestamp":   "YYYY-MM-DD",
-  "location": "Strait of Hormuz",
-}
-```
-
-`confidence` is deliberately distinct from `anomaly_score`: a window can score 1.0 (saturated isolation forest) but only have 2 of 3 features firing on most days (`confidence ≈ 0.67`), or score 0.7 with all three features elevated every day (`confidence = 1.0`). Downstream consumers (the LLM-facing summariser, the SHAP report) can use this split to reason about *certainty* independently of *severity*.
-
-#### `run(data)` — Pipeline orchestration
-
-Auto-fits if needed (one-shot evaluation mode), then chains
-`preprocess → detect → validate → output`, logging each stage's row counts. Returns the list of structured window dicts. For per-row evaluation, `run_dataframe(data)` exposes the intermediate validated DataFrame, and `to_detection_result(validated)` adapts that frame to the existing `DetectionResult` dataclass so the agent slots into `RiskEngine.aggregate()` unchanged.
-
-### Evaluation Results (synthetic Hormuz dataset, seed 42)
-
-Run `pytest tests/test_agents.py::test_shipping_agent_evaluation -v -s` to reproduce:
-
-```
-======================================================================
-ShippingAgent — End-to-End Evaluation on Synthetic Hormuz Dataset
-======================================================================
-Total rows               : 365
-Ground-truth disruption  : 47 days
-Predicted (validated)    : 45 days
-Anomaly windows reported : 5
-
-Confusion Matrix
-                 pred=Normal   pred=Disruption
-true=Normal              317                 1
-true=Disruption            3                44
-
-TPR (recall)     : 0.936
-FPR              : 0.003
-Precision        : 0.978
-
-Classification Report
-              precision    recall  f1-score   support
-      Normal      0.991     0.997     0.994       318
-  Disruption      0.978     0.936     0.957        47
-    accuracy                          0.989       365
-    macro avg     0.984     0.967     0.975       365
-    weighted avg  0.989     0.989     0.989       365
-======================================================================
-```
-
-| Metric | Target | Achieved |
-|---|---|---|
-| **True Positive Rate** | ≥ 0.80 | **0.936** |
-| **False Positive Rate** | ≤ 0.15 | **0.003** |
-| Precision | — | 0.978 |
-| F1 (Disruption) | — | 0.957 |
-
-The agent recovers 44 of 47 ground-truth disruption days with a **single false positive** across 318 normal days. The three missed days fall at the extreme edges of the ramp-up / decay tails of the Major Blockage scenario, where the disruption envelope is small enough that the multi-feature elevation gate (≥ 2 of 3 features with |z| > 1.5) correctly judges them indistinguishable from baseline noise — a false negative we accept in exchange for the near-zero false-positive rate.
-
-The five reported windows correspond cleanly to the three injected scenarios (with the Major Blockage window split into a main body and two short trailing fragments), confirming the pipeline preserves event-level structure rather than just per-row classification.
-
-### Test Coverage (Shipping Agent)
-
-`tests/test_agents.py` — 4 new shipping-agent tests added on top of the 5 prior ABC contract tests, all passing:
-
-| Test | Asserts |
-|---|---|
-| `test_shipping_agent_evaluation` | TPR ≥ 0.80, FPR ≤ 0.15 against the synthetic dataset; prints confusion matrix, classification report, and a sample window dict |
-| `test_shipping_agent_run_output_schema` | Every dict from `run()` contains all required keys, scores are in `[0, 1]`, and the `signals` block has exactly the three z-score features |
-| `test_shipping_agent_determinism` | Two fresh agents with identical config produce bit-identical anomaly scores and validated flags (deterministic — `random_state=42`) |
-| `test_shipping_agent_no_leakage` | `fit()` discards disruption rows when `is_disruption` is present — verified by checking the fitted scaler's mean matches the non-disruption mean and **not** the full-dataset mean |
-
-### Non-Functional Guarantees
-
-- **Determinism** — `IsolationForest(random_state=42)`; no other randomness. Same input + config → identical output, byte-for-byte.
-- **No data leakage** — `fit()` filters on `is_disruption == False` whenever the column is present; the scaler is never refit during inference; `preprocess()` raises if called before `fit()`.
-- **Type hints** — Every public signature is fully annotated (`pd.DataFrame`, `list[dict[str, Any]]`, etc.).
-- **Google-style docstrings** — Every public method has Args / Returns sections; module-level docstring explains the agent's role in the broader pipeline.
-- **Logging** — Every pipeline stage emits an `INFO`-level line with row counts and key parameters, routed through the project's standard logger.
-
-### Market Agent
-
-`src/agents/market_agent.py` — `MarketAgent` is the **second concrete detection agent** and the cross-confirmation layer for the shipping signal. Where the shipping agent watches the physical-flow side of a Strait of Hormuz disruption (vessel counts, transit delays, corridor congestion), the market agent watches the **price-side and trade-flow** reaction (Brent crude price, normalised trade volume, composite freight rates). Because the market envelope lags the underlying shipping disruption by ~1-2 days and decays slowly afterwards, it functions as an **independent corroborator**: a shipping flag confirmed by an aligned market response is far less likely to be a false alarm than a shipping-only flag.
-
-#### Why a Different Detection Strategy
-
-Market features are inherently noisier than shipping features and exhibit strong temporal autocorrelation — yesterday's Brent price is the single best predictor of today's. An Isolation Forest on the raw values would either (a) require a meticulously curated training window to avoid memorising baseline drift, or (b) collapse on a stationary subset that's not representative of live market conditions. Instead, the market agent uses **rolling-window Z-scores** that adapt to slow drift naturally: each row is scored against the trailing 30 days only. There is no global mean/variance to misalign over time, and there is no look-ahead bias because the rolling window is strictly trailing.
-
-```
-              ┌────────────────────┐
-              │   Raw market CSV   │
-              └─────────┬──────────┘
-                        ▼
-            ┌─────────────────────────┐
-            │   MarketAgent.fit()     │   schema check only — rolling stats
-            │   (no global params)    │     are computed inline per call
-            └─────────────┬───────────┘
-                          ▼
-            ┌──────────────────────────┐
-            │  preprocess(data)        │   ffill + 30-day trailing rolling
-            │  → rolling_mean/std      │     mean & std per feature
-            └──────────────┬───────────┘
-                           ▼
-            ┌──────────────────────────┐
-            │  detect(prepped)         │   z = (x − μ_30) / σ_30
-            │  → per-feature z-scores  │   weighted |z|: oil 0.40,
-            │  → anomaly_score [0,1]   │     trade 0.35, freight 0.25
-            │  → is_anomaly bool       │   normalised by z_threshold
-            └──────────────┬───────────┘
-                           ▼
-            ┌──────────────────────────┐
-            │  validate(signals)       │   |oil_z| > z_t   AND
-            │  → validated bool        │   (|trade_z| OR |freight_z|) > z_t
-            │                          │   AND that gate persists ≥ 2 days
-            └──────────────┬───────────┘
-                           ▼
-            ┌──────────────────────────┐
-            │  output(validated)       │   group consecutive validated days
-            │  → List[dict] per window │   → unified schema, agent="market"
-            └──────────────────────────┘
-```
-
-#### Configuration (`config/settings.yaml` — `agents.market`)
-
-| Key | Default | Effect |
-|---|---|---|
-| `z_threshold` | `2.5` | Per-feature absolute z-score that counts as elevated for the validation gate AND saturation point for the combined score normaliser. The evaluation harness uses `1.2` because, on the synthetic dataset, the baseline noise is small enough that genuine disruption signals only reach raw z ≈ 1.5-4 during the lower-severity windows; tuning down the gate captures the brief incident without breaching the 0.20 FPR ceiling. |
-| `threshold` | `0.55` | Min combined score to set `is_anomaly=True`. Evaluation uses `0.40` for the same reason. |
-| `window` | `30` | Trailing rolling-window length, in days. 30 is chosen as a one-month memory: long enough to absorb day-of-week and holiday effects, short enough to track regime changes (e.g. seasonal supply shifts). |
-
-#### Method-by-Method Walkthrough
-
-##### `fit(df)` — Schema check only
-
-Validates that the three required columns are present and sets `_is_fitted = True`. **No global parameters are learned** — rolling stats are computed inline inside `preprocess`. This is intentional: a global StandardScaler would freeze the mean/variance at training time and slowly drift out of sync with the live market, defeating the noise model. `fit` exists purely to satisfy the `BaseAgent` ABC contract and to fail fast on bad input.
-
-##### `preprocess(data)` — Trailing rolling statistics
-
-```python
-for col in ("brent_crude_usd", "trade_volume_index", "freight_rate_index"):
-    roll = df[col].rolling(window=30, min_periods=2)
-    df[f"{col}_rolling_mean"] = roll.mean()
-    df[f"{col}_rolling_std"]  = roll.std(ddof=0)
-df = df.dropna(subset=[<rolling_std cols>])
-```
-
-`min_periods=2` means a single warm-up row is dropped (a one-sample std is undefined) but rows 2-30 still get a rolling estimate from whatever history is available. Forward-fill handles short sensor gaps before the rolling computation. `ddof=0` is used so the rolling std matches numpy's `population` definition (consistent with how the synthetic noise was specified).
-
-##### `detect(data)` — Feature-weighted absolute z-scores
-
-```python
-weighted = 0.0
-for col, weight in (("brent_crude_usd", 0.40),
-                    ("trade_volume_index", 0.35),
-                    ("freight_rate_index", 0.25)):
-    z = (x - μ_30) / σ_30          # NaN-safe: degenerate flat windows → z=0
-    weighted += weight * |z|
-anomaly_score = min(weighted / z_threshold, 1.0)
-is_anomaly    = anomaly_score >= threshold
-```
-
-The 40/35/25 weights reflect the relative diagnostic value of each signal for a Hormuz disruption: oil price is the most direct and watched indicator, trade volume captures aggregate flow, and freight rates lag both. The score is normalised by `z_threshold` so it saturates at 1.0 when the weighted |z| matches the configured per-feature elevation cutoff — giving downstream consumers a stable upper bound that aligns with the validation gate. Per-row z-scores are exposed as `oil_zscore`, `trade_volume_zscore`, `freight_zscore`.
-
-##### `validate(signals)` — Oil-led, persistent corroboration
-
-```python
-combined  = is_anomaly & (|oil_z| > z_t) & ((|trade_z| > z_t) | (|freight_z| > z_t))
-validated = combined & "combined holds for ≥ 2 consecutive days"
-```
-
-The asymmetry — oil **must** be elevated, with *one* of trade/freight as corroboration — is hard-coded by design. Oil is the lead indicator for a Hormuz disruption: a real strait-flow event drives Brent first, and trade volume / freight rates follow with their own characteristic lags. A trade-volume drop with quiet oil is far more likely to be a routine port-cycle anomaly; a freight rate spike with quiet oil is far more likely to be a charter-market quirk. Persistence is checked on the **combined gate**, not on raw `is_anomaly`, so the resulting `validated` flags always form runs of length ≥ 2 — there are zero isolated-day validations on the synthetic dataset.
-
-##### `output(validated_signals)` — Window-level reports
-
-Same shape as the shipping agent but stamped `"agent": "market"` with market-specific signal keys:
-
-```python
-{
-  "agent": "market",
-  "anomaly_score": float,           # max combined score across the window
-  "confidence": float,              # mean (features_elevated / 3) over window
-  "signals": {
-    "oil_zscore":          float,   # max |z| in the window
-    "trade_volume_zscore": float,
-    "freight_zscore":      float,
-  },
-  "start_timestamp": "YYYY-MM-DD",
-  "end_timestamp":   "YYYY-MM-DD",
-  "location": "Strait of Hormuz",
-}
-```
-
-Identical schema to the shipping output keeps the downstream `RiskEngine`, SHAP explainer, and RAG retriever agnostic to which agent produced a given report.
-
-##### `run(data)` — Pipeline orchestration
-
-Auto-fits on first call (since fit is just a schema check there is no leakage concern), then chains `preprocess → detect → validate → output`, logging row counts at each stage. `run_dataframe(data)` returns the per-row validated frame for evaluation harnesses; `to_detection_result(validated)` adapts the frame to the existing `DetectionResult` dataclass used by `RiskEngine.aggregate()`.
-
-#### Evaluation Results (synthetic market dataset, seed 42)
-
-Run `pytest tests/test_agents.py::test_market_agent_evaluation -v -s` to reproduce:
-
-```
-======================================================================
-MarketAgent — End-to-End Evaluation on Synthetic Market Dataset
-======================================================================
-Scored rows              : 364 (warm-up rows dropped)
-Ground-truth disruption  : 47 days
-Predicted (validated)    : 45 days
-Anomaly windows reported : 6
-
-Confusion Matrix
-                 pred=Normal   pred=Disruption
-true=Normal              310                 7
-true=Disruption            9                38
-
-TPR (recall)     : 0.809
-FPR              : 0.022
-Precision        : 0.844
-
-Classification Report
-              precision    recall  f1-score   support
-      Normal      0.972     0.978     0.975       317
-  Disruption      0.844     0.809     0.826        47
-    accuracy                          0.956       364
-======================================================================
-```
-
-| Metric | Target | Achieved |
-|---|---|---|
-| **True Positive Rate** | ≥ 0.70 | **0.809** |
-| **False Positive Rate** | ≤ 0.20 | **0.022** |
-| Precision | — | 0.844 |
-| F1 (Disruption) | — | 0.826 |
-
-The agent recovers 38 of 47 ground-truth disruption days. The 9 missed days are concentrated at the **leading edges** of each disruption window — recall the market envelope lags the shipping window by 2 days, so the first ~2 days of every disruption period have *no* market signal yet (they cannot be detected by definition). The 7 false positives are concentrated in the **trailing edges** of the same windows, where the mean-reverting decay tail of the disruption envelope (~30%/day persistence) keeps prices and freight rates elevated for a few days past the labelled end of the shipping window. Both behaviours are physically realistic — markets *should* react late and recover slowly — and reflect the synthetic data's deliberate modelling of information-propagation lag rather than a flaw in the detector.
-
-The 6 reported anomaly windows align cleanly with the 3 injected scenarios (each scenario produces a main detected window plus, for the major blockage, two short trailing fragments as the decay tail crosses the validation threshold). All windows are ≥ 2 days long — the persistence check on the combined gate guarantees no isolated-day reports.
-
-#### Test Coverage (Market Agent)
-
-`tests/test_agents.py` — 4 new tests added for `MarketAgent`, all passing:
-
-| Test | Asserts |
-|---|---|
-| `test_market_agent_evaluation` | TPR ≥ 0.70, FPR ≤ 0.20 against the synthetic dataset; prints confusion matrix, classification report, and a sample window dict |
-| `test_market_agent_run_output_schema` | Every dict from `run()` contains the required keys, scores in `[0, 1]`, and a `signals` block with exactly `oil_zscore`, `trade_volume_zscore`, `freight_zscore` |
-| `test_market_agent_determinism` | Two fresh agents with identical config produce bit-identical anomaly scores and validated flags (the rolling-window pipeline contains no randomness) |
-| `test_market_agent_oil_led_validation` | Every validated row has `|oil_zscore| > z_threshold` AND at least one of `|trade_volume_zscore|`, `|freight_zscore|` > `z_threshold` — confirms the oil-led validation gate is enforced |
-
-#### Agent-by-Agent Comparison
-
-| Aspect | ShippingAgent | MarketAgent |
-|---|---|---|
-| Primary detector | Isolation Forest (multivariate, contamination-driven) | Rolling Z-scores (univariate per feature, 30-day trailing) |
-| Secondary detector | Per-feature Z-score fallback | None — rolling Z-scores ARE the detector |
-| Global fit needed? | Yes — StandardScaler + IsolationForest, fit on non-disruption rows | No — rolling stats computed inline; `fit()` is a schema check |
-| Combined score | `0.7 * IF + 0.3 * max|z|/z_t` | `Σ wᵢ · |zᵢ| / z_t` (oil 0.40, trade 0.35, freight 0.25) |
-| Validation gate | ≥ 2-day persistence AND ≥ 2 of 3 features elevated | ≥ 2-day persistence AND oil elevated AND ≥ 1 other elevated |
-| Persistence check | On `is_anomaly` | On combined per-row gate (stricter — no isolated-day output) |
-| Eval target | TPR ≥ 0.80, FPR ≤ 0.15 | TPR ≥ 0.70, FPR ≤ 0.20 (noisier domain) |
-| Eval result | TPR=0.936, FPR=0.003 | TPR=0.809, FPR=0.022 |
-
-Both agents emit the same dict schema, slot into the same `RiskEngine.aggregate()` call site via `to_detection_result()`, and respect the same determinism / no-leakage / type-hint / docstring / logging guarantees.
-
----
-
-## Phase 2.1 — Real-Data Integration
-
-> **Summary.** Real-data integration end-to-end.
-> Changes: both connectors gain a hybrid `source_mode` ∈ {`csv`, `synthetic`, `api`} (IMF PortWatch Shuaiba 2,699 days + FRED Brent / freight 14,252 days), both agents auto-discover real-data feature extras (`tanker_count`, `vessel_count_trend`, `freight_services_pct_change`) and adapt their weight schedules, market agent gains a recent-baseline clip (default 5 years). New: `src/orchestrator.py` `ingest()` + `run_full_pipeline()` + `run_timeseries_analysis()` with per-connector CSV→synthetic fallback, `main.py` CLI (`--mode {csv,synthetic}` / `--serve`) with a formatted summary box, four historical-event scenario tests (2026 Hormuz, 2019 tanker, 2023 normal, COVID), `tests/test_fred_api.py` standalone API connectivity check. **Real-data evaluation:** ShippingAgent TPR = 0.827 / FPR = 0.060 on Shuaiba, MarketAgent TPR = 0.966 / FPR = 0.184 on FRED. 108/108 tests passing.
-
-This session integrated **real datasets** end-to-end. Both connectors gained a hybrid `csv` / `synthetic` / `api` source mode, both agents auto-adapt to richer real-data feature sets, the orchestrator merges and routes the combined frame through the agents, and `main.py` ships a one-command CLI that prints a formatted risk summary. **108 tests pass**, including real-data evaluations on the 2,699-day Shuaiba PortWatch record and the 14,252-day FRED Brent + freight history.
-
-### Hybrid Ingestion
-
-| Connector | Real CSV source | Synthetic fallback | API stub |
+| Layer | What it weights | Location | Optimized? |
 |---|---|---|---|
-| `ShippingConnector` | IMF PortWatch Shuaiba arrivals — daily vessel-type counts 2019-01-01 → 2026-05-22 (2,699 rows) | Legacy 365-day three-scenario generator (preserved verbatim) | `aisstream.io` WebSocket — raises `NotImplementedError` |
-| `MarketConnector` | FRED — Brent daily 1987-2026 (14,252 rows) ⨝ deep-sea freight PPI (monthly) ⨝ freight services index (monthly) | Legacy 365-day lagged generator (preserved verbatim) | FRED + Alpha Vantage — raises `NotImplementedError` |
+| **L1** intra-agent | features within one agent | `agent.set_weights()` | yes |
+| **L2** inter-agent | agents against each other | `RiskEngine.weights` | yes |
+| **L3** thresholds | detection cutoffs, risk bands, agreement bonuses | `set_threshold()` + `RiskEngine` | yes |
 
-Mode is selected per-connector via `config["ingestion"]["{shipping,market}"]["source_mode"]`. `fetch()` routes to the configured branch, then runs `validate()` and logs a one-line summary (`rows`, `range`, `disruption_days`).
+`weight_mode` in `config/settings.yaml` selects `hand_tuned` (current default) or `optimized`.
 
-**Shipping CSV-mode derived columns** — `vessel_count` (sum across types), `tanker_count` (most Hormuz-sensitive class), `vessel_count_7dma` (passthrough), `congestion_index = clip(1 − vessel_count / rolling_30d_mean, 0, 1)`, `avg_delay_hours = clip(4.0 × rolling_mean / max(vessel_count, 0.1), 1, 72)`. Ground-truth `is_disruption` fires when `vessel_count < rolling_mean − 2σ` persists ≥ 3 consecutive days OR the date lies within the known April-May 2026 Strait of Hormuz shutdown window.
-
-**Market CSV-mode pipeline** — Build a daily index from Brent's range, left-join PPI + services, forward-fill weekends/holidays, **rebase** the freight PPI so the trailing 2 years average to 100 (otherwise the 1988 baseline value of 100 sits decades below the 2026 value of ~440, breaking comparability), derive `trade_volume_index = clip(1 − minmax(rolling_30d_std(brent)), 0, 1)`, label `is_disruption` where Brent > μ + 2σ **and** freight > μ + 1.5σ simultaneously.
-
-**Alignment** — `MarketConnector.align_with_shipping(shipping_df, market_df)` filters market data to the shipping date range, reindexes onto the shipping timestamp grid, and forward/back-fills gaps. This is what the orchestrator calls before merging.
-
-**`validate()` contract change** — Both connectors now return a cleaned `DataFrame` (sorted, small gaps ffilled) instead of a `bool`, and assert on hard schema/domain breaks. `fetch_and_validate()` is overridden so the base-class implementation's `if not validate(df)` truthiness check is bypassed.
-
-### Hybrid Agent Feature Discovery
-
-Both agents now **auto-discover** real-data columns at fit time and adapt their feature set without changing the public schema for synthetic mode.
-
-**`ShippingAgent`** picks up `tanker_count` (the most Hormuz-sensitive vessel class) and derives `vessel_count_trend = vessel_count − vessel_count_7dma` when those columns are present. The active feature set grows from 3 (synthetic) to 5 (real), `_ZSCORE_NAME_MAP` adds `tanker_zscore` and `trend_zscore` to the output schema, and the location stamp switches to `"Shuaiba Port, Persian Gulf"`. `run()` now logs a `[ShippingAgent.eval]` confusion matrix + precision / recall / F1 / TPR / FPR line when ground truth is available.
-
-**`MarketAgent`** picks up `freight_services_pct_change` and switches its weight schedule from `(0.40 / 0.35 / 0.25)` to `(0.35 / 0.30 / 0.20 / 0.15)`. `preprocess()` applies a trailing **recent-baseline clip** (default `baseline_years=5`) before rolling stats — without it, the rolling 30-day mean over the 1987-1998 $20/bbl regime would be ~1/5 of the post-2022 $90/bbl regime and pollute the anomaly baseline. Location switches to `"Global/Persian Gulf"`. The oil-led validation gate (`oil AND [trade OR freight]`) is kept identical so that synthetic-mode behaviour and existing tests are unaffected.
-
-Backwards compatibility is enforced by tests: the 3-feature synthetic path still yields the original schema, the original `_feature_columns` tuple, and the original `"Strait of Hormuz"` location.
-
-### Orchestrator
-
-`src/orchestrator.py` now owns the connectors and exposes three entry points:
-
-- **`ingest()`** — fetch both feeds, call `align_with_shipping()`, left-join on `timestamp`, rename market's `is_disruption` to `market_is_disruption` (so shipping ground truth survives the merge), back-fill `oil_price_usd` from `brent_crude_usd`.
-- **`run_full_pipeline()`** — ingest → run each registered agent via `run_dataframe()` + `to_detection_result()` (falling back to `detect()` for legacy agents) → aggregate via `RiskEngine` → return `{composite_score, risk_level, agent_scores, data, shap, context}`.
-- **`run_timeseries_analysis()`** — run every agent, collect per-row `anomaly_score` into `<agent>_score` columns, compute a daily weighted `composite_score`, bucket into `risk_level`.
-
-**Graceful degradation.** `_safe_fetch()` catches `FileNotFoundError` / `ValueError` from a connector, flips its `source_mode` to `synthetic`, and retries. `_warn_if_market_coverage_short()` logs a warning when raw market data doesn't span the shipping range. The legacy `run(df)` entry point is preserved unchanged so the four pre-existing scenario tests still pass.
-
-### CLI Entrypoint
-
-`main.py` keeps the original `load_config()` and `setup_logging()` and adds:
-
-```bash
-python main.py                    # CSV mode (from config), prints summary box
-python main.py --mode synthetic   # override both connectors to synthetic
-python main.py --serve            # uvicorn src.api.endpoints:app on settings.yaml host/port
-```
-
-Pipeline run sequence:
-
-1. **INGEST** — `Orchestrator._safe_fetch()` on both connectors, then `align_with_shipping()` + merge.
-2. **DETECT** — `_run_agent_safe()` wraps each agent in try/except, captures `len(agent.run(df))` for the windows tally and `agent.to_detection_result(agent.run_dataframe(df))` for aggregation.
-3. **AGGREGATE** — `RiskEngine.aggregate(detection_results)`.
-4. **SUMMARY** — always printed (even on partial failure), example real-CSV output:
-
-```
-╔══════════════════════════════════════╗
-║   SUPPLY CHAIN DSS — RISK SUMMARY    ║
-╠══════════════════════════════════════╣
-║  Risk Score : 0.52                   ║
-║  Risk Level : MEDIUM                 ║
-║  Shipping   : 0.37  (w=0.40)         ║
-║  Market     : 0.71  (w=0.30)         ║
-║  Agreement  : 2 agents               ║
-║  Windows    : ship=96 mkt=72         ║
-╚══════════════════════════════════════╝
-```
-
-`main()` reconfigures `sys.stdout` / `sys.stderr` to UTF-8 so the box-drawing characters render under Windows `cp1252`.
-
-### Real-Data Evaluation Results
-
-| Component | Config | Result |
-|---|---|---|
-| `ShippingAgent` on Shuaiba CSV (2,699 days, 52 ground-truth disruption days) | `contamination=0.05`, `threshold=0.55`, `z_threshold=2.0` | **TPR=0.827, FPR=0.060**, precision=0.214, 96 anomaly windows; the April-May 2026 shutdown is recovered in full |
-| `MarketAgent` on FRED CSV (1,826 scored days after `baseline_years=5` clip, 29 ground-truth disruption days) | `z_threshold=1.5`, `threshold=0.50`, `baseline_years=5` | **TPR=0.966, FPR=0.184**, 73 anomaly windows over 4 active features |
-| End-to-end pipeline on real merged data | default config | composite=0.52 (MEDIUM); 98 CRITICAL / 427 HIGH / 936 MEDIUM / 1,232 LOW days across 2019-2026 |
-
-### Historical-Event Scenario Tests
-
-`tests/test_scenarios.py` adds four named tests verifying the orchestrator behaves sanely across known windows in the real record (conservative thresholds, `market.baseline_years=10` so the 2019 and 2020 windows actually have a baseline):
-
-| Test | Window | Assertion | Empirical result |
-|---|---|---|---|
-| `test_2026_hormuz_shutdown` | Mar-May 2026 | ≥ 25% of days at HIGH/CRITICAL, peak composite ≥ 0.60 | 31/83 (37%) escalated, peak 0.92 |
-| `test_2019_tanker_attacks` | Jun-Jul 2019 | ≥ 5 days at MEDIUM+ | 20 elevated days, avg 0.340 |
-| `test_normal_period_2023` | Jan-Jun 2023 | ≥ 50% LOW, ≤ 5% CRITICAL | 114/181 (63%) LOW, 0% CRITICAL |
-| `test_covid_impact` | Mar-Apr 2020 | ≥ 5 days at MEDIUM+ | 25 elevated days, avg 0.391 |
-
-### Test Coverage (Phase 2.1)
-
-| File | Tests | Coverage |
-|---|---|---|
-| `tests/test_ingestion.py` | 49 | shipping CSV/synthetic/API + validate (`assert`-style) + `test_synthetic_fallback`; market CSV/synthetic/API + alignment + cross-correlation on real data (`r = −0.085` for brent ↔ vessel_count) |
-| `tests/test_agents.py` | 25 | 5 ABC + 9 shipping (4 synthetic + 5 real-data including feature discovery, location override, signal-key extras) + 11 market (4 synthetic + 7 real-data including weight redistribution and baseline clip) |
-| `tests/test_scenarios.py` | 17 | 4 legacy + 9 hybrid orchestrator + 4 historical-event |
-| `tests/test_risk_engine.py` | 7 | unchanged from Phase 0 |
-| **Total** | **108 / 108 passing** | |
-
-### Configuration Additions (`config/settings.yaml`)
-
-```yaml
-ingestion:
-  shipping:
-    source_mode: "csv"             # csv | synthetic | api
-    csv_path: "data/raw/shuaiba_arrivals.csv"
-    vessel_type_columns: [Container, "Dry Bulk", "General Cargo", "Roll-on/roll-off", Tanker]
-    api:
-      endpoint: "wss://stream.aisstream.io/v0/stream"
-      key: null
-      bounding_box: {lat_min: 28.95, lat_max: 29.20, lon_min: 48.05, lon_max: 48.25}
-  market:
-    source_mode: "csv"
-    brent_crude_path: "data/raw/brent_crude.csv"
-    freight_ppi_path: "data/raw/freight_ppi.csv"
-    freight_services_path: "data/raw/freight_services.csv"
-    api:
-      fred_endpoint: "https://api.stlouisfed.org/fred"
-      fred_key: null
-      alpha_vantage_key: null
-```
-
----
-
-## Phase 2.2 — Four New Domain Agents
-
-> **Summary.** Four new signal domains land the pipeline at six active agents.
-> Adds: `GeopoliticalConnector` + `GeopoliticalAgent`, `DisasterConnector` + `DisasterAgent`, `RoutingConnector` + `RoutingAgent`, `NewsConnector` + `NewsAgent`. Every new connector exposes the three-mode `data_mode` ∈ {`synthetic`, `csv`, `api`} dispatcher (API stubbed with planned-integration docstrings); every new agent emits the unified anomaly-window dict and a `DetectionResult` so `RiskEngine.aggregate()` accepts all six agents unchanged. Six-agent weight split (shipping 0.25, market 0.15, geopolitical 0.25, natural_disaster 0.10, routing 0.15, news_sentiment 0.10). 27 new tests in `tests/test_new_agents.py` including a 6-agent integration ranking Scenario B > Scenario A > normal. **135/135 tests passing.**
-
-This session brought the multi-agent architecture to its full six-agent breadth. Where Phase 2 covered the *physical-flow* (shipping) and *price-side* (market) axes, this phase fills in **geopolitical**, **natural-disaster**, **routing**, and **news-sentiment** — each with its own bespoke detection strategy, each leading or lagging the shipping disruption by an agent-specific delay so the orchestrator sees realistic propagation behaviour. No existing module was changed: the six agents are additive.
-
-### Three-Mode Data Ingestion (applies to all four new connectors)
-
-Every new connector dispatches on `data_mode` in its config block under `agents.{name}` in `settings.yaml`:
-
-```yaml
-agents:
-  geopolitical:
-    data_mode: "synthetic"   # Options: "synthetic" | "csv" | "api"
-    csv_path: "data/raw/geopolitical_events.csv"
-    api:
-      provider: "acled"
-      base_url: "https://api.acleddata.com/acled/read"
-      api_key: ""
-```
-
-- **`synthetic`** — internal numpy generator with seedable RNG; injects scenarios aligned with the existing shipping windows (days 60-74 / 150-170 / 280-290), each shifted by an agent-specific `lead_days` so tensions / rerouting / news / disasters arrive *before* port-side congestion.
-- **`csv`** — load a user CSV at `csv_path`; schema + range validation raises `ValueError` on failure.
-- **`api`** — `NotImplementedError` with a docstring that names the planned source, endpoints, and aggregation steps. No external keys required for any current testing.
-
-### Agent Summary
-
-| Domain | Detection method | Key features | Validation gate | Scenarios it drives |
-|---|---|---|---|---|
-| **Geopolitical** | Weighted composite + sigmoid compression (gain 6, centred at 0.5) | `sanctions_severity` / `military_activity_index` / `diplomatic_incident_score` / `regime_stability_index` (inverted) | ≥ 3-day persistence AND ≥ 2 of 4 features elevated above 0.40 | A, B, C — leads shipping by 3 days |
-| **Natural disaster** | Weighted composite OR any single feature ≥ 0.40 | `earthquake_severity` / `tsunami_risk` / `cyclone_severity` / `severe_weather_index` (proximity-decayed: full weight ≤ 500 km, zero ≥ 1,500 km) | Single-day valid (a M6.5 quake on day N is itself the signal); min severity 0.10 to suppress baseline tremor noise | **B only** — single M6.5 quake at day 148, 200 km from Strait |
-| **Routing** | Isolation Forest baseline (contamination 0.08, n_estimators 200) + transit-ratio z-score | `rerouting_percentage` / `avg_route_deviation_km` / `transit_volume_ratio` / `vessels_holding` / `alternative_route_traffic` | ≥ 2-day persistence AND `rerouting_percentage` ≥ 10 %; versioned model id `hormuz_v1.0` | A, B, C — leads shipping by 2 days |
-| **News sentiment** | Threshold detector — `0.40 × neg_sent + 0.25 × consensus + 0.20 × velocity + 0.15 × volume_spike` | `sentiment_score` / `sentiment_magnitude` / `source_consensus` / `article_volume` / `recency_weighted_score` / `dominant_narrative` | ≥ 2-day persistence AND recency-weighted sentiment ≤ −0.30 AND `source_consensus` ≥ 0.40 | A, B, C — leads shipping by 2 days |
-
-The **disaster-only-fires-on-B** asymmetry is deliberate: it lets the orchestrator demonstrate selective attribution (Scenario B = Hormuz disruption *with* a natural cause; Scenarios A and C = pure geopolitical / market / news events with no disaster involvement).
-
-### Synthetic-Mode Output Schemas
-
-All four connectors emit `timestamp` + the source-specific feature columns + a `composite_*_risk` rollup + `is_disruption` (ground truth). The geopolitical and disaster connectors additionally carry a JSON-encoded list of free-text incidents (`flagged_incidents` / `active_events`) that survive into the agent's per-window report:
-
-```python
-{
-  "agent": "geopolitical",
-  "anomaly_score": 0.78,
-  "confidence": 0.65,
-  "signals": {
-    "sanctions_severity": 0.72,
-    "military_activity_index": 0.81,
-    "diplomatic_incident_score": 0.45,
-    "regime_stability_index": 0.38,
-  },
-  "flagged_incidents": [
-    "Comprehensive sanctions package targeting maritime exports",
-    "Major naval deployment to Gulf chokepoint reported",
-  ],
-  "start_timestamp": "2025-05-25",
-  "end_timestamp":   "2025-06-29",
-  "location":        "Strait of Hormuz",
-}
-```
-
-### Six-Agent Weight Split
-
-`settings.yaml` now reflects the production weight distribution (sums to 1.0):
-
-```yaml
-weights:
-  shipping:         0.25
-  market:           0.15
-  geopolitical:     0.25
-  natural_disaster: 0.10
-  routing:          0.15
-  news_sentiment:   0.10
-```
-
-`RiskEngine` auto-renormalises when any agent is toggled off via `agents.{name}.enabled: false`, so the orchestrator stays valid in any sub-configuration.
-
-### Test Coverage (Phase 2.2)
-
-`tests/test_new_agents.py` — 27 new tests, all passing:
-
-| Layer | Per agent | Coverage |
-|---|---|---|
-| Connector — synthetic mode | 1-3 tests | Schema (8-9 columns), value ranges, disruption-day count, scenario placement (e.g. disaster-only-in-B, Scenarios A/C clean) |
-| Connector — CSV mode | 1 test | Round-trip via `save_raw()` + `load_csv()` on a tmp_path target |
-| Connector — API mode | 1 test | `NotImplementedError` raised |
-| Agent — detection | 1 test | Mean `anomaly_score` on disruption days > 1.5-2× normal mean |
-| Agent — output schema | 1 test | Window dicts contain `agent`, `anomaly_score`, `confidence`, `signals`, domain-specific extras, timestamps, location |
-| **6-agent integration** | 1 test | All six agents fit on synthetic data, fed to `RiskEngine.aggregate()`, per-day weighted composite ranks **Scenario B > Scenario A > normal** with Scenario B ≥ 0.40 |
-
-Full project: **135/135 tests passing.**
-
-### Configuration Additions (`config/settings.yaml`)
-
-```yaml
-agents:
-  geopolitical:
-    enabled: true
-    data_mode: "synthetic"
-    detection_method: "weighted_composite"
-    threshold: 0.5
-    lead_days: 3
-    weights: {sanctions: 0.35, military: 0.25, diplomatic: 0.25, stability: 0.15}
-  natural_disaster:
-    enabled: true
-    data_mode: "synthetic"
-    detection_method: "weighted_composite"
-    threshold: 0.30
-    single_event_threshold: 0.40
-    weights: {earthquake: 0.35, tsunami: 0.30, cyclone: 0.20, severe_weather: 0.15}
-    proximity:
-      center_lat: 26.5
-      center_lon: 56.5
-      full_weight_radius_km: 500
-      decay_radius_km: 1500
-  routing:
-    enabled: true
-    data_mode: "synthetic"
-    detection_method: "isolation_forest"
-    contamination: 0.08
-    threshold: 0.55
-    min_rerouting_pct: 10
-    model_version: "hormuz_v1.0"
-    lead_days: 2
-  news_sentiment:
-    enabled: true
-    data_mode: "synthetic"
-    detection_method: "sentiment_threshold"
-    negative_threshold: -0.30
-    consensus_threshold: 0.40
-    volume_spike_multiplier: 2.0
-    threshold: 0.40
-    weights: {sentiment: 0.40, consensus: 0.25, velocity: 0.20, volume: 0.15}
-    location_context:
-      primary_location: "Strait of Hormuz"
-      region: "Persian Gulf"
-      countries: ["Iran", "Oman", "UAE", "Saudi Arabia"]
-      topics: ["shipping", "oil", "tanker", "sanctions", "military", "blockade"]
-```
-
-(API sub-blocks for ACLED / USGS+Ambee / Kpler / NewsAPI+GDELT are present but blank — see `config/settings.yaml` for the full set.)
-
-### What's Next
-
-The new agents are not yet registered with the orchestrator's `run_full_pipeline()` — `python main.py` still drives the two-agent (shipping + market) path. Phase 3 will wire all six into the orchestrator's risk aggregation, Phase 5 will extend the SHAP explainer to the 6-agent feature space, Phase 6 will expand the RAG knowledge base with cases relevant to the new signal types, and Phase 7 will surface the new agent panels in a dashboard.
-
----
-
-## Phase 3 — Six-Agent Risk Aggregation
-
-> **Summary.** The six-agent architecture is wired end-to-end into the risk engine.
-> `Orchestrator.run_full_pipeline()` rebuilds so a single call drives all six agents: shipping + market on the merged daily frame, and geopolitical / natural-disaster / routing / news each on their own connector frame. Agents enabled in `config["agents"]` are auto-built and registered (honouring `weight_mode`), every `DetectionResult` flows into both `RiskEngine.aggregate()` (legacy keys) and `RiskEngine.compute_risk()` (agreement-amplified `risk_score` + `contributing_agents`), and the output carries a `metadata` block (`agents_active`, `data_modes`, `weight_mode`). `python main.py` now prints a JSON risk assessment with **all six agents contributing**, plus the summary box. **160/160 tests passing.**
-
-This session closes the gap flagged in Phase 2.2's *What's Next* — the four domain agents were built but never registered with the orchestrator, so `python main.py` still drove the two-agent path. This phase wires all six in; the weight search built in Phase 4 is later re-validated against this integrated pipeline.
-
-### Orchestrator Integration
-
-`Orchestrator.run_full_pipeline()` is now the single integration point. Its mechanics:
-
-- **Auto-registration** — `_build_enabled_agents()` constructs and registers every agent whose `agents.<name>.enabled` flag is true (default `true`), applying the active weight layout on registration so the roster always respects `weight_mode`. It only fires when no agents were registered manually, so the existing `register_agent(...)` test paths are unchanged.
-- **Domain-aware routing** — `_frame_for_agent()` sends shipping + market to the merged shipping⨝market frame and each of the four domain agents (geopolitical, natural_disaster, routing, news_sentiment) to its **own** connector frame via `fetch_domain()`. A disabled or failed connector returns `None` and the agent is simply skipped.
-- **Dual aggregation** — collected `DetectionResult`s are passed to both `RiskEngine.aggregate()` (legacy `composite_score` / `agent_scores`) and `RiskEngine.compute_risk()` (the richer `risk_score` / `contributing_agents` / `agent_agreement` / `reason`, with the 3-agent → 1.15× and 5-agent → 1.25× agreement bonus active).
-- **Graceful degradation** — every agent and connector call is wrapped; one failure is logged and skipped, never aborting the run.
-- **Run metadata** — the output gains a `metadata` block reporting `agents_active` (agents that ran successfully), `data_modes` (each agent's ingest mode), and `weight_mode`.
-
-`run_timeseries_analysis()` received the same auto-registration + domain-aware frame routing so the per-day composite series also spans all six agents.
-
-### CLI Output
-
-`main.py run_pipeline()` now delegates to `run_full_pipeline()` and prints a machine-readable JSON assessment followed by the human-readable box:
-
-```json
-{
-  "risk_score": 0.333,
-  "risk_level": "LOW",
-  "reason": "LOW risk. Primary driver: market (mean anomaly 0.71, 32% of weighted risk). 1 agent(s) above the alert threshold (0.50).",
-  "agent_agreement": 1,
-  "contributing_agents": {
-    "shipping":        {"score": 0.371669, "weight": 0.25, "contribution": 0.092917},
-    "market":          {"score": 0.710327, "weight": 0.15, "contribution": 0.106549},
-    "geopolitical":    {"score": 0.156497, "weight": 0.25, "contribution": 0.039124},
-    "natural_disaster":{"score": 0.066784, "weight": 0.10, "contribution": 0.006678},
-    "routing":         {"score": 0.428574, "weight": 0.15, "contribution": 0.064286},
-    "news_sentiment":  {"score": 0.234448, "weight": 0.10, "contribution": 0.023445}
-  },
-  "metadata": {
-    "agents_active": ["shipping", "market", "geopolitical", "natural_disaster", "routing", "news_sentiment"],
-    "data_modes": {"shipping": "csv", "market": "csv", "geopolitical": "synthetic", "natural_disaster": "synthetic", "routing": "synthetic", "news_sentiment": "synthetic"},
-    "weight_mode": "hand_tuned"
-  }
-}
-```
-
-The `market` agent — previously `enabled: false` — was switched on in `settings.yaml` so the default run exercises the full six. Disabling any agent (`agents.<name>.enabled: false`) removes it from the pipeline and `RiskEngine.compute_risk()` redistributes the remaining weights so they sum to 1.0.
-
-### Test Coverage (Phase 3)
-
-No production behaviour broke: the integration preserves every existing contract (legacy `run()` and `register_agent(...)` paths, the four historical-event scenarios, the no-leakage guarantee — agents still select their own feature columns and never consume `is_disruption`). Full project: **160/160 tests passing**, no regressions.
-
----
-
-## Phase 4 — Optuna Weight Optimization
-
-> **Summary.** Every learnable weight across the pipeline is now tunable by **Optuna**, evaluated on a proper train/validation/test split, with a one-line YAML switch between hand-tuned and optimized weights.
-> Adds: `src/optimization/` (`data_split.py`, `weight_optimizer.py`, `pipeline_evaluator.py`, `optimization_analysis.py`, `weight_config.py`), `config/optimized_weights.yaml`, `weight_mode` + `optimization` blocks in `settings.yaml`, `set_weights()` / `set_threshold()` on all six agents and `RiskEngine`, a `python main.py --optimize` CLI path, and `tests/test_optimization.py` (9 tests). All three weight layers are searched at once (Dirichlet-normalised), the detectors are **fit on train and scored on validation**, and the **test split is touched exactly once** for the headline number. On the initial 100-trial run (predating the Phase 3 six-agent wiring) the optimized weights lift test lead-time from **2.67 → 5.00 days** and F1 from **0.92 → 0.94** at near-zero FPR; the search is later re-run against the fully-integrated pipeline (see below). **154/154 tests passing.**
-
-Until now every weight in the system was hand-set: the six inter-agent aggregation weights, each agent's internal feature weights, and the risk / detection thresholds. This phase replaces guess-and-check tuning with a reproducible search that optimises all of them jointly against held-out data, and makes the result a drop-in via a config switch — so the thesis can report a defensible, generalisation-tested weight set rather than intuition.
-
-### The `weight_mode` switch
-
-A single key in `config/settings.yaml` selects which weights the whole pipeline uses:
-
-```yaml
-weight_mode: "hand_tuned"   # "hand_tuned" | "optimized"
-```
-
-- **`hand_tuned`** — weights come from `settings.yaml` exactly as before (zero behaviour change).
-- **`optimized`** — weights are loaded from `config/optimized_weights.yaml` (regenerated by Optuna). A missing or malformed file logs a warning and **falls back to hand-tuned**, so flipping the switch is always safe.
-
-`src/optimization/weight_config.py` is the single source of truth: `resolve_active_weights(config)` returns the active three-layer layout and records which source it used; `apply_weights_to_agent(agent, layout)` injects it. Both the `Orchestrator` (on `register_agent`) and `main.py` consume these, and `RiskEngine` honours `weight_mode` in its constructor.
-
-### Three weight layers, all searched at once
-
-| Layer | What it controls | Parameters |
-|---|---|---|
-| **Layer 1 — intra-agent** | Per-agent feature weights | shipping IF/Z blend · market oil/trade/freight · geo sanctions/military/diplomatic/stability · disaster earthquake/tsunami/cyclone/weather · routing model/transit · news sentiment/consensus/velocity/volume |
-| **Layer 2 — inter-agent** | `RiskEngine` aggregation weights | shipping · market · geopolitical · natural_disaster · routing · news_sentiment |
-| **Layer 3 — thresholds** | Risk + per-agent detection cutoffs | `risk_high` · `risk_medium` · `agreement_bonus_3/5` · per-agent thresholds (shipping, market-z, geo, disaster + single-event, routing, news negative/consensus) |
-
-Each weight **group** is suggested as raw values and then renormalised to sum to 1.0 (a Dirichlet-style parameterisation): the search space stays unconstrained while every injected weight set is valid by construction. Layers can be toggled independently via `optimization.parameter_space.{inter,intra,thresholds}_agent_weights`.
-
-### Train / validation / test by independent realisation
-
-`src/optimization/data_split.py` — `DataSplitManager`. Synthetic signals are *temporal* (one row per day, fixed disruption windows), so you cannot row-shuffle into splits without leaking the shape of a disruption and breaking every agent's rolling-window logic. Instead the manager generates **three independent realisations** of the same world by re-seeding all six connectors:
-
-| Split | Seed | Rows | Disruption days | Role |
-|---|---|---|---|---|
-| train | 42 | 365 | 47 | calibrates the Isolation-Forest baselines |
-| validation | 43 | 365 | 47 | the objective is scored here |
-| test | 44 | 365 | 47 | held out — touched once, for the thesis number |
-
-Same disruption structure (so the task is identical), different baseline noise (so a good weight set has *generalised*, not memorised). `validate_splits()` confirms each frame is 365 rows, the disruption-day count matches across splits, and the normal-day `vessel_count` series is genuinely decorrelated across splits (Pearson **r = 0.007**, well under the 0.5 ceiling). Ground truth is the shipping connector's `is_disruption` label and is **never** fed to an agent as input.
-
-### The objective
-
-`src/optimization/pipeline_evaluator.py` runs the full six-agent pipeline for a candidate weight set — **fit on the train realisation, score on the eval realisation** — and aggregates daily risk exactly as `RiskEngine.compute_risk` does (renormalised weighted mean + non-linear agreement bonus), so the number Optuna maximises is the number the live pipeline produces. Three metrics combine into the scalar objective:
-
-```
-objective = 0.50 · F1  +  0.30 · lead_time_score  −  0.20 · FPR
-```
-
-- **F1** — precision/recall of HIGH-risk alerts (`composite ≥ risk_high`) vs ground truth.
-- **lead_time_score** — earliest MEDIUM-level alert in the 5-day run-up to each disruption window, normalised by the 5-day horizon (a 5-days-early flag scores 1.0).
-- **FPR** — false-positive rate of HIGH-risk alerts, penalised.
-
-Hard constraints (`risk_high > risk_medium`, `agreement_bonus_5 > agreement_bonus_3`) short-circuit invalid trials to a sentinel score without evaluating, and `MedianPruner` early-stops weak trials.
-
-### Running it
-
-```bash
-python main.py --optimize              # full run (optimization.n_trials, default 100)
-python main.py --optimize --trials 30  # quick run
-```
-
-The run prints the split-summary table, executes the study, evaluates the best weights once on test, writes the artifacts, and renders the figures. Afterwards, set `weight_mode: "optimized"` to use the result.
-
-**Artifacts:**
-
-| File | Contents |
-|---|---|
-| `config/optimized_weights.yaml` | Best three-layer weight set (auto-generated header records trial, score, date) — consumed by `weight_mode: "optimized"` |
-| `data/processed/optimization_results.json` | Best trial, validation + **test** metrics, hand-tuned baseline metrics, deltas, full per-trial history *(gitignored)* |
-| `data/processed/*.png` | Optuna history / param-importances / parallel-coordinate / contour + weight-comparison + performance-comparison charts *(gitignored)* |
-
-### Results (100-trial run, TPE sampler, seed 42)
-
-Best trial 26 (validation objective 0.7435), 52 trials completed and 48 pruned. Final held-out **test** comparison:
-
-```
-┌─────────────────┬──────────────┬──────────────┬──────────────┐
-│ Metric          │ Hand-Tuned   │ Optimized    │ Improvement  │
-├─────────────────┼──────────────┼──────────────┼──────────────┤
-│ F1 (test)       │         0.92 │         0.94 │        +1.7% │
-│ Lead Time (days)│         2.67 │         5.00 │      +2.33d │
-│ FPR (test)      │         0.00 │         0.01 │      +new    │
-└─────────────────┴──────────────┴──────────────┴──────────────┘
-```
-
-The dominant gain is **early warning**: the optimizer trades a fraction of a percent of FPR for a 2.3-day improvement in mean lead time (saturating the 5-day horizon) — exactly the trade-off the objective's lead-time term is designed to reward for an early-warning DSS.
-
-### Pipeline integration
-
-- **All six agents** gained `set_weights(...)` and `set_threshold(...)`. The shipping IF/Z blend and market feature weights — previously module constants — became instance-overridable without changing default behaviour.
-- **`RiskEngine`** gained `set_weights(...)`, instance-level agreement-bonus multipliers, and `weight_mode` awareness in its constructor.
-- **`Orchestrator`** resolves the active layout on init and injects it into every registered agent.
-- **`main.py`** applies the active layout to the inline shipping/market/domain agents and adds the `--optimize` / `--trials` flags.
-
-### Test Coverage (Phase 4)
-
-`tests/test_optimization.py` — 9 new tests, all passing:
-
-| Test | Asserts |
-|---|---|
-| `test_data_splits` | Each split is 365 rows × 6 connectors, 47 disruption days, normal-day correlation < 0.5 |
-| `test_ground_truth_not_a_feature` | `is_disruption` is a boolean, timestamp-indexed evaluation label |
-| `test_parameter_space` | Inter and every intra weight group renormalise to 1.0; thresholds within bounds |
-| `test_parameter_space_disabled_layers_use_hand_tuned` | Disabled layers fall back to hand-tuned values verbatim |
-| `test_objective_function` | Objective returns a float and evaluates validation, never test |
-| `test_weight_mode_switch` | Hand-tuned vs a dummy optimized file load different weights → different composite risk |
-| `test_weight_mode_missing_file_falls_back` | Missing optimized file degrades gracefully to hand-tuned |
-| `test_optimization_short` | A 5-trial run writes `optimized_weights.yaml` + `optimization_results.json` with valid metrics |
-| `test_no_test_leakage` | The test split is never touched during `objective()` — only via the explicit final evaluation |
-
-Full project: **154/154 tests passing** (9 new, no existing test changed).
-
-### Configuration Additions (`config/settings.yaml`)
-
-```yaml
-weight_mode: "hand_tuned"        # "hand_tuned" | "optimized"
-
-optimization:
-  enabled: true
-  n_trials: 100
-  timeout_seconds: 3600
-  sampler: "tpe"                 # "tpe" | "cmaes"
-  pruner: "median"
-  direction: "maximize"
-  seeds: {train: 42, validation: 43, test: 44}
-  objective_weights: {f1: 0.50, lead_time: 0.30, fpr_penalty: 0.20}
-  parameter_space:
-    inter_agent_weights: true    # Layer 2
-    intra_agent_weights: true    # Layer 1
-    thresholds: true             # Layer 3
-    detection_params: false      # IF contamination / z-thresholds (expensive)
-```
-
----
-
-### Re-Validation on the Six-Agent Pipeline
-
-The run above predates the Phase 3 orchestrator wiring. Once all six agents were integrated into `RiskEngine`, the search was re-run to confirm the tuned weights still hold against the fully-integrated pipeline. Two findings worth recording:
-
-- **No optimizer changes were needed.** `WeightOptimizer.define_parameter_space()` already searched all six inter-agent weights, all six intra-agent weight groups, and every threshold; `PipelineEvaluator` already built all six agents and applied the agreement bonus. Steps 2–3 of the re-run were verification, not code.
-- **The search is deterministic** (TPESampler `seed=42`, split seeds 42/43/44), so the re-run reproduced best trial 26 with byte-identical weights — only the YAML header date changed. The prior 2-agent-era artifacts were preserved as `config/optimized_weights_2agent_backup.yaml` and `data/processed/optimization_results_2agent_backup.json`.
-
-Held-out **test** comparison under the integrated pipeline (best trial 26, validation objective 0.7435, 52/100 trials completed after median pruning):
-
-| Metric (test) | Hand-Tuned | Optimized | Δ |
-|---|---|---|---|
-| F1 | 0.956 | 0.935 | −0.021 |
-| Lead time (days) | 2.67 | **5.00** | **+2.33** |
-| FPR | 0.000 | 0.006 | +0.006 |
-| **Blended objective** (F1·0.5 + lead·0.3 − FPR·0.2) | 0.638 | **0.766** | **+0.128** |
-
-The optimizer maximises the blended objective, not raw F1: it trades ~2 F1 points for **nearly doubling early-warning lead time** (2.7 → 5.0 days, saturating the horizon), lifting the composite objective by +0.128 — the intended trade-off for an early-warning DSS. `weight_mode` stays `hand_tuned` by default; flip to `optimized` in `settings.yaml` to use the tuned set. Full project at this point: **160/160 tests passing**, no regressions.
-
----
-
-## Phase 5 — SHAP Explainability
-
-> **Summary.** SHAP explainability expanded from 2-agent to the full 20-feature, 6-agent space. A `SurrogateShapExplainer` trains a Random Forest surrogate to reproduce the pipeline's composite risk score, then applies `shap.TreeExplainer` for exact Shapley values. Surrogate R² = **0.991** on 364 synthetic days. `run_full_pipeline()` now populates `output["explanation"]` with top-3 drivers, expected value, natural-language text, and surrogate R². **165/165 tests passing** (5 new SHAP tests in `tests/test_shap_6agent.py`).
-
-### Feature Space
-
-20 canonical SHAP features map across 6 agent domains:
-
-| Domain | Features |
-|---|---|
-| `shipping` | `vessel_count`, `avg_delay_hours`, `congestion_index` |
-| `market` | `brent_crude_usd`, `trade_volume_index`, `freight_rate_index` |
-| `geopolitical` | `sanctions_severity`, `military_activity_index`, `diplomatic_incident_score`, `regime_stability_index` |
-| `natural_disaster` | `earthquake_severity`, `tsunami_risk`, `cyclone_severity`, `severe_weather_index` |
-| `routing` | `rerouting_percentage`, `avg_route_deviation_km`, `transit_volume_ratio` |
-| `news_sentiment` | `sentiment_score`, `source_consensus`, `article_volume` |
-
-`ALL_FEATURE_NAMES` (list, length 20) and `FEATURE_AGENT_MAP` (dict mapping each feature to its domain) are module-level constants in `src/explainability/shap_explainer.py` and shared with the orchestrator.
-
-### `SurrogateShapExplainer`
-
-A wrapper around `RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)` and `shap.TreeExplainer`:
-
-- **`train_surrogate(features_df, risk_scores)`** — trains the surrogate; logs a warning if R² < 0.85. Returns R² (0.991 on the 364-day synthetic dataset).
-- **`explain(features_row)`** — returns `{shap_values, top_drivers, feature_names, expected_value}`. `top_drivers` is a list of 3 dicts, each `{feature, agent, shap_value}`.
-- **`generate_explanation_text(risk_score, risk_level, weight_mode, shap_result)`** — produces a natural-language sentence such as: `"Risk is HIGH (0.82) [hand_tuned weights]. Primary drivers: brent_crude_usd (market, +0.21), vessel_count (shipping, +0.14), sentiment_score (news_sentiment, +0.09)."`.
-- **`generate_shap_plot(features_df, risk_scores)`** — saves `shap_beeswarm_6agent.png` and `shap_waterfall_6agent.png` via Matplotlib Agg; returns file paths.
-
-### `build_shap_training_data(config)`
-
-Generates a 364-day training dataset from all 6 connectors:
-
-- Feature values come from **raw connector frames** (not scaled agent outputs), preserving interpretable real-world ranges.
-- Anomaly scores come from each agent's `run_dataframe()` output for the per-day risk target.
-- Market agent outputs 364 rows (one dropped for rolling window); all domains aligned to 364 via `iloc[-n:]`.
-- Disabled agents contribute zero-filled columns so the matrix is always (364, 20).
-
-### Orchestrator Integration
-
-`run_full_pipeline()` populates `output["explanation"]` after the risk score is computed:
-
-```json
-{
-  "explanation": {
-    "top_drivers": [
-      {"feature": "brent_crude_usd", "agent": "market",        "shap_value": 0.214},
-      {"feature": "vessel_count",    "agent": "shipping",       "shap_value": 0.138},
-      {"feature": "sentiment_score", "agent": "news_sentiment", "shap_value": 0.091}
-    ],
-    "expected_value": 0.312,
-    "text": "Risk is MEDIUM (0.55) [hand_tuned weights]. Primary drivers: brent_crude_usd (market, +0.21), vessel_count (shipping, +0.14), sentiment_score (news_sentiment, +0.09).",
-    "surrogate_r2": 0.991
-  }
-}
-```
-
-The surrogate is lazy-trained once per `Orchestrator` instance (`self._shap_explainer`) and cached for all subsequent calls. Raw agent input frames are stored in `self._last_agent_frames` and used by `_build_shap_features_row()` to construct the current-state 20-column feature row for `explain()`. The entire SHAP block is `try/except` guarded — failure logs a warning and never aborts the pipeline.
-
-### Test Coverage (Phase 5)
-
-`tests/test_shap_6agent.py` — 5 tests:
-
-| Test | What it verifies |
-|---|---|
-| `test_surrogate_full_features` | R² > 0.85 on 20-feature synthetic data |
-| `test_explain_scenario_b` | High-anomaly row: top SHAP driver from an elevated-signal domain |
-| `test_explain_normal_day` | Zero input: total absolute SHAP < 1.0 |
-| `test_explanation_text_mentions_agents` | Text output contains known domain names |
-| `test_disabled_agent` | Zeroed routing columns: model still trains and produces a valid explanation |
-
----
-
-## Phase 6 — RAG Knowledge Base
-
-> **Summary.** The RAG knowledge base expanded to 10 real historical disruption cases covering all 6 signal domains. `ContextRetriever` was rebuilt around ChromaDB's built-in `DefaultEmbeddingFunction` (ONNX-backed all-MiniLM-L6-v2 — no HuggingFace download required at runtime). Three new methods handle index rebuild detection, 6-domain signal-profile queries, and readable context formatting. `run_full_pipeline()` now populates `output["historical_context"]` after the SHAP block. **170/170 tests passing** (5 new RAG tests in `tests/test_rag_6domain.py`).
-
-### Knowledge Base (`data/knowledge_base/disruption_cases.json`)
-
-10 real-world disruption cases committed to git. Each case contains:
-
-| Field | Type | Description |
-|---|---|---|
-| `id` | str | Unique slug (e.g. `"hormuz_2019"`) |
-| `event` | str | Human-readable event name |
-| `date` | str | ISO date |
-| `region` | str | Geographic region |
-| `description` | str | Narrative description |
-| `features` | dict | Quantitative signals: vessel count drop, delay factor, congestion peak, oil spike, rerouting %, geopolitical risk level, disaster involvement flag, sentiment drop |
-| `impact` | str | Economic/operational impact summary |
-| `duration_days` | int | Disruption duration |
-| `recovery_days` | int | Days to full recovery |
-| `primary_agents` | list[str] | Active signal domains (subset of the 6 agents) |
-| `lessons` | str | Key takeaway for early-warning systems |
-
-Cases cover all 6 domains: Hormuz tension (2019), Ever Given Suez Canal (2021), Houthi Red Sea attacks (2024), Hormuz mine threat (2010), Somali piracy (2011), Japan earthquake/tsunami (2011), COVID port congestion (2021), US West Coast port strikes (2014), Iran sanctions (2012), Cyclone Gonu (2007).
-
-### `ContextRetriever` Updates
-
-Three new methods alongside the legacy `load_knowledge_base()` / `retrieve()` path:
-
-**`build_index(kb_json_path)`** — count-based rebuild detection. If `collection.count() == len(cases)`, returns 0 (fast path, no re-embedding). Otherwise clears stale entries and rebuilds from scratch. ChromaDB auto-embeds via `DefaultEmbeddingFunction` when `add(documents=...)` is called.
-
-**`query(current_signals, top_k)`** — high-level entry point. Builds a natural-language query string from domains whose anomaly score exceeds 0.40, then delegates to `retrieve()`. Example for a shipping + geopolitical scenario:
-```
-"Supply chain disruption signals: high shipping disruption with vessel count reduction and transit delays;
-elevated geopolitical tension with sanctions, military activity, or diplomatic incidents."
-```
-Falls back to a generic normal-conditions string when no domain is active.
-
-**`format_context(results)`** — converts retrieval results to a numbered readable block:
-```
-Historical Precedents:
-1. [2019-06-01] Iran Strait of Hormuz Tension (similarity: 0.89) [Domains: shipping, geopolitical, news_sentiment]
-   Iran Strait of Hormuz Tension (2019-06-01). Region: Strait of Hormuz...
-```
-
-**Embedding backend:** Switched from `sentence-transformers` to ChromaDB's `DefaultEmbeddingFunction`. The ONNX model (79.3MB) is downloaded once to `~/.cache/chroma/onnx_models/` on first use; subsequent runs use the local cache with no network dependency. The `.chromadb/` persistence directory (`data/knowledge_base/.chromadb/`) is gitignored; `disruption_cases.json` is committed.
-
-### Orchestrator Integration
-
-`run_full_pipeline()` queries RAG after SHAP and writes results to `output["historical_context"]`:
-
-```json
-{
-  "historical_context": [
-    {
-      "id": "hormuz_2019",
-      "document": "Iran Strait of Hormuz Tension (2019-06-01). Region: ...",
-      "distance": 0.112,
-      "similarity": 0.888,
-      "metadata": {
-        "event": "Iran Strait of Hormuz Tension",
-        "date": "2019-06-01",
-        "primary_agents": "[\"shipping\", \"geopolitical\", \"news_sentiment\"]",
-        "duration_days": 45,
-        "geopolitical_risk_level": "critical"
-      }
-    }
-  ]
-}
-```
-
-`ContextRetriever` is instantiated per pipeline call; `build_index()` returns immediately on the fast path when case count is unchanged. The RAG block is `try/except` guarded — failure logs a warning and never aborts the pipeline.
-
-### Test Coverage (Phase 6)
-
-`tests/test_rag_6domain.py` — 5 tests (shared `scope="module"` ChromaDB fixture):
-
-| Test | What it verifies |
-|---|---|
-| `test_knowledge_base_completeness` | ≥ 10 cases, all 6 domains represented, all required fields present |
-| `test_query_scenario_b` | Multi-domain signals (ship=0.8, geo=0.85, disaster=0.7, routing=0.75, news=0.72): similarity > 0.6, top match covers ≥ 2 domains |
-| `test_query_geopolitical_only` | geo=0.90, others low: top result has `"geopolitical"` in `primary_agents` |
-| `test_query_disaster` | disaster=0.88, others low: at least one top-3 result has `"natural_disaster"` in `primary_agents` |
-| `test_format_context` | Output contains `"Historical Precedents:"`, `"similarity:"`, and known event keywords |
-
----
-
-## Phase 7 — Live API Extraction Layer & Composite-Threshold RAG Gating
-
-> **Summary.** A new `src/extractors/` layer pulls real data from seven external APIs to populate a second ChromaDB collection (`live_extracted_context`), queried alongside the static `disruption_cases` collection. `ContextRetriever` gained `query_gated()` — historical-precedent lookup now fires only when the composite risk score clears a configurable threshold (default `0.65`), instead of running unconditionally on every pipeline call. `DisasterConnector.fetch_api()` went from a stub to a real live-scoring path against the Ambee Disasters API. `ACLEDExtractor` was rewritten against ACLED's 2024+ OAuth scheme. A one-time historical backfill via SerpAPI's Google News engine populated **170 real documents** spanning 2007–2024 — the only source able to clear every other API's free-tier lookback cap. **203/203 tests passing** (26 new tests in `tests/test_extractors.py`, one outdated test fixed in `test_new_agents.py`).
-
-### Extraction Layer (`src/extractors/`)
-
-Each extractor subclasses `BaseExtractor` (rate limiting, `${VAR}`-style env-var resolution against `.env`, and a common ChromaDB document schema) and implements `extract_historical(region)` for one of the four chokepoints (`hormuz`, `red_sea`, `malacca`, `suez`):
-
-| Extractor | Covers | Source | Status / discovered limitation |
-|---|---|---|---|
-| `NewsAPIExtractor` | `news_sentiment` | NewsAPI.org `/v2/everything` | Free Developer plan rejects `from`/`to` older than ~30 days (`426 Upgrade Required`, confirmed live) — current/recent news only |
-| `SerpAPIExtractor` | all domains (case-dependent) | SerpAPI Google News engine | The only source with no lookback cap — `after:`/`before:` operators in the query string. Used for the one-time historical backfill (10 cases × 2 queries = 20 of 250 free monthly searches) |
-| `AmbeeExtractor` | `natural_disaster` | Ambee Disasters API | Primary source, replacing ReliefWeb. `/history` capped at ~30 days on this plan (`400`, "data older than one month, contact us"); falls back to `/latest` |
-| `ReliefWebExtractor` | `natural_disaster` | UN OCHA ReliefWeb | Kept as a fallback — blocked by a `403` until an appname is approved at apidoc.reliefweb.int |
-| `FREDExtractor` | `market` | FRED `/series/observations` | Pulls Brent/WTI/USD-index/HY-spread around 5 known disruption windows (2007–2024) |
-| `ACLEDExtractor` | `geopolitical` | ACLED via the `acled` PyPI client | Rewritten for ACLED's 2024+ OAuth scheme (24h access + 14-day refresh token, handled internally by `AcledClient`) — the legacy email+key query-param auth no longer works |
-| `AISStreamMonitor` | `shipping`, `routing` (live only) | aisstream.io WebSocket | `extract_historical()` always returns `[]` — no historical API exists; real-time vessel tracking only, disabled by default (`aisstream.enabled: false`) |
-
-**`KnowledgeBaseBuilder`** (`knowledge_base_builder.py`) orchestrates every extractor enabled in `extraction.enabled_extractors`: extract per chokepoint → deduplicate by document `id` → write a JSON backup (`data/knowledge_base/live_extracted_backup.json`, gitignored) → upsert into the `live_extracted_context` ChromaDB collection. Run it directly via `scripts/populate_knowledge_base.py [--extractors a,b,c]`.
-
-### `ContextRetriever.query_gated()` — dual-collection, threshold-gated lookup
-
-Added alongside the existing `query()`/`retrieve()`/`build_index()` methods (left untouched so `test_rag_6domain.py` keeps passing unmodified):
-
-```python
-def query_gated(
-    self,
-    current_signals: dict[str, float],
-    composite_risk_score: float,
-    top_k: int | None = None,
-    min_similarity: float | None = None,
-) -> dict | None:
-```
-
-- Returns `None` immediately if `composite_risk_score < rag.composite_threshold` (default `0.65`) — no embedding call, no ChromaDB query.
-- Otherwise queries **both** the static `disruption_cases` collection and the live `live_extracted_context` collection, merges results by similarity, drops anything below `rag.min_similarity` (default `0.55`), and returns:
-
-```json
-{
-  "triggered": true,
-  "composite_score": 0.82,
-  "threshold": 0.65,
-  "matches": [
-    {"source": "static", "text": "...", "similarity": 0.91, "metadata": {...}},
-    {"source": "live", "text": "...", "similarity": 0.74, "metadata": {...}}
-  ],
-  "formatted_summary": "Historical Precedents:\n1. [static] ..."
-}
-```
-
-`build_both_indexes(kb_json_path)` ensures both collections are populated and returns their document counts.
-
-### Orchestrator Integration (supersedes the Phase 6 example above)
-
-`run_full_pipeline()`'s RAG block now calls `query_gated()` instead of the old unconditional `query()`. `output["historical_context"]` is therefore **`None`** on most runs (composite score below threshold) and only becomes the `matches`/`formatted_summary` dict above once risk is genuinely elevated. Still `try/except` guarded — a RAG failure logs a warning and never aborts the pipeline.
-
-### `DisasterConnector.fetch_api()` — live Ambee scoring
-
-> ⚠️ **Superseded in Phase 13.** The Ambee path is dead: the key is valid but the endpoint returns zero documents for every region and window tested. `DisasterConnector.fetch_api()` now reads **GDACS + USGS** instead — see [Phase 13](#phase-13--live-data-wiring). `AmbeeExtractor` is retained but disabled in `_EXTRACTOR_CLASSES`. The description below is kept as a record of what was tried.
-
-Previously raised `NotImplementedError` unconditionally. Now, when `agents.natural_disaster.data_mode: "api"`:
-
-1. Queries Ambee `/disasters/latest/by-lat-lng` for every point in `monitoring_points[location]` (`location` defaults to `"hormuz"`; 4 chokepoints × 2–3 points each are pre-configured).
-2. Maps Ambee's two categorical fields onto `[0, 1]`: `severity = 0.6 * proximity_severity_level + 0.4 * default_alert_levels` (mapping table in `severity_mapping`) — a deliberate approximation, since Ambee exposes no magnitude/wind-speed number the way USGS would for earthquakes.
-3. Takes the worst-case severity per feature column across all points/events, derives `tsunami_risk` from any sufficiently severe earthquake event (damped ×0.7 — no real tsunami signal exists in this feed), and computes `composite_disaster_risk` via the same agent weights used elsewhere.
-4. Raises `ValueError` (not `NotImplementedError`) when no key/monitoring points are configured, so the orchestrator's existing fallback-to-synthetic path (which catches `ValueError`) applies automatically.
-
-Verified against the live API: returns a schema-valid row and correctly flagged `is_disruption=True` via a real M-something earthquake near Hormuz during testing.
-
-### Known free-tier limitations (discovered live, not assumed)
-
-| Source | Limitation | Evidence |
-|---|---|---|
-| NewsAPI | `from`/`to` capped to ~30 days on the free Developer plan | Live `426`: *"you may need to upgrade to a paid plan"* |
-| ReliefWeb | Requires a pre-approved `appname` | Live `403 AccessDeniedHttpException` |
-| Ambee | `/history` capped to ~30 days | Live `400`: *"For data older than one month, contact us!"* |
-| ACLED | Legacy email+key auth retired in favour of OAuth | Library rewrite required; no historical data without registered credentials |
-
-SerpAPI is the only one of the five with no such cap, which is why it carried the entire 2007–2024 historical backfill.
-
-> **Updated in Phase 13.** Two rows above have since been resolved, and one got worse:
-> - **ACLED** — OAuth was implemented (`ACLEDExtractor` owns the token lifecycle), so ACLED now serves both the knowledge base and the live geopolitical connector.
-> - **Ambee** — the 30-day cap turned out to be the lesser problem; the endpoint returns *zero* documents even inside the window. Replaced by GDACS + USGS, both keyless and both historical.
-> - **PortWatch** and **GDACS/USGS** were added precisely because they have no cap and need no credentials, which is what made a 2019–2026 evaluation set possible.
-
-### Test Coverage (Phase 7)
-
-`tests/test_extractors.py` — 26 tests, all HTTP calls mocked (no live network access required in CI):
-
-| Class | Covers |
-|---|---|
-| `TestBaseExtractor` | document normalization schema, rate limiting, `${VAR}` env-var resolution |
-| `TestNewsAPIExtractor` | article search + normalization, missing-key graceful empty |
-| `TestReliefWebExtractor` | disaster search parsing |
-| `TestFREDExtractor` | observation parsing, spike/volatility metrics |
-| `TestACLEDExtractor` | risk-profile classification, `AcledClient` transport delegation, client-error graceful empty |
-| `TestAISStreamMonitor` | historical always `[]`, empty-state metrics |
-| `TestAmbeeExtractor` | `/latest` ↔ `/history` response-key handling (`result` vs `data`), severity math, cross-point dedup |
-| `TestSerpAPIExtractor` | flat + grouped (`stories`) result handling, all-10-cases coverage, region/agent-domain completeness |
-| `TestKnowledgeBaseBuilder` | document deduplication by id |
-| `TestRAGCompositeThreshold` | `query_gated()` below/above threshold behaviour |
-
-Plus one updated test in `tests/test_new_agents.py`: `DisasterConnector(data_mode="api")` without an Ambee key now asserts `ValueError` (the real, intentional exception) instead of the old `NotImplementedError` stub.
-
-### Configuration Additions (`config/settings.yaml`)
-
-```yaml
-api_keys:
-  fred: "${FRED_API_KEY}"
-  newsapi: "${NEWSAPI_KEY}"
-  acled_username: "${ACLED_USERNAME}"
-  acled_password: "${ACLED_PASSWORD}"
-  aisstream: "${AISSTREAM_API_KEY}"
-  serpapi: "${SERPAPI_API_KEY}"
-
-extraction:
-  enabled_extractors: [newsapi, serpapi, ambee, fred, acled]
-  historical_range: {start_year: 2007, end_year: 2025}
-  chokepoints: {hormuz: {...}, red_sea: {...}, malacca: {...}, suez: {...}}  # countries + bounding boxes
-  rate_limits: {newsapi: 30, reliefweb: 60, ambee: 60, fred: 100, acled: 20, serpapi: 10}
-
-rag:
-  composite_threshold: 0.65   # query_gated() fires only above this
-  min_similarity: 0.55
-  collections: {static_cases: disruption_cases, live_context: live_extracted_context}
-
-agents.natural_disaster:
-  location: "hormuz"
-  severity_mapping: {proximity: {...}, alert: {...}, proximity_weight: 0.6, alert_weight: 0.4}
-  monitoring_points: {hormuz: [...], red_sea: [...], malacca: [...], suez: [...]}
-
-aisstream:
-  enabled: false   # live AIS WebSocket monitoring, off by default
-```
-
-All API keys/credentials live in `.env` (gitignored) and are resolved at runtime via `${VAR_NAME}` placeholders — see `src/extractors/base_extractor.py::resolve_env_value`.
-
----
-
-## Phase 8 — FastAPI Expansion (Full 6-Agent REST API)
-
-> **Summary.** The three-stub FastAPI layer is expanded to **10 production endpoints** exposing all 6 agents, weight-mode switching, per-agent toggling, optimization results, and background knowledge-base population. Module-level state (config dict + cached orchestrator instance) makes weight and agent changes persistent across requests without restarts. CORS is open (`*`) for thesis dashboard use. **215 tests passing** (12 new tests in `tests/test_api_6agent.py`).
-
-### Endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/health` | Extended liveness probe — reports all 6 agent names, active weight mode, ChromaDB doc count, timestamp |
-| `POST` | `/predict` | Run the full 6-agent pipeline; returns composite score, risk level, per-agent scores, contributing-agents breakdown |
-| `POST` | `/explain` | Run pipeline then return SHAP top-3 drivers + RAG historical context |
-| `GET` | `/agents` | List all 6 agents with name, enabled state, data mode, detection method, and current inter-agent weight |
-| `POST` | `/agents/toggle` | Enable or disable a named agent; rebuilds the cached orchestrator so the next `/predict` reflects the change |
-| `GET` | `/weights` | Return active weight mode, all 6 inter-agent weights, and detection thresholds |
-| `POST` | `/weights/switch` | Switch between `"hand_tuned"` and `"optimized"` weight modes; rebuilds the cached orchestrator |
-| `GET` | `/optimization/results` | Serve `data/processed/optimization_results.json` (Optuna output) or 404 if not yet generated |
-| `POST` | `/populate` | Kick off `scripts/populate_knowledge_base.py` as a non-blocking background task; returns `{"status": "started"}` immediately |
-| `GET` | `/status` | System-level status: per-agent enabled/data-mode state, both ChromaDB collection doc counts, last pipeline run timestamp, active weight mode |
-
-### Architecture
-
-All mutable pipeline state lives in three module-level variables:
-
-```python
-_config: dict = {}                  # loaded lazily from config/settings.yaml; mutated by toggle/switch
-_orchestrator: Orchestrator | None  # built lazily; set to None by _reset_orchestrator()
-_last_run_timestamp: str | None     # updated on every /predict or /explain call
-```
-
-`/agents/toggle` and `/weights/switch` mutate `_config` in-place, then call `_reset_orchestrator()` so the next request rebuilds the `Orchestrator` with the updated config. This pattern avoids a global lock while keeping the API stateful across requests.
-
-### Test Coverage (Phase 8)
-
-`tests/test_api_6agent.py` — 12 tests, all using `unittest.mock.patch` + `MagicMock` so the orchestrator is never actually invoked:
-
-| Test | What it verifies |
-|---|---|
-| `test_health_6agents` | Returns 200, lists all 6 agents, correct count |
-| `test_predict_6agents` | Returns composite score + 6 contributing_agents |
-| `test_explain_has_shap_and_rag` | `explanation.top_drivers` present, `historical_context.matches` ≥ 1 |
-| `test_agents_list` | All 6 agents listed with required keys |
-| `test_toggle_agent` | Toggle off → /agents shows 5 enabled; toggle on → 6 enabled |
-| `test_toggle_invalid_agent` | Unknown agent name → 422 |
-| `test_weights_endpoint` | 6 weights sum to 1.0, mode key present |
-| `test_weight_switch` | Switch to optimized → /weights reflects it; switch back → hand_tuned |
-| `test_weight_switch_invalid_mode` | Invalid mode string → 422 |
-| `test_optimization_results` | 200 with correct keys when file exists; 404 when missing |
-| `test_populate_returns_immediately` | Returns in < 5 s with `status: started` |
-| `test_status_endpoint` | Contains `agents`, `knowledge_base`, `last_pipeline_run`, `weight_mode` |
-
----
-
-## Phase 4 Depth — Thesis-Grade SHAP and RAG Evidence
-
-> **Summary.** Three new analysis methods added to `SurrogateShapExplainer` and one to `ContextRetriever` generate thesis-grade comparative evidence: hand-tuned vs. optimized SHAP driver comparison, explanation faithfulness measurement (score > 0.8), and RAG retrieval quality evaluation (overall_relevance > 0.7). **219 tests passing** (4 new tests in `tests/test_phase4_depth.py`).
-
-### New Methods
-
-#### `compare_explanations(features_df, risk_engine_ht, risk_engine_opt, features_row)` → `dict`
-
-Trains two SHAP surrogates — one using hand-tuned inter-agent weights, one using optimized weights — via `_proxy_risk_scores()` (direction-corrected, agent-weighted feature composites). For the selected feature row (default: day of maximum risk under hand-tuned weights) it returns:
-
-```json
-{
-  "hand_tuned":  {"top_drivers": [...], "shap_values": {...}, "r2": 0.84},
-  "optimized":   {"top_drivers": [...], "shap_values": {...}, "r2": 0.87},
-  "driver_rank_changes": [
-    {"feature": "vessel_count", "ht_rank": 1, "opt_rank": 3, "direction": "down"},
-    ...
-  ],
-  "weight_mode_impact": "Optimized weights shift emphasis from geopolitical (−13.1%) to shipping (+24.1%), promoting vessel_count from rank 1 to 3."
-}
-```
-
-`driver_rank_changes` is sorted by `|ht_rank − opt_rank|` and shows how the reweighting redistributes explanatory credit across features — the primary thesis comparison table.
-
-#### `generate_comparison_plot(features_df, save_dir, risk_engine_ht, risk_engine_opt)` → `list[str]`
-
-Calls `compare_explanations()` internally and saves two publication-ready figures to `data/processed/`:
-
-| File | Content |
-|---|---|
-| `shap_comparison_waterfall.png` | Side-by-side horizontal waterfall bars (top 10 features), hand-tuned left / optimized right |
-| `shap_comparison_importance.png` | Grouped bar chart of mean absolute SHAP per feature across all days (top 15 features) |
-
-#### `compute_faithfulness(features_df, risk_scores, ground_truth_disruptions)` → `float`
-
-Measures how reliably the surrogate's SHAP top-3 features correspond to genuinely anomalous signals on ground-truth disruption days:
-
-1. Build a per-feature baseline (mean + std) from non-disruption days only.
-2. Train a `SurrogateShapExplainer` on the full dataset.
-3. For each disruption day, retrieve the 3 features with highest `|SHAP|`.
-4. A feature is *faithful* when its value on that day deviates > 1.5 σ from the non-disruption baseline.
-5. Return `faithful_count / total_checks`.
-
-**Target: > 0.8.** Achieved via a fixture design that keeps the B-type features (`sanctions_severity`, `military_activity_index`, `vessel_count`) and C-type features (`earthquake_severity`, `tsunami_risk`, `rerouting_percentage`) disjoint, so the RF learns two orthogonal patterns and SHAP credit flows cleanly to the genuinely anomalous features on each disruption type.
-
-#### `ContextRetriever.evaluate_retrieval_quality(scenarios)` → `dict`
-
-Evaluates RAG retrieval quality across a list of labelled signal scenarios (each with `name`, `signals`, `expected_agents`):
-
-- Queries the knowledge base with `top_k=1` per scenario.
-- Parses `primary_agents` from ChromaDB metadata and checks set intersection with `expected_agents`.
-- Returns `{per_scenario: [...], overall_relevance: float, mean_similarity: float}`.
-
-**Target: overall_relevance > 0.7.**
-
-### Test Coverage (Phase 4 Depth)
-
-`tests/test_phase4_depth.py` — 4 tests using a 365-day synthetic fixture (`scope="module"`):
-
-| Test | What it verifies |
-|---|---|
-| `test_compare_explanations_scenario_b` | Day 155 (Scenario B peak): both surrogates valid, R² > 0.5, driver_rank_changes non-empty |
-| `test_faithfulness` | `compute_faithfulness()` returns > 0.8 on 47 disruption days |
-| `test_rag_quality` | `evaluate_retrieval_quality()` overall_relevance > 0.7 on 3 labelled scenarios |
-| `test_comparison_plots_saved` | Both PNGs exist and are non-empty after `generate_comparison_plot()` |
-
----
-
-## Phase 9a — Evaluation Suite (8 Metrics, incl. Decision Effectiveness / SRQ5)
-
-> **Summary.** A single executable script, `notebooks/evaluation.py`, produces the full thesis evidence bundle — eight metrics computed on the same train/validation/test realisations the optimizer used (seeds 42/43/44), reported side by side for the hand-tuned and optimized weight modes. The eighth metric, **Decision Effectiveness**, answers SRQ5 directly: it measures whether the system's risk score + explanation would actually lead a decision-maker to the *correct action*, not merely whether it detects and explains. New module `src/evaluation/decision_effectiveness.py` and auditable label file `data/knowledge_base/decision_labels.json`. **229 tests passing** (5 new tests in `tests/test_evaluation.py`, on top of the 5 detection/diversity tests added with the suite).
-
-Run it:
-
-```bash
-python notebooks/evaluation.py
-```
-
-It prints eight tables and writes two artefacts to `data/processed/` (gitignored, regenerated each run): `evaluation_results.json` (all raw metrics) and `thesis_comparison_table.json` (flattened for direct thesis use). It reuses the existing `PipelineEvaluator`, `DataSplitManager`, `compute_faithfulness`, and `ContextRetriever` — no core pipeline code was changed.
-
-### The Eight Metrics
-
-| # | Metric | What it measures | Headline result (hand-tuned, TEST) |
-|---|---|---|---|
-| 1 | Detection performance | Per-agent + system precision/recall/F1, both weight modes | System F1 = 0.956 |
-| 2 | Explainability faithfulness | SHAP top-3 vs. planted anomalies, both modes | 0.908 / 0.915 (target > 0.8) |
-| 3 | **Agent-diversity value** | 6-agent vs. 2-agent vs. 1-agent (F1 / lead / FPR) | 6-agent F1 0.956 › 1-agent 0.711 › 2-agent 0.610 |
-| 4 | Baseline comparison | Naive 2σ vs. hand-tuned vs. optimized | 0.522 vs. 0.956 vs. 0.935 |
-| 5 | **Weight-optimization impact** | Metric deltas + top-5 shifted params from `optimization_results.json` | F1 −0.024, lead +1.67 d, objective +0.088 |
-| 6 | RAG relevance | `evaluate_retrieval_quality()` on 3 scenarios | relevance 1.00, mean sim 0.656 |
-| 7 | Generalization | Validation vs. test for optimized weights | val F1 0.967 vs. test 0.935 — no overfit |
-| 8 | **Decision effectiveness (SRQ5)** | Predicted action vs. correct action | overall 0.866 (target > 0.75), > baseline 0.797 |
-
-Agent diversity (3) and optimization impact (5) reprise the two key findings from Phase 4; the ablation disables agents through the inter-agent weight mask, never by deleting code.
-
-### METRIC 8 — Decision Effectiveness (SRQ5)
-
-The rest of the suite measures *detection* and *explanation*. METRIC 8 measures the step that matters to a decision-maker: given the risk level, the SHAP drivers, and any retrieved historical precedent, would a human be led to the **correct action**?
-
-**Action space** (`src/evaluation/decision_effectiveness.py`): `["no_action", "monitor", "reroute", "escalate"]`.
-
-**Ground-truth labelling** comes from two auditable sources:
-
-- **10 historical RAG cases** — `derive_case_action()` maps each case's `impact` / `lessons` / feature fields to a correct action via a documented rubric (catastrophic disaster or sustained high-intensity geopolitical crisis → `escalate`; physical blockage with active rerouting → `reroute`; credible threat or gradual congestion → `monitor`). The result is persisted to `data/knowledge_base/decision_labels.json` (4 `escalate` / 4 `reroute` / 2 `monitor`) so labels are inspectable and manually correctable rather than buried in code.
-- **Synthetic Scenarios A/B/C** — `scenario_correct_action()` assigns correct actions by day range: Scenario A (moderate tension, days 60-74) → `monitor`; Scenario B (major blockage, days 150-170) → `reroute` at onset, `escalate` once risk stays HIGH for > 5 consecutive days; Scenario C (brief incident, days 280-290) → `monitor`; normal days → `no_action`.
-
-**Evidence → action mapper** — `predict_action(risk_level, top_shap_drivers, historical_context, sustained=False)` is a deliberately transparent rule set (not another ML model — decision support has to stay interpretable):
-
-- `low` → `no_action`; `medium` → `monitor`
-- `high` + sustained (HIGH > 5 consecutive days) → `escalate`
-- `high` + top driver agent in {routing, shipping} → `reroute`
-- `high` + top driver agent in {geopolitical, natural_disaster} with a > 0.75-similar case labelled `escalate` → `escalate`
-- otherwise → `monitor`
-
-It is robust to missing / `None` `historical_context` and empty drivers, and always returns a value in `ACTIONS`.
-
-**Result (hand-tuned, the default weight mode):** overall daily decision accuracy **0.866** (> 0.75 target) and **above the naive-baseline 0.797** — the baseline maps its threshold flags through the same `predict_action` logic but, lacking agent attribution, can never recommend `reroute` or `escalate`. Scenario B scores **1.00**. The confusion matrix and per-scenario breakdown are printed in full and expose a real calibration gap rather than hiding it: the pipeline **over-reacts** to moderate tension (Scenario A) and **under-reacts** to the brief incident (Scenario C). Optimized mode scores lower (0.49) because its lower risk thresholds over-alert on quiet days — reported honestly alongside hand-tuned.
-
-### Test Coverage (Phase 9a)
-
-`tests/test_evaluation.py` — 10 tests (`scope="module"` fixture that fits the agents once):
-
-| Test | What it verifies |
-|---|---|
-| `test_scenario_b_high_risk` | Scenario B reaches HIGH risk by day 151; all 6 agents fire |
-| `test_scenario_a_medium_risk` | Scenario A reaches ≥ MEDIUM; exactly 5 of 6 fire (not natural_disaster) |
-| `test_normal_period_low` | Days 100-130 raise no HIGH alert; mean risk below MEDIUM |
-| `test_6agent_beats_1agent` | 6-agent F1 ≥ 1-agent F1 (diversity adds value) |
-| `test_optimized_beats_handtuned` | Optimized objective + lead time improve (raw F1 is a deliberate trade-off) |
-| `test_decision_labels_complete` | `decision_labels.json` has all 10 cases, every value in `ACTIONS` |
-| `test_predict_action_valid_output` | `predict_action()` never crashes on missing/None input; always returns a valid action |
-| `test_decision_effectiveness_scenario_b` | Scenario B peak (day 155) predicts `reroute` or `escalate` |
-| `test_decision_effectiveness_beats_baseline` | Overall decision accuracy ≥ naive-baseline accuracy |
-| `test_decision_effectiveness_threshold` | Overall decision accuracy > 0.75 |
-
-> **Note on `test_optimized_beats_handtuned`.** Optimization is multi-objective (0.5·F1 + 0.3·lead − 0.2·FPR); on this dataset it trades ≈ 0.02 raw F1 for +1.7 days of early-warning lead time. The test therefore asserts the blended objective and lead time improve — the honest, reproduced result — rather than raw F1 in isolation.
-
----
-
-## Phase 9b — Streamlit Dashboard (Two-Page Redesign)
-
-> **Summary.** The final deliverable: a Streamlit dashboard split into **two pages for two audiences**. The **Decision View** is a single-viewport, plain-language operational page for a supply-chain manager — status words, a recommended action, a MapLibre GL JS pitched 3-D chokepoint map, and a natural-language risk explanation, with **no raw scores anywhere** (machine-verified by test). The **Analysis View** is a scrollable research page for the thesis author — all 8 Phase 9a metrics, raw signals, per-day SHAP values, and per-chart JPEG export for direct thesis use. The first dashboard version (a single tabbed page exposing raw technical scores) was restructured into this split after direct feedback; a follow-up revision replaced the original CesiumJS globe with the keyless MapLibre map. **243 tests passing** (14 in `tests/test_dashboard.py`).
-
-Run it:
-
-```bash
-streamlit run src/dashboard/app.py
-```
-
-### Architecture
-
-True Streamlit multipage via `st.navigation` over thin `pages/` shims; all logic lives in importable modules so pytest exercises it without a Streamlit runtime:
-
-| File | Role |
-|---|---|
-| `src/dashboard/app.py` | Entry point / router (`st.navigation`); re-exports the helper surface |
-| `src/dashboard/core.py` | Shared cached data layer, status-word mapping, routes/vessels/news, MapLibre map builder, narrative + JPEG helpers |
-| `src/dashboard/decision_view.py` | Page 1 render logic |
-| `src/dashboard/analysis_view.py` | Page 2 render logic |
-| `src/dashboard/pages/1_Decision_View.py`, `2_Analysis_View.py` | Thin page shims |
-| `.streamlit/config.toml` | Muted-dark analytical theme (risk colors reserved for risk) |
-
-The data layer scores the same **seed-44 held-out test split** every Phase 9a number is reported on (fit on train, score on test via `PipelineEvaluator`), so the dashboard and thesis tables agree by construction. Everything is cached with `st.cache_data` / `st.cache_resource` and shared across both pages.
-
-### Page 1 — Decision View (manager audience, no scrolling, no raw scores)
-
-- **Region selector** — only "Strait of Hormuz" is offered for the thesis, but every underlying fetcher (`get_routes` / `get_news` / monitoring points) accepts an arbitrary region key, so post-thesis chokepoints (red_sea / malacca / suez, already in `settings.yaml`) plug in by extending one dict.
-- **Risk trend** (top-left) — on-panel 30/90/180/365-day window control; the numeric y-axis is hidden and replaced with **Critical / High / Low status bands**; hover shows the status word, not the score. A diamond marker flags the most significant peak in the window; clicking it (or the Explain button) opens an inline **natural-language explanation** generated from the live SHAP drivers — via the Anthropic API when `ANTHROPIC_API_KEY` is set, otherwise a compositional fallback (one generic algorithm, not per-feature templates; no LLM client existed in the codebase to reuse). A "View full breakdown →" link deep-links the Analysis page to that day via shared session state.
-- **Interactive map** (centre) — a **MapLibre GL JS** pitched 3-D regional map (55° tilt, not a globe) that needs **no API key at all**: OpenFreeMap vector tiles for the base style, AWS Open Data terrarium DEM for `setTerrain()` 3-D relief, and conditional `fill-extrusion` 3-D buildings where the tile source carries height data. `MAPTILER_API_KEY` in `.env` is an *optional* upgrade (MapTiler dark style + terrain-RGB DEM). **Status-colored route lines** through the strait, the selected route highlighted, chokepoint markers, and vessel markers with detail popups. Vessel records are clearly-documented representative synthetic data (per-vessel AIS is not tracked; vessel classes are the shipping connector's real CSV types). Clicking a route on the map selects it in the app via a `?route=` query-param round-trip — plain `components.html` has no direct return channel to Streamlit.
-- **Route status** (top-right) — one row per monitored route with a word-only status pill (⚠ Critical / ▲ High / ✔ Low) and a Select button. The control strip, the status list, and the map all funnel through one `select_route()` state authority.
-- **Decision support + news** (bottom-right) — the `predict_action()` recommendation as a colored badge with a one-line rationale and **the exact rule that fired**, captioned "Rule-based recommendation, not an automated decision". The news feed reads the system's own Phase 7 extraction backup (real NewsAPI/SerpAPI articles, region-tagged — no live API quota burned per rerun) with a "This route / All regions" toggle.
-- **Routes are presentational scopes over real signals**: each route's trend is the pipeline's own renormalised weighted aggregation restricted to the agents most relevant to that corridor (the same masking mechanism as the diversity ablation) — no per-route analytics are invented.
-
-### Page 2 — Analysis View (thesis author, scrollable)
-
-Nine sections: (1) detection performance, (2) explainability faithfulness + SHAP comparison figures + an interactive per-day SHAP waterfall, (3) agent diversity, (4) baseline comparison, (5) optimization impact + top-5 shifted parameters, (6) RAG relevance, (7) generalization check **including the four held-out real-data disruption checks** from `tests/test_scenarios.py` (2026 Hormuz shutdown, 2019 tanker attacks, 2023 normal period, COVID), (8) decision effectiveness with the full confusion matrix, and (9) the interactive time-range explorer (presets, recompute button, summary CSV export).
-
-**Every chart has an "Export as JPEG" button** — the chart, its title, and its caption are flattened into one print-ready image (white background, 2× scale, via `kaleido`) for direct inclusion in the thesis document.
-
-### Test Coverage (Phase 9b)
-
-`tests/test_dashboard.py` — 14 tests (8 original smoke tests + 6 redesign tests):
-
-| Test | What it verifies |
-|---|---|
-| `test_decision_view_no_raw_scores` | Page 1's rendered text contains status words but **no raw metric decimals or technical vocabulary** (F1, z-score, congestion index, …) |
-| `test_route_selection_sync` | Control-strip radio and status-list buttons both drive the shared `selected_route` session state |
-| `test_decision_badge_valid_action` | The badge logic always yields a defined action; tolerates missing/None historical context |
-| `test_analysis_view_all_metrics_present` | Page 2 renders all 9 sections from `evaluation_results.json` with zero exceptions |
-| `test_jpeg_export_helper` | `fig_to_jpeg()` produces a valid JPEG (magic bytes) with title + caption flattened in |
-| `test_region_selector_hormuz_only` | Hormuz is the only offered region, but every fetcher accepts arbitrary region keys without raising |
-| *(+ 8 Phase 9b originals)* | Imports, monitoring-point validity, keyless map render (`test_map_renders_without_key` — OpenFreeMap/terrain/extrusion/pitch present, no key material leaked), `predict_action` reachability, range-preset mapping |
-
----
-
-## Phase 11 — Multi-Region Pipeline (4 Chokepoints)
-
-The pipeline runs against any of four maritime chokepoints, selected per run.
-Region awareness lives entirely in **configuration**: no class gained a `region`
-parameter, and `Orchestrator(config: dict)` is unchanged and region-agnostic.
-
-| Region key | Chokepoint | Documented driver |
-|---|---|---|
-| `hormuz` *(default)* | Strait of Hormuz | Apr–May 2026 shutdown; oil/gas transit |
-| `panama` | Panama Canal | Gatún Lake drought → transit-slot cap |
-| `bab_el_mandeb` | Bab el-Mandeb | Red Sea security campaign → Cape diversion |
-| `malacca` | Strait of Malacca | Transboundary haze; piracy |
-
-### Architecture
-
-**Config is merged at the call site**, not inside the Orchestrator:
-
-```
-config/settings.yaml  ──┐
-                        ├─► _deep_merge ─► _project_region_settings ─► Orchestrator(config)
-config/regions/X.yaml ──┘
-```
-
-`src/core/config_manager.py` does this in two steps:
-
-1. **Merge** — recursive dict merge. The overlay's `agents.<key>.enabled` lands
-   on the flag `Orchestrator.__init__` already reads to decide whether to build
-   a domain connector. This is what activates or mutes an agent per region.
-2. **Project** — the overlays are flat where `settings.yaml` is keyed, so a
-   plain merge cannot reach the paths consumers read. The projection copies:
-
-   | Overlay key | Projected to | Read by |
-   |---|---|---|
-   | `extraction.countries` | `extraction.chokepoints.<key>.countries` | ACLED / NewsAPI / FRED / Ambee extractors |
-   | `extraction.bounding_box` | `extraction.chokepoints.<key>.bounding_box` | same |
-   | `extraction.countries` | `agents.geopolitical.acled_countries` | `GeopoliticalConnector` |
-   | `aisstream.bbox` | `aisstream.monitor_regions[0]` | `aisstream_monitor.py` |
-   | `aisstream.bbox` | `ingestion.shipping.ais_bounds` | `ShippingConnector` |
-
-   `monitor_regions` is *replaced*, not appended — otherwise Hormuz's box would
-   leak into every other region's live monitoring.
-
-`NewsConnector` needs no projection: it derives `newsapi_keywords` from
-`agents.news_sentiment.location_context`, which the merge already makes
-region-specific.
-
-The merged config also carries `_active_region` (the region it was built for)
-and a `region` block (display name, centre coordinates) for logging.
-
-### Running a region
-
-```bash
-python main.py                          # hormuz (default)
-python main.py --region panama
-python main.py --region malacca --mode synthetic
-
-export SUPPLY_CHAIN_REGION=bab_el_mandeb   # honoured when --region is absent
-python main.py
-```
-
-An unknown region fails loudly — `--region` validates against the registry, and
-a typo'd `SUPPLY_CHAIN_REGION` raises rather than silently running Hormuz.
-
-Programmatically — the Orchestrator builds its own agents, so there is nothing
-to register:
-
-```python
-from src.core.config_manager import load_config_for_region
-from src.orchestrator import Orchestrator
-
-config = load_config_for_region("panama")   # None → env var, else hormuz
-result = Orchestrator(config=config).run_full_pipeline()
-
-print(result["composite_score"], sorted(result["agent_scores"]))
-```
-
-### Per-region agent activation
-
-Activation is evidence-driven, sourced from the per-region review behind the
-EVAL01 benchmark (archived under `docs/eval01-archived/`). A domain with no
-documented real-world driver for a region is **passive**: not built, not run,
-not weighted. `src/core/regions.py` holds the registry and the reason for every
-exclusion.
-
-| Agent | hormuz | panama | bab_el_mandeb | malacca |
-|---|---|---|---|---|
-| `shipping` | ● | ● | ● | ● |
-| `market` | ● | ● | ● | ○ no market signal in any documented event |
-| `geopolitical` | ● | ○ driver is purely hydrological | ● | ● |
-| `natural_disaster` | ● | ● | ○ security campaign, not a natural hazard | ● |
-| `routing` | ○ | ○ | ○ | ○ |
-| `news_sentiment` | ● | ● | ● | ● |
-
-● active ○ passive
-
-**Routing is muted in all four regions.** Unlike every other exclusion, this is
-*not* an evidence call — it is a deliberate, temporary, uniform muting that
-defers the per-region decision to post-Phase-14 evaluation.
-`routing_connector.fetch_api()` is still a `NotImplementedError` stub, so the
-agent emits synthetic or CSV signal everywhere regardless. Note that Bab
-el-Mandeb's routing evidence is the strongest in the benchmark (85% of large
-containerships diverted via the Cape of Good Hope) and is muted *in spite* of
-that; re-enable that one first if routing is revisited.
-
-### Region-specific data sources
-
-| Region | AIS bounds `[[lat_min, lon_min], [lat_max, lon_max]]` | ACLED countries | Chokepoint key |
-|---|---|---|---|
-| `hormuz` | `[[25.0, 55.0], [27.5, 58.0]]` | Iran, Oman, UAE, Saudi Arabia, Qatar, Bahrain, Kuwait, Iraq | `hormuz` |
-| `panama` | `[[8.8, -80.1], [9.5, -79.4]]` | Panama | `panama` *(created by projection)* |
-| `bab_el_mandeb` | `[[11.8, 42.6], [13.4, 44.1]]` | Yemen, Saudi Arabia, Egypt, Eritrea, Djibouti, Sudan, Somalia | `red_sea` |
-| `malacca` | `[[0.5, 99.0], [4.0, 105.0]]` | Malaysia, Indonesia, Singapore | `malacca` |
-
-Market data is **not** region-scoped: the connector reads global benchmark
-series (Brent crude, freight PPI, freight services) whose `LOCATION` is
-`"Global/Persian Gulf"`. Inventing per-region FRED series IDs would fabricate
-sources the pipeline does not use.
-
-All three connector settings degrade gracefully when absent — a missing setting
-logs and falls back, and only `api` data mode needs them. CSV and synthetic
-modes, which is what the pipeline actually runs, are unaffected.
-
-### Hormuz regression gate — re-baselined
-
-Applying `hormuz.yaml` drops routing from the default run (6 → 5 agents),
-moving the synthetic composite from **0.333000 → 0.316134**. Phase 11's
-original gate ("bit-for-bit with #44") therefore no longer holds and is
-re-baselined as *"bit-for-bit except routing"*. This was the explicit choice
-`config/regions/hormuz.yaml` asked to be made before wiring.
-
-### Test Coverage (Phase 11)
-
-| File | Tests | What it verifies |
-|---|---|---|
-| `tests/test_regions.py` | 9 | Registry integrity — agent keys, activation lookup, unknown-region errors |
-| `tests/test_region_configs.py` | 21 | Region YAMLs parse, match the registry, and have coherent bounding boxes |
-| `tests/test_config_manager.py` | 12 | Merge semantics, region-selection precedence, merged flags match the registry |
-| `tests/test_region_specific_connectors.py` | 17 | Projection lands settings where connectors read them; connectors consume them and degrade gracefully |
-| `tests/test_region_config_completeness.py` | 5 | Every region supplies all three connector settings, distinct per region |
-| `tests/test_region_isolation.py` | 7 | Each region's pipeline runs end-to-end; only registry-active agents score; no cross-run contamination |
-
-```bash
-pytest tests/test_regions.py tests/test_region_configs.py \
-       tests/test_config_manager.py tests/test_region_specific_connectors.py \
-       tests/test_region_config_completeness.py tests/test_region_isolation.py -v
-```
-
-See `docs/REGION_USAGE_GUIDE.md` for usage recipes and troubleshooting.
-
----
-
-## Phase 12 — Multi-Region Dashboard & API
-
-Phase 11 made the *pipeline* region-aware; Phase 12 makes the two front doors
-region-aware too. Neither the Orchestrator nor the config merging changed.
-
-### Dashboard region selector
-
-The Decision View's selector is populated from the region registry
-(`core.AVAILABLE_REGIONS = {display_name: key}`), so it cannot drift from
-`src/core/regions.py`. It renders as one button per chokepoint with the active
-one highlighted (Phase 12.5; previously a dropdown). Selecting a region reloads
-its merged config, changing which agents run and what each connector is pointed
-at, and updates `?region=` so the view stays shareable.
-
-**Presentation was Hormuz-only through Phase 12; Phase 12.5 extends it to all
-four regions** — see the Phase 12.5 section below. The activation-summary
-fallback remains for any region without corridors.
-
-### Per-region caching
-
-`src/dashboard/cache.py` holds one config and one Orchestrator per region
-(`lru_cache`, `maxsize` = region count, so no region evicts another). The first
-visit builds six connectors; switching back is a cache hit. The cache is
-**process-global, not per-session**, and Orchestrator is stateful — fine for
-this single-analyst deployment, not for a multi-user one.
-
-### Region endpoints
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/regions/list` | Every region, with activation summary |
-| `GET` | `/api/regions/current` | The region being scored now |
-| `GET` | `/api/regions/info/{region}` | One region in detail (404 if unknown) |
-| `POST` | `/api/regions/switch` | Change the active region (400 if unknown) |
-
-`src/api/endpoints.py`'s `_load_config()` now merges the active region's
-overlay, so **every** existing endpoint scores the selected chokepoint.
-`switch` mutates process-global state and resets the cached Orchestrator — a
-real switch, but shared across all callers. An unknown region is rejected
-before any state changes.
-
-One consequence worth stating plainly: `/health` now reports the *active
-region's* agent set, not a fixed six. Routing is muted everywhere, so the
-default region reports five.
-
-### Test Coverage (Phase 12)
-
-| File | Tests | What it verifies |
-|---|---|---|
-| `tests/test_dashboard_regions.py` | 15 | Selector matches the registry; `load_app_config` is region-aware; caching identity, isolation, eviction and invalidation; cached results match a fresh run; the no-routes branch renders real activation |
-| `tests/test_api_regions.py` | 12 | List/current/info payloads and error codes; switch changes what later config loads return, is idempotent, and leaves state untouched on a bad request |
-
-```bash
-pytest tests/test_dashboard_regions.py tests/test_api_regions.py -v
-```
-
-See `docs/DASHBOARD_USAGE.md` for the selector, caching behaviour, endpoint
-recipes and troubleshooting.
-
----
-
-## Phase 12.5 — Decision View UX
-
-All four chokepoints now render the full Decision View. Changes are confined to
-`src/dashboard/`; the pipeline, API and config layers are untouched.
-
-### Region corridors and map framing
-
-Each region has three schematic corridors and its own camera framing. Corridor
-polylines trace each strait's real transit axis between real named places
-(Gatún and Miraflores locks, Perim Island, One Fathom Bank, Bandar Abbas) at
-dashboard-overview fidelity — **they are not official IMO TSS geometry** and
-carry no navigational meaning. Map quick-jump buttons are the selected region's
-own waypoints; the previous fixed Hormuz/Red Sea/Malacca/**Suez** chip row is
-gone, so the map no longer offers jumps out of the region under analysis.
-
-Corridor `agents` are **intersected with the region's active agents** at render
-time. Hormuz's eastbound corridor lists `routing`, which Phase 11 muted
-everywhere; without the intersection its trend renormalised over a signal the
-region never runs. The corridor keeps listing it, so it returns automatically if
-routing is re-enabled.
-
-### Timeline: date axis and spikes
-
-> ⚠️ **The axis is relative, not a calendar.** Both charts label ticks by
-> distance from today (`364d ago` … `Today`). The series is the 365-day
-> evaluation test split (seed 44), whose own timestamps run **2025-01-01 →
-> 2025-12-31**, re-indexed onto a window ending today. Calendar labels invited
-> the misreading that something happened on a given date; relative labels keep
-> the recency and drop the false precision. `core.TIMELINE_SYNTHETIC_CAPTION`
-> is rendered under every chart on this axis. Nothing here relates to the real
-> April–May 2026 Hormuz shutdown in `data/raw/shuaiba_arrivals.csv`.
-
-Upward threshold crossings are drawn as clickable rings. Only the highest band
-crossed on a day is reported — 0.2 → 0.85 is one `Critical` spike, not three
-stacked ones — and the bands come from the engine's own thresholds rather than a
-second hardcoded set.
-
-### Spike explanations
-
-Clicking a spike opens an explanation plus the contributing agent scores.
-`src/dashboard/llm_explanations.py` follows the pattern `core.generate_risk_narrative`
-already established: Anthropic (`claude-opus-5`) when `ANTHROPIC_API_KEY` is
-set, otherwise a deterministic paragraph composed from the live agent scores.
-Cached per `(region, day, level)`.
-
-Because the axis is relabelled, the system prompt **forbids naming any real
-incident, actor or date** and asks for an explanation of the *signal*. The
-composed path cannot violate this by construction — it only restates the scores
-it was given. `stop_reason == "refusal"` is checked before reading content
-(realistic here: these prompts name sanctions, military and blockade signals)
-and falls through to the composed text.
-
-### Vessels
-
-Vessel markers carry **their corridor's** risk — the pipeline's own scoped
-aggregation, the same number the route status list shows. Vessels on one
-corridor therefore share a score. Spreading it with per-ship jitter would look
-more informative while being entirely invented, and would let a reader believe
-one ship was measurably riskier than the one beside it. Records are
-deterministic synthetic placeholders (`synthetic: True`) with region-appropriate
-destination ports; the pipeline tracks daily aggregate arrivals, not per-vessel
-AIS.
-
-### Agent breakdown and news
-
-A full-width per-agent chart shares the composite's axis, with an interactive
-legend. Passive agents are **omitted rather than drawn flat at zero** — a zero
-line reads as "measured and quiet" instead of "not run here". The news feed
-keeps its existing region / all-regions toggle and is region-scoped via
-`core.get_news`.
-
-### Test Coverage (Phase 12.5)
-
-`tests/test_dashboard_ux.py` — 27 tests: corridor coverage and agent scoping,
-map framing containment, region-appropriate vessel destinations, date-axis
-behaviour and the declared shift, spike banding, agent-line omission, vessel
-risk provenance, and explanation composition/caching/refusal handling.
-
----
-
-## Phase 13 — Live Data Wiring
-
-> **Summary.** Every connector that has a credible free source now reads a real API instead of a stub. Five of six agents moved from `synthetic`/`csv` to live data — shipping to **IMF PortWatch**, market to **FRED**, geopolitical to **ACLED**, natural disaster to **GDACS + USGS**, news to **GDELT**. The sixth, routing, was made **dormant** rather than faked. The through-line of this phase is that a feature is either measured or absent; nothing is invented to fill a column.
-
-### The dormancy decision (routing)
-
-`RoutingConnector.fetch_api()` still raises `NotImplementedError`, and that is now a recorded decision rather than an unfinished task. `src/core/regions.py` declares:
-
-```python
-DORMANT_AGENTS: frozenset[str] = frozenset({"routing"})
-```
-
-A *passive* agent is one with no evidence in a given region. A *dormant* agent is a project-scope decision: no free source produces evidence-grade rerouting data, so the agent is not scored anywhere. `validate_region()` raises if a region config activates a dormant agent, so reviving one is a deliberate edit to `DORMANT_AGENTS`, not an accidental YAML toggle.
-
-### Renormalisation over present features
-
-Two agents gained the same capability, for the same reason: a live source may not carry every feature the synthetic schema defined.
-
-- **`GeopoliticalAgent`** — ACLED has no sanctions data. OpenSanctions is paywalled and publishes current designations rather than a time series, and sanctions are discrete events, so any daily "sanctions severity" curve would be a modelling artefact. `sanctions_severity` is therefore **not produced**, and the agent renormalises its weights over the three features ACLED does support.
-- **`NewsAgent`** — same treatment when GDELT does not answer for a region.
-
-The alternative — scoring a missing column as zero — would read as "no sanctions risk" rather than "not measured", and would quietly drag the composite down.
-
-### Connector-by-connector
-
-| Connector | Source | Credentials | Notes |
-|---|---|---|---|
-| `shipping_connector.py` | IMF PortWatch `Daily_Chokepoints_Data` FeatureServer | None | Daily transits per chokepoint, all four regions. `n_total` / `n_tanker` feed the agent; per-type counts travel for provenance |
-| `market_connector.py` | FRED `api.stlouisfed.org/fred` | Key | Brent daily; freight PPI and services monthly, forward-filled to daily |
-| `geopolitical_connector.py` | ACLED (via `ACLEDExtractor`'s OAuth) | OAuth | Per-country, per-year event fetch; warns on hitting the per-year cap, since a capped page is indistinguishable from a complete one |
-| `disaster_connector.py` | GDACS `geteventlist` + USGS `fdsnws` | None | GDACS restricted to `Orange;Red` — green-inclusive queries exceed GDACS's silent 100-result cap every month |
-| `news_connector.py` | GDELT DOC API v2 | None | Tone scores |
-| `routing_connector.py` | — | — | Dormant, see above |
-
-> **Naming trap.** `ShippingConnector` and `MarketConnector` each carry two similarly named methods. `fetch_from_api()` is the real live path and is what `fetch()` dispatches to in `api` mode. `fetch_api()` is a leftover convenience hook that logs a warning and **silently returns synthetic data**. Call `fetch()` (or `fetch_and_validate()`), never `fetch_api()` directly, or you will get generated numbers while believing they are live. Several docstrings in these two modules still describe `api` mode as an unimplemented aisstream.io stub and are themselves out of date.
-
-### New extractors
-
-| Extractor | Purpose |
-|---|---|
-| `gdacs_extractor.py` | GDACS event list — the primary natural-disaster source |
-| `usgs_extractor.py` | Seismic detail below GDACS's alert bar |
-| `disaster_combined_extractor.py` | Wraps GDACS + USGS behind one interface so the monthly cap applies to their combined output. Enabling them individually would bypass it |
-| `portwatch_extractor.py` | Monthly chokepoint traffic summaries for the knowledge base |
-
-`AmbeeExtractor` is retained but disabled: the key is valid and the endpoint returns zero documents. `ReliefWebExtractor` remains a fallback pending an approved `appname`.
-
-### Retired region keys
-
-`red_sea` and `suez` were folded into `bab_el_mandeb`, leaving four live regions (`hormuz`, `bab_el_mandeb`, `panama`, `malacca`). `RETIRED_REGION_ALIASES` in `src/core/regions.py` maps the old keys so historical knowledge-base documents still resolve, and `scripts/migrate_retired_region_keys.py` migrates stored documents. Migrated documents keep their original text — which still names Suez — so the distinction stays visible to anyone reading them.
-
----
-
-## Phase 14 — Sustained-Shift Detection and Risk-Band Recalibration
-
-> **Summary.** The shock detectors could not hold a flag across a long disruption: an isolation forest normalised against each scored batch treats a month-long shutdown as the new normal after a few days. `ShippingAgent` gained a duration signal, and the risk bands were recalibrated onto the resulting absolute scale.
-
-### `ShippingAgent.level_shift_score()`
-
-A sustained shift is measured against a **trailing** long-window baseline rather than the batch being scored, so a shutdown that persists for weeks keeps scoring instead of being absorbed into the reference distribution. A 40 % sustained drop scores 1.0.
-
-Batch min-max normalisation was removed for the same reason: it forced every window onto `[0, 1]` by its own extremes, destroying exactly the signal a sustained disruption carries.
-
-### Recalibrated risk bands
-
-With absolute rather than window-relative scores, the calm-day median rose to ≈0.47, which put most ordinary days at MEDIUM or worse under the old `0.8 / 0.6 / 0.4` boundaries. The bands were re-expressed as the **same quantiles of calm behaviour** on the new scale — a re-scaling, not a loosening:
+**The hand-tuned risk bands are empirically calibrated, not chosen by intuition.** They are the p60 / p85 / p97 quantiles of the composite score on *calm* (label-negative) days, pooled across all four regions 2019–2026 — **9,183 days**:
 
 ```yaml
 thresholds:
@@ -2067,44 +223,391 @@ thresholds:
   risk_low:      0.30
 ```
 
-Calibrated against 9,183 pooled label-negative days across all four regions, 2019–2026.
+They were recalibrated when the shipping agent stopped batch-normalising its forest score. Batch min-max forced every scored window onto `[0,1]` by its own extremes, so the old `0.8 / 0.6 / 0.4` boundaries were tuned to a compressed, window-relative distribution. On absolute scores the calm median rose to ≈0.47. The new bands are the **same quantiles of calm behaviour expressed on the new scale — a re-scaling, not a loosening**.
+
+### Implementation
+
+| Concern | Code |
+|---|---|
+| Weight config and `weight_mode` switching | `src/optimization/weight_config.py` · `config/optimized_weights.yaml` |
+| Optuna study, parameter space, constraints | `src/optimization/weight_optimizer.py` |
+| Objective evaluation and split discipline | `src/optimization/pipeline_evaluator.py` |
+| Split construction | `src/optimization/data_split.py` |
+
+Optimization procedure and results: [§4.9](#49-weight-optimization-results).
+
+## 3.7 Risk aggregation
+
+### Analysis
+
+```
+1. keep agents present AND weighted AND producing scores
+2. score_a   = mean(anomaly_scores_a)
+3. w_norm_a  = w_a / Σw            renormalised over ACTIVE agents → sums to 1
+4. base      = Σ w_norm_a · score_a
+5. agreement = |{a : score_a > 0.5}|
+6. amp       = 1.25 if agreement ≥ 5;  1.15 if ≥ 3;  else 1.00
+7. risk      = min(base · amp, 1.0)
+8. level     = high / medium / low by threshold
+```
+
+**Step 3 is what satisfies R7.** Renormalising over *active* agents makes a passive or dormant agent harmless: its weight redistributes across the agents that did report, rather than contributing a zero that drags the composite down. Without it, muting routing in all four regions would have silently depressed every score by its weight.
+
+**Step 6 is the only non-linearity in the entire scoring path.** It encodes the intuition that three domains agreeing is worth more than the sum of three domains individually.
+
+### Implementation
+
+`src/aggregation/risk_engine.py`. Note that **four composite paths exist and are not identical** — see [§4.11](#411-known-defects-and-open-issues) before citing any number.
+
+## 3.8 Explainability and retrieval
+
+### Analysis
+
+Two mechanisms answer two different user questions, and they are deliberately complementary:
+
+- **"Which features drove this score?"** — a SHAP surrogate over the feature space produces per-feature attributions and a top-drivers list.
+- **"Has this happened before?"** — a retrieval layer matches the current multi-domain signal profile against a curated knowledge base of historical disruptions.
+
+Feature attribution alone tells a manager *what moved*; precedent tells them *what it meant last time*. The decision-support argument in [§1](#1-problem-and-scope) needs both.
+
+### Implementation
+
+- **SHAP** — `src/explainability/shap_explainer.py`. A RandomForest surrogate is fitted to reproduce the composite, then explained. **The surrogate sees 20 of the features, not all** — see [§4.11](#411-known-defects-and-open-issues) item 6.
+- **RAG** — `src/rag/context_retriever.py`, ChromaDB with a local ONNX embedding model (no API key). Knowledge base: 10 curated historical cases in `data/knowledge_base/disruption_cases.json` — `cyclone_gonu_2007`, `hormuz_mine_threat_2010`, `somali_piracy_2011`, `japan_earthquake_2011`, `iran_sanctions_2012`, `west_coast_port_strikes_2014`, `hormuz_2019`, `ever_given_2021`, `covid_port_congestion_2021`, `houthi_redsea_2024`. Retrieval is threshold-gated so a quiet day does not attach spurious precedent.
+- **Action rubric** — `src/evaluation/decision_effectiveness.py` maps a risk level and its drivers to a recommended action through a transparent rubric, **deliberately not another model**.
+
+## 3.9 Implementation
+
+| | |
+|---|---|
+| **Scale** | 60 source modules · 25 test modules · 420 tests |
+| **Stack** | Python 3.10+, pandas, scikit-learn, SHAP, ChromaDB, Optuna, FastAPI, Streamlit |
+| **Config** | `config/settings.yaml` base + `config/regions/*.yaml` overlays, merged by `src/core/config_manager.py` |
+| **Region registry** | `src/core/regions.py` — `RegionConfig`, `DORMANT_AGENTS`, `RETIRED_REGION_ALIASES`, validation |
+| **Orchestration** | `src/orchestrator.py`; CLI entry `main.py` |
+
+Full layout in [Project Structure](#project-structure); construction history in [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md).
 
 ---
 
-## Phase 15 — Measured Method Comparison and Agent Ablation
+# 4. Evaluation
 
-> **Summary.** A three-script harness that scores the pipeline against baselines on **real connector features**, not generated ones. The motivating observation is blunt: an evaluation on `np.random.normal` cannot distinguish a good detector from a bad one, because there is no signal to find and every AUC lands at 0.5 by construction.
+## 4.1 Evaluation design
 
-### `scripts/build_eval_dataset.py`
+### Analysis
 
-Assembles the per-region evaluation set by merging the live connectors on a daily index — PortWatch transits, FRED market series, GDACS/USGS hazards, ACLED events. `news_sentiment` is included when GDELT answers and omitted when it does not; **the column set per region is recorded in the manifest**, so a later run cannot quietly compare a five-feature region against a four-feature one.
+Three decisions carry the weight of the entire evaluation. Each exists to prevent a specific way of accidentally reporting a flattering number.
 
-Ground truth is the shipping connector's `is_disruption` (a 2σ persistent drop in transits, plus the pinned Apr–May 2026 Hormuz shutdown). Its known weakness travels with the data in the manifest rather than in a comment.
+**1. One temporal split, applied to everyone.** The last 30 % of each region's series is the test window and nothing is fitted on it. A supervised model scored on its own training rows posts an inflated number that is not comparable with an unsupervised detector. The split is **temporal rather than random** because shuffling days of a time series leaks the future into the past and destroys the ordering every rolling window depends on.
 
-### `scripts/run_method_comparison.py`
+**2. Tiers instantiate real agents.** A tier is a set of agent classes; each is fitted and run, and the composite is the weighted mean of their scores under the project's own weights. Approximating a tier by averaging "the first N feature columns" would measure nothing — the first two columns of these frames are both shipping features, so a "Tier 2" built that way would contain no market signal at all despite its label.
 
-Three design decisions carry most of the weight:
+**3. Malacca is a false-positive harness, not a detection test.** With zero labelled disruptions its AUC is undefined. What it measures is the **alert rate on a region where nothing happened** — the number that decides whether an early warning system is usable in practice.
 
-- **One temporal split, applied to everyone.** The last 30 % of each region's series is the test window; nothing is fitted on it. A supervised model scored on its own training rows would post an inflated number that is not comparable with an unsupervised detector. The split is temporal, not random — shuffling days of a time series leaks the future into the past.
-- **Tiers build real agents.** A tier is a set of agent classes, each fitted and run, with the composite being the weighted mean of their scores under the project's own weights. Approximating a tier by averaging "the first N feature columns" would measure nothing: the first two columns of these frames are both shipping features, so a Tier 2 built that way contains no market signal despite its label.
-- **Trivial controls and circularity tagging.** Added so a method that merely re-derives the label is visibly marked as such rather than celebrated. A matrix-profile baseline was included alongside.
+### Circularity rating — the decision that makes the evaluation credible
 
-### `scripts/report_method_comparison.py`
+The ground-truth label is "vessel_count against a trailing long baseline." **Any method computing that same statistic predicts the label by construction.** Rather than leave this implicit, every method carries a recorded rating:
 
-Reads `eval/method_comparison_results.csv` and emits the graphs and written findings. Nothing is asserted that the CSV does not contain, and the findings are written from what the numbers show rather than from what the architecture predicts.
+| Rating | Meaning |
+|---|---|
+| `high` | reads vessel_count against a trailing long baseline — the label's own statistic |
+| `medium` | short/rolling baseline, or fits on the label directly |
+| `low` | reads other features, or shape rather than level |
+| `n/a` | controls and oracles |
+
+**Every tier is rated `high`**, because all tiers include the shipping agent's level-shift feature. This is why tier AUC cannot be cited as clean detection skill — and why the result graphs colour bars by circularity, so a ranking cannot be misread as "tallest is best."
+
+## 4.2 Dataset and ground truth
+
+### The evaluation dataset
+
+Built by `scripts/build_eval_dataset.py` from the live connectors, merged on a daily index:
+
+| Region | Rows | Dropped | Date range | Positive days | Rate | Missing domain |
+|---|---|---|---|---|---|---|
+| hormuz | 2,434 | 358 | 2019-01-01 → 2025-08-30 | **159** | 6.53 % | news_sentiment |
+| bab_el_mandeb | 2,434 | 358 | 2019-01-01 → 2025-08-30 | **244** | 10.02 % | news_sentiment |
+| panama | 2,433 | 359 | 2019-01-01 → 2025-08-29 | **149** | 6.12 % | — (all present) |
+| malacca | 2,434 | 358 | 2019-01-01 → 2025-08-30 | **0** | 0.00 % | news_sentiment |
+
+**Live sources:** shipping = IMF PortWatch chokepoint transits · market = FRED (Brent, freight PPI, freight services) · natural_disaster = GDACS (Orange/Red only) + USGS (M ≥ 4.0) · geopolitical = ACLED · news_sentiment = GDELT where it answered.
+
+**Two facts that must be stated whenever this dataset is cited:**
+
+1. **The frame ends 2025-08-30.** The pinned April–May 2026 Hormuz shutdown is **not in it**. The 159 Hormuz positives are earlier events.
+2. **news_sentiment is missing from three of four regions** — GDELT did not answer. Column sets are recorded per region in the manifest specifically so a five-feature region is never silently compared against a four-feature one.
+
+### The label, and its recorded weakness
+
+```
+y_true = 30-day mean of vessel_count is ≥20% below the trailing
+         365-day median, sustained 14+ consecutive days
+```
+
+**The weakness travels with the data in the manifest, not in a comment:** a rolling baseline drifts downward during a slow decline, so the label catches shocks and misses slow-onset disruption. **Panama's 2023–24 drought cut transits by 38 % and the label flags almost none of it.**
+
+### Synthetic splits
+
+The optimizer and `notebooks/evaluation.py` use synthetic data because it is the only source carrying labels. Rows cannot be shuffled, so instead three **independent realisations** of the same world are generated by re-seeding every connector: identical disruption structure (days 60–74, 150–170, 280–290), different noise stream. Seeds 42 / 43 / 44 for train / validation / test, 365 days each. `is_disruption` is an evaluation label only and is **never** an agent input.
+
+## 4.3 Baselines, tiers, and circularity
+
+Methods span controls, classical detectors, supervised models, and an oracle:
+
+- **Controls** — M0 random, M1 always-alert, M2 never-alert. A method that cannot beat these has no signal.
+- **Unsupervised** — B1 rolling z, B2 MA crossover, B3 isolation forest, B4 EWMA deviation, B5 AR residual, B6 CUSUM, M3 persistence, M8 matrix profile.
+- **Supervised** — B7 logistic regression, B8 random forest (n/a where the training window has no positives).
+- **Oracle** — label at t−1. An upper bound, not a competitor.
+- **Tiers 1–5** — the multi-agent system, progressively adding agents.
+
+## 4.4 Metrics
+
+| Metric | What it captures | Note |
+|---|---|---|
+| **AUC** | Ranking quality, threshold-free | Undefined on Malacca (0 positives) |
+| **F1** | Balance of precision and recall at the operating threshold | |
+| **FPR** | False-positive rate — the number that decides operational usability | |
+| **Alert rate** | Fraction of days alerted | The only meaningful metric on Malacca |
+
+An 8-metric suite (`notebooks/evaluation.py`) additionally covers detection, explainability faithfulness, agent diversity, lead time, optimization gain, RAG quality, and decision effectiveness. **Those numbers are not currently citable** — see [§4.11](#411-known-defects-and-open-issues).
+
+## 4.5 Results
+
+Reported as found. Source: `eval/method_comparison_results.csv` (76 rows), graphs in `eval/graphs_method_comparison/` and `eval/graphs_ablation_tiers/`.
+
+### Hormuz — 159 positives (6.53 %)
+
+| Method | Kind | Circ. | AUC | F1 | FPR |
+|---|---|---|---|---|---|
+| ORACLE label t−1 | oracle | n/a | 0.986 | 0.977 | 0.005 |
+| B7 logistic regression | supervised | medium | **0.968** | 0.682 | 0.020 |
+| B6 CUSUM | unsupervised | high | 0.958 | 0.000 | 0.000 |
+| M3 persistence | unsupervised | high | 0.851 | 0.503 | 0.140 |
+| B8 random forest | supervised | medium | 0.747 | 0.378 | 0.100 |
+| M8 matrix profile | unsupervised | low | 0.596 | 0.227 | 0.104 |
+| M0 random | control | n/a | 0.526 | 0.165 | 0.094 |
+| **Tier 1** | multi-agent | high | **0.502** | 0.034 | 0.164 |
+| M1/M2 always/never | control | n/a | 0.500 | 0.000 | 0.000 |
+| **Tier 2** | multi-agent | high | **0.465** | 0.071 | 0.139 |
+| B3 isolation forest | unsupervised | low | 0.434 | 0.085 | 0.194 |
+| **Tier 3/4/5** | multi-agent | high | **0.400** | 0.141 | 0.265 |
+
+**Best baseline 0.986 vs best tier 0.502 → gap −0.484. Tier 1 is at chance**, and Tiers 2–5 fall below it.
+
+### Bab el-Mandeb — 244 positives (10.02 %)
+
+| Method | Circ. | AUC | F1 | FPR |
+|---|---|---|---|---|
+| ORACLE label t−1 | n/a | 0.997 | 0.996 | 0.002 |
+| M3 persistence | high | 0.961 | 0.784 | 0.234 |
+| **Tier 1** | high | **0.679** | 0.553 | 0.735 |
+| **Tier 2** | high | **0.620** | 0.511 | 0.546 |
+| B2 MA crossover | medium | 0.581 | 0.386 | 0.177 |
+| B3 isolation forest | low | 0.500 | 0.410 | 0.628 |
+| **Tier 3/4/5** | high | **0.449** | 0.441 | 0.682 |
+| B6 CUSUM | high | 0.263 | 0.498 | 0.737 |
+
+Gap −0.318. B7/B8 not applicable — no positives in the training window.
+
+### Panama — 149 positives (6.12 %) — the strongest region
+
+| Method | Circ. | AUC | F1 | FPR |
+|---|---|---|---|---|
+| ORACLE label t−1 | n/a | 0.996 | 0.993 | 0.002 |
+| M3 persistence | high | 0.973 | 0.811 | 0.112 |
+| **Tier 1** | high | **0.909** | 0.722 | 0.167 |
+| **Tier 5** | high | **0.884** | 0.613 | 0.157 |
+| **Tier 2** | high | **0.884** | 0.620 | 0.134 |
+| **Tier 3/4** | high | **0.876** | 0.612 | 0.134 |
+| B3 isolation forest | low | 0.814 | 0.435 | 0.170 |
+| B6 CUSUM | high | 0.145 | 0.372 | 0.866 |
+
+**Panama Tier 1 at 0.909 beats every non-oracle unsupervised baseline except persistence.** This is the system's strongest real result.
+
+### Malacca — 0 positives — false-positive harness
+
+AUC undefined. What is measured is the alert rate on a region where nothing happened:
+
+| Method | Alert rate |
+|---|---|
+| M2 never · B6 CUSUM · ORACLE | 0.000 |
+| M3 persistence | 0.049 |
+| B2 MA crossover | 0.059 |
+| B4 EWMA | 0.068 |
+| M0 random | 0.100 |
+| B1 rolling z | 0.103 |
+| M8 matrix profile | 0.107 |
+| B5 AR residual | 0.111 |
+| **Tier 1 / Tier 2** | **0.178 / 0.181** |
+| B3 isolation forest | 0.208 |
+| **Tier 3/4/5** | **0.257** |
+
+**The tiers are the noisiest methods on the quiet region**, and adding agents makes it worse (0.178 → 0.257). This is the cost of the fusion design, and it is reported rather than buried.
+
+## 4.6 The central negative finding
+
+**Across every evaluable region, tier AUC falls as agents are added.**
+
+| Region | Tier 1 | Tier 2 | Tier 3 | Tier 4 | Tier 5 |
+|---|---|---|---|---|---|
+| hormuz | 0.502 | 0.465 | 0.400 | 0.401 | 0.401 |
+| bab_el_mandeb | 0.679 | 0.620 | 0.449 | 0.449 | 0.449 |
+| panama | 0.909 | 0.884 | 0.876 | 0.876 | 0.884 |
+| malacca *(alert rate — lower is better)* | 0.178 | 0.181 | 0.257 | 0.257 | 0.257 |
+
+**This directly refutes the agent-diversity hypothesis (SRQ2) on real data.**
+
+**Mechanism — dilution.** The label is shipping-derived. Every non-shipping agent therefore contributes weighted score that is uncorrelated with the label, pulling the composite toward noise. The finding is not that multi-domain fusion is worthless; it is that **fusion cannot help against a single-domain label**, and the evaluation was constructed well enough to show it.
+
+## 4.7 Root-cause analysis — why Hormuz sits at chance
+
+Decomposing Hormuz's own anomaly score on the test window (2023-08-31 → 2025-08-30, 133 positives / 731 days):
+
+| Component | Mean on normal | Mean on disruption | **Separation** |
+|---|---|---|---|
+| `duration_score` | 0.0497 | 0.4395 | **+0.3898** |
+| `shock_score` | 0.5455 | 0.3982 | **−0.1473** |
+| `anomaly_score` = `max(shock, duration)` | 0.5561 | 0.5315 | **−0.0246** |
+
+**The duration signal separates the label cleanly (+0.39). The shock detectors are anti-correlated (−0.15) — disruption days look *less* anomalous to them than calm days.** Because shock sits ≈0.55 on quiet days while duration only reaches ≈0.44 on disrupted ones, `max()` returns shock nearly everywhere and **erases the working signal**, leaving −0.02.
+
+The code comment defends `max()` over averaging on the grounds that a calm shock detector would dilute an active duration signal. It does prevent dilution — and causes **masking** instead. **This is the actual root cause of Hormuz ≈ 0.50**: not forest training, not the validation gate.
+
+**Secondary cause.** `detect()` receives only the test slice, so the 365-day trailing baseline restarts from scratch. The **first 120 test days have no baseline at all**, and 17 of 133 positives fall inside that blind window.
+
+This decomposition is the finding that turns a negative result into a contribution: the architecture is not merely underperforming, it is underperforming for a located, fixable reason.
+
+## 4.8 Hypotheses tested and rejected
+
+Both were implemented, measured, and reverted. Negative results with a mechanism are evidence.
+
+### Option 1 — replace the persistence gate with direct level-shift scoring
+
+Gate: `level_shift_score > 0.50 AND duration_held >= 0.70`.
+
+- **Structurally inert for the AUC.** `run_method_comparison.py:384` scores via `agent.detect(agent.preprocess(frame))` and never calls `validate()`.
+- Full re-run: **0 of 76 rows changed**, output byte-identical, Hormuz gap unchanged at −0.484.
+- Where it *does* apply (the synthetic path) it is destructive:
+
+| Gate | TP | FP | FN | TN | TPR | FPR | F1 |
+|---|---|---|---|---|---|---|---|
+| persistence (current) | 44 | 10 | 3 | 308 | 0.936 | 0.031 | **0.871** |
+| level_shift | 6 | 2 | 41 | 316 | 0.128 | 0.006 | **0.218** |
+
+Cause: the trailing baseline needs 91 days shifted by 30, so **no baseline exists until day 156** — the day 60–74 disruption is unscoreable by construction — and only 23 of 365 days clear `score > 0.50`.
+
+### Option 3 — retrain the Isolation Forest on mixed normal + disruption days
+
+- **Premise false.** `_agent_frame` passes only `timestamp` + `shipping__*`, so `y_true` never reaches the agent and `fit()`'s leak-filter never fires. The forest producing Hormuz 0.502 was **already** trained on mixed data.
+- Tested both regimes properly, on real data, with the harness's own split:
+
+| Region | mixed | normal-only | Δ |
+|---|---|---|---|
+| hormuz | 0.5023 | 0.5240 | **+0.0216** |
+| bab_el_mandeb | 0.6790 | 0.6790 | 0.0000 |
+| panama | 0.9087 | 0.9087 | 0.0000 |
+
+Bab el-Mandeb and Panama are identical because their training windows contain no positives, so filtering removes nothing. Option 3's direction is the *worse* of the two on Hormuz, by a negligible margin.
+
+## 4.9 Weight optimization results
+
+Optuna, TPE sampler (seed 42), median pruner, 100 trials, 1 h cap, Dirichlet-style renormalisation per weight group. Hard constraints reject `risk_high ≤ risk_medium` and `agreement_bonus_5 ≤ agreement_bonus_3`.
+
+**Objective:** `0.50·F1 + 0.30·lead_time_score − 0.20·FPR`, where lead_time_score is the earliest MEDIUM alert within 5 days before onset ÷ 5.
+
+**Test-split discipline:** touched exactly once, after the study. `PipelineEvaluator.evaluated_splits` is an audit trail proving it.
+
+**Best run:** trial 63 of 100, validation objective **0.7491**.
+
+| Agent | Hand-tuned L2 | Optimized L2 |
+|---|---|---|
+| shipping | 0.25 | **0.402** |
+| market | 0.15 | 0.088 |
+| geopolitical | 0.25 | 0.109 |
+| natural_disaster | 0.10 | 0.095 |
+| routing | 0.15 | 0.130 |
+| news_sentiment | 0.10 | **0.177** |
+
+The optimizer independently concentrates weight on shipping — consistent with the dilution mechanism in [§4.6](#46-the-central-negative-finding), since shipping is the domain the label is derived from.
+
+> ⚠️ **These weights cannot currently be cited as a result.** See [§4.11](#411-known-defects-and-open-issues) item 1.
+
+## 4.10 Threats to validity — what cannot be claimed
+
+Stated explicitly, because a defence will find them otherwise.
+
+1. **Cannot claim the system beats baselines at detection.** On Hormuz it is at chance (0.502 vs 0.968 for logistic regression). Only Panama (0.909) is competitive.
+2. **Cannot claim agent diversity improves detection.** Measured on real data, AUC *falls* monotonically as agents are added, in every evaluable region.
+3. **Cannot cite tier AUC as clean detection skill.** Every tier is rated `high` circularity — tiers include the shipping level-shift feature, which is the label's own statistic.
+4. **Cannot claim anything about routing.** Dormant in all four regions; never exercised.
+5. **Cannot claim performance on the 2026 Hormuz shutdown.** It is not in the evaluation frame, which ends 2025-08-30.
+6. **Cannot claim slow-onset detection.** The label itself misses it — Panama's 38 % drought decline is almost entirely unlabelled.
+7. **Cannot cite METRIC 5 or any 8-metric number** until the defects in [§4.11](#411-known-defects-and-open-issues) are resolved.
+
+## 4.11 Known defects and open issues
+
+### Blocking
+
+1. **The optimization records contradict each other.**
+
+   ```
+   config/optimized_weights.yaml            → 100 trials, best trial 63, val 0.7491
+   data/processed/optimization_results.json →   5 trials, best trial  1, obj 0.6301
+   ```
+
+   Entirely different weight vectors (news_sentiment 0.177 vs 0.046; natural_disaster 0.095 vs 0.168). The JSON was overwritten by an apparent smoke run; the committed YAML is still the 100-trial result. **`notebooks/evaluation.py` METRIC 5 reads that JSON**, so running the suite today reports the 5-trial numbers as the optimization result. The two SHAP comparison plots were generated in that same session and are suspect. **Fix: re-run the 100-trial optimization before writing up results.**
+
+2. **The 8-metric suite has never been run against the current system.** `evaluation_results.json` and `thesis_comparison_table.json` are dated 2026-07-30 — a month before the re-optimization and the shipping rework. METRICS 1–8 as they sit on disk describe a superseded system.
+
+### Code-level inconsistencies to disclose
+
+1. **Routing normalises its Isolation Forest by batch min-max**, the exact practice shipping was deliberately moved away from. Routing went dormant before it was migrated.
+2. **`Orchestrator.run_timeseries_analysis` omits the agreement bonus** that every other composite path applies.
+3. **The agreement threshold (0.5) is a module constant**, not configurable or optimized — while the bonuses it gates are both.
+4. **Geopolitical computes rolling baselines and deviations that `detect()` never reads**; news does the same with `sentiment_rolling_7d`. `sentiment_magnitude` is a schema feature that never enters any score.
+5. **`PipelineEvaluator.build_agents` hardcodes agent config** instead of reading `settings.yaml`, so the optimizer tunes a slightly different agent than the live pipeline runs.
+6. **The SHAP surrogate sees 20 of the features, not all.** Absent: `tanker_count`, `vessel_count_trend`, `freight_services_pct_change`, `vessels_holding`, `alternative_route_traffic`, `sentiment_magnitude`, `recency_weighted_score`. Missing columns fill with 0.0 — indistinguishable from a true zero.
+7. **The shipping duration score is near-circular** against the level-shift label. Cite operationally, never as detection skill.
+
+### Four composite paths that are not identical
+
+Always state which produced a reported number.
+
+| Path | Granularity | Agreement bonus? |
+|---|---|---|
+| `RiskEngine.compute_risk` | one scalar per run | yes |
+| `RiskEngine.compute_risk_timeseries` | per day | yes |
+| `Orchestrator.run_timeseries_analysis` | per day | **no** |
+| `PipelineEvaluator._aggregate_daily` | per day, vectorised | yes |
+
+`_aggregate_daily` faithfully mirrors `compute_risk`, so the optimizer maximises what the pipeline actually produces.
+
+### Figure provenance
+
+| Set | Path | Status |
+|---|---|---|
+| Method comparison (7) | `eval/graphs_method_comparison/` | **Current, real data — cite freely** |
+| Tier ablation (3) | `eval/graphs_ablation_tiers/` | **Current** |
+| Optimizer (6) | `data/processed/` (gitignored) | Current |
+| SHAP comparison (2) | `data/processed/` (gitignored) | ⚠ Suspect — generated in the 5-trial session |
+| SHAP beeswarm/waterfall (2) | `data/processed/` (gitignored) | ✗ **Stale (2026-06-20) — do not cite** |
+
+Malacca deliberately has no tier-progression chart: `graph_tiers()` drops NaN-AUC rows and all of Malacca's are NaN. It is covered instead by `A2_false_positive_harness.png`. All four regions' tier data is in the CSV.
 
 ---
 
 ## Reference Documents
 
-Two long-form references live in `docs/` (see the note on `docs/` under *Repository hygiene* below):
-
 | Document | Contents |
 |---|---|
-| `docs/THESIS_BRIEF.md` | The writing brief — what each thesis chapter must establish and which artefact supplies the evidence |
-| `docs/SCORING_REFERENCE.md` | End-to-end walkthrough of how a raw feature becomes a composite risk score and a band |
+| [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md) | **The phase-by-phase build history** — the former body of this README, preserved verbatim. Read it for *how* the system was built and why decisions were later revised |
+| `docs/THESIS_BRIEF.md` | The source of record for every measured number in [§4](#4-evaluation). Where this README and the brief disagree, the brief wins |
+| `docs/SCORING_REFERENCE.md` | End-to-end walkthrough of how a raw feature becomes a composite risk score and a band; per-agent formulas |
 | `docs/DASHBOARD_USAGE.md` | Running and reading the two-page dashboard |
 | `docs/REGION_USAGE_GUIDE.md` | Adding and operating a region |
+| `eval/COMPARISON_REPORT.md` | The results narrative generated from `method_comparison_results.csv` |
+
+The `docs/` entries are subject to the tracking caveat under *Repository hygiene* below.
 
 ### Repository hygiene
 
@@ -2262,7 +765,7 @@ Every key is optional — each extractor and `DisasterConnector.fetch_api()` log
 
 ```bash
 python main.py                        # default region: hormuz
-python main.py --region panama        # see Phase 11 for the four regions
+python main.py --region panama        # four regions, see §1
 ```
 
 Expected output:
@@ -2283,7 +786,27 @@ python -c "from src.ingestion import MarketConnector; MarketConnector(config={})
 
 The first command writes `data/raw/shipping_hormuz.csv` (365 rows) and prints the Welch t-statistic separating normal vs. disruption vessel counts. The second writes `data/raw/market_data.csv` (365 rows) with Brent crude, trade volume, and freight rate signals lag-aligned to the shipping disruption windows.
 
-### Populate the RAG knowledge base from live APIs (Phase 7)
+### Reproducing the evaluation
+
+The three scripts behind [§4](#4-evaluation), in order. Each writes artefacts the next one reads.
+
+```bash
+python scripts/build_eval_dataset.py        # live connectors -> data/eval/ + manifest
+python scripts/run_method_comparison.py     # -> eval/method_comparison_results.csv
+python scripts/report_method_comparison.py  # -> eval/graphs_*/ + COMPARISON_REPORT.md
+```
+
+`build_eval_dataset.py` hits the live APIs and is the slow step (Hormuz geopolitical alone takes ~11 minutes). The manifest it writes records the column set per region, so a later comparison cannot silently score a five-feature region against a four-feature one.
+
+The 8-metric suite runs separately on the synthetic splits:
+
+```bash
+python notebooks/evaluation.py
+```
+
+> ⚠️ Its output is **not currently citable** — see [§4.11](#411-known-defects-and-open-issues). Re-run the 100-trial optimization first, or METRIC 5 will report a 5-trial smoke run as the optimization result.
+
+### Populate the RAG knowledge base from live APIs
 
 ```bash
 python scripts/populate_knowledge_base.py                       # all extractors in extraction.enabled_extractors
@@ -2292,7 +815,9 @@ python scripts/populate_knowledge_base.py --extractors serpapi   # one-time hist
 
 Extracts → deduplicates by document id → backs up to `data/knowledge_base/live_extracted_backup.json` (gitignored) → upserts into the `live_extracted_context` ChromaDB collection. Safe to re-run; missing API keys degrade individual extractors to zero documents rather than failing the run.
 
-A full live run populated **531 documents** across all five extractors (newsapi 265, serpapi 169, fred 16, acled 80, ambee 1) over the four chokepoints, with `documents_stored == documents_deduplicated` and no errors. That run also surfaced and fixed a cross-region de-duplication bug in `acled_extractor.py`: countries shared between chokepoints (Saudi Arabia in `hormuz` + `red_sea`, Egypt in `red_sea` + `suez`) previously produced identical `acled_{country}_{year}` document ids, so the second region's rows were silently dropped by the deduplicator — the id is now region-scoped (`acled_{region}_{country}_{year}`).
+Document ids are region-scoped (`acled_{region}_{country}_{year}`). They were not originally: countries shared between chokepoints produced identical ids, so the second region's rows were silently dropped by the deduplicator. Any extractor spanning overlapping country sets needs the same treatment.
+
+> **Historical note.** Earlier runs of this script are reported in [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md) with document counts that include the `ambee` extractor and the `red_sea` / `suez` region keys. Both are retired — Ambee returns zero documents with a valid key, and the two region keys were folded into `bab_el_mandeb`. Current sources are in [§3.3](#layer-1-in-detail--live-data-sources).
 
 ### API server
 
@@ -2302,7 +827,7 @@ uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8000 --reload
 
 API docs available at `http://localhost:8000/docs`.
 
-### Dashboard (Phase 9b)
+### Dashboard
 
 ```bash
 streamlit run src/dashboard/app.py
