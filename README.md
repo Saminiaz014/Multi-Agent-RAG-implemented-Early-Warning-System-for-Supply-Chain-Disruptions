@@ -62,7 +62,7 @@ Purely predictive systems are insufficient here. A risk score with no attributio
 | **SRQ1** | Can multi-domain signals detect chokepoint disruption? | `scripts/run_method_comparison.py` | Partially — Panama yes (0.909), Hormuz no (0.502) |
 | **SRQ2** | Does agent diversity add value over fewer agents? | Tier ablation · `notebooks/evaluation.py` METRIC 3 | **No — refuted on real data** ([§4.6](#46-the-central-negative-finding)) |
 | **SRQ3** | Can the score be explained faithfully? | `src/explainability/shap_explainer.py` · METRIC 2 | Yes, with a stated surrogate caveat |
-| **SRQ4** | Does weight optimization improve on hand-tuning? | `src/optimization/` · METRIC 5 | Unresolved — blocked by [§4.11](#411-known-defects-and-open-issues) |
+| **SRQ4** | Does weight optimization improve on hand-tuning? | `src/optimization/` · METRIC 5 | **Yes, on the synthetic objective** — lead time 1.67 → 5.00 d, F1 +0.039, at +0.0031 FPR ([§4.9](#49-weight-optimization-results)). Says nothing about real-data detection |
 | **SRQ5** | Would a decision-maker be led to the correct action? | `src/evaluation/decision_effectiveness.py` · METRIC 8 | Not currently citable — see [§4.11](#411-known-defects-and-open-issues) |
 
 ---
@@ -995,7 +995,17 @@ Optuna, TPE sampler (seed 42), median pruner, 100 trials, 1 h cap, Dirichlet-sty
 
 **Test-split discipline:** touched exactly once, after the study. `PipelineEvaluator.evaluated_splits` is an audit trail proving it.
 
-**Best run:** trial 63 of 100, validation objective **0.7491**.
+**Best run:** trial 63, validation objective **0.7491**. Reproduced 2026-09-05: **100 trials requested, 57 completed, 43 pruned** by the median pruner, of which 8 were rejected by the hard constraints. Quote all three numbers — "57 trials" alone reads as a truncated run, and "100 trials" alone hides the pruning.
+
+> ### These numbers are not comparable to [§4.5](#45-results)
+>
+> Everything in this section is measured on **synthetic splits**: three independent 365-day realisations of the same generated world (seeds 42 / 43 / 44), carrying a ground-truth `is_disruption` label the data generator placed deliberately.
+>
+> [§4.5](#45-results) is measured on the **real evaluation set**: live connector data 2019–2025, with a label derived statistically from vessel counts.
+>
+> Different data, different label, different harness. **An F1 of 0.933 here does not contradict a Tier 1 AUC of 0.502 there, and neither number transfers to the other setting.** The optimizer runs on synthetic data because it is the only source carrying a label that was placed rather than inferred — see [§3.4](#34-layer-1--ingestion). What this section establishes is that *tuning improves the pipeline against its own objective*, not that the pipeline detects real disruptions.
+
+### Weights
 
 | Agent | Hand-tuned L2 | Optimized L2 |
 |---|---|---|
@@ -1006,9 +1016,30 @@ Optuna, TPE sampler (seed 42), median pruner, 100 trials, 1 h cap, Dirichlet-sty
 | routing | 0.15 | 0.130 |
 | news_sentiment | 0.10 | **0.177** |
 
-The optimizer independently concentrates weight on shipping — consistent with the dilution mechanism in [§4.6](#46-the-central-negative-finding), since shipping is the domain the label is derived from.
+The optimizer independently concentrates weight on shipping — consistent with the dilution mechanism in [§4.6](#46-the-central-negative-finding), since shipping is the domain the label is derived from. It reaches that conclusion from the synthetic objective alone, without access to the real-data ablation.
 
-> ⚠️ **These weights cannot currently be cited as a result.** See [§4.11](#411-known-defects-and-open-issues) item 1.
+### Measured performance (synthetic splits, 365 days each)
+
+| Split | Config | F1 | Precision | Recall | FPR | Lead time | Objective |
+|---|---|---|---|---|---|---|---|
+| Validation | optimized | 0.978 | 1.000 | 0.957 | 0.000 | 4.33 d | **0.7491** |
+| Validation | hand-tuned | 0.932 | 1.000 | 0.872 | 0.000 | 1.67 d | 0.5659 |
+| Test | optimized | 0.933 | 0.977 | 0.894 | 0.0031 | 5.00 d | **0.7660** |
+| Test | hand-tuned | 0.894 | 1.000 | 0.809 | 0.000 | 1.67 d | 0.5471 |
+
+**The gain is lead time, not accuracy.** F1 improves by 0.039 on the test split; detection lead time improves from 1.67 to 5.00 days — the full width of the 5-day window the objective scores. That is what the `0.30·lead_time_score` term was written to buy.
+
+**And it is paid for in false positives.** Hand-tuning holds FPR at exactly 0.000 on both splits. Optimization gives up 0.0031 on test. The `−0.20·FPR` term permits that trade deliberately; whether 3 false positives per 1,000 days is worth 3.3 days of warning is an operational judgement the objective encodes but does not settle.
+
+**`weight_mode` remains `hand_tuned` by default.** Switching to `optimized` is a deliberate config change, because the trade above should be made knowingly.
+
+### Reproducibility
+
+The 2026-09-05 re-run reproduced `config/optimized_weights.yaml` **byte-identically apart from the date header** — every weight to six decimal places, same best trial. The optimizer is fully deterministic under its seed, so this section can be regenerated with:
+
+```bash
+python main.py --optimize --trials 100
+```
 
 ## 4.10 Threats to validity — what cannot be claimed
 
@@ -1024,18 +1055,19 @@ Stated explicitly, because a defence will find them otherwise.
 
 ## 4.11 Known defects and open issues
 
+### Resolved
+
+1. ~~**The optimization records contradict each other.**~~ **Fixed 2026-09-05.**
+
+   `data/processed/optimization_results.json` had been overwritten by a 5-trial smoke run (best trial 1, objective 0.6301) carrying a different weight vector from the committed YAML (news_sentiment 0.046 vs 0.177; natural_disaster 0.168 vs 0.095). Because **`notebooks/evaluation.py` METRIC 5 reads that JSON**, the suite would have reported the smoke run as the optimization result.
+
+   Re-running the full study (`python main.py --optimize --trials 100`) regenerated both artifacts consistently. The YAML came back **byte-identical apart from its date header**, confirming that the committed weights were always the genuine 100-trial result and that the JSON was the only corrupted artifact. Results are now in [§4.9](#49-weight-optimization-results).
+
 ### Blocking
 
-1. **The optimization records contradict each other.**
+1. **The 8-metric suite has never been run against the current system.** `evaluation_results.json` and `thesis_comparison_table.json` are dated **2026-07-30** — before the re-optimization and before the shipping level-shift rework. METRICS 1–8 as they sit on disk describe a superseded system.
 
-   ```
-   config/optimized_weights.yaml            → 100 trials, best trial 63, val 0.7491
-   data/processed/optimization_results.json →   5 trials, best trial  1, obj 0.6301
-   ```
-
-   Entirely different weight vectors (news_sentiment 0.177 vs 0.046; natural_disaster 0.095 vs 0.168). The JSON was overwritten by an apparent smoke run; the committed YAML is still the 100-trial result. **`notebooks/evaluation.py` METRIC 5 reads that JSON**, so running the suite today reports the 5-trial numbers as the optimization result. The two SHAP comparison plots were generated in that same session and are suspect. **Fix: re-run the 100-trial optimization before writing up results.**
-
-2. **The 8-metric suite has never been run against the current system.** `evaluation_results.json` and `thesis_comparison_table.json` are dated 2026-07-30 — a month before the re-optimization and the shipping rework. METRICS 1–8 as they sit on disk describe a superseded system.
+   Note that resolving the optimization contradiction above does **not** clear this. METRIC 5 will now read a correct JSON, but the other seven metrics have not been recomputed. **No 8-metric number should be cited until `notebooks/evaluation.py` is re-run end to end.**
 
 ### Code-level inconsistencies to disclose
 
@@ -1046,6 +1078,7 @@ Stated explicitly, because a defence will find them otherwise.
 5. **`PipelineEvaluator.build_agents` hardcodes agent config** instead of reading `settings.yaml`, so the optimizer tunes a slightly different agent than the live pipeline runs.
 6. **The SHAP surrogate sees 20 of the features, not all.** Absent: `tanker_count`, `vessel_count_trend`, `freight_services_pct_change`, `vessels_holding`, `alternative_route_traffic`, `sentiment_magnitude`, `recency_weighted_score`. Missing columns fill with 0.0 — indistinguishable from a true zero.
 7. **The shipping duration score is near-circular** against the level-shift label. Cite operationally, never as detection skill.
+8. **The test suite writes into the figure directory.** `tests/test_phase4_depth.py::test_comparison_plots_saved` calls `generate_comparison_plot(..., save_dir="data/processed/")`, so **running `pytest` silently overwrites `shap_comparison_waterfall.png` and `shap_comparison_importance.png` with plots built from test fixtures**. Any figure taken from that directory must be regenerated from a real pipeline run *after* the last test invocation. The test should write to a `tmp_path` fixture instead.
 
 ### Four composite paths that are not identical
 
@@ -1066,8 +1099,8 @@ Always state which produced a reported number.
 |---|---|---|
 | Method comparison (7) | `eval/graphs_method_comparison/` | **Current, real data — cite freely** |
 | Tier ablation (3) | `eval/graphs_ablation_tiers/` | **Current** |
-| Optimizer (6) | `data/processed/` (gitignored) | Current |
-| SHAP comparison (2) | `data/processed/` (gitignored) | ⚠ Suspect — generated in the 5-trial session |
+| Optimizer (6) | `data/processed/` (gitignored) | **Current** — regenerated 2026-09-05 by the 100-trial re-run |
+| SHAP comparison (2) | `data/processed/` (gitignored) | ⚠ **Do not cite.** Overwritten by the *test suite* on every run — see the disclosure below. They show fixture data, not a real pipeline run |
 | SHAP beeswarm/waterfall (2) | `data/processed/` (gitignored) | ✗ **Stale (2026-06-20) — do not cite** |
 
 Malacca deliberately has no tier-progression chart: `graph_tiers()` drops NaN-AUC rows and all of Malacca's are NaN. It is covered instead by `A2_false_positive_harness.png`. All four regions' tier data is in the CSV.
@@ -1282,7 +1315,7 @@ The 8-metric suite runs separately on the synthetic splits:
 python notebooks/evaluation.py
 ```
 
-> ⚠️ Its output is **not currently citable** — see [§4.11](#411-known-defects-and-open-issues). Re-run the 100-trial optimization first, or METRIC 5 will report a 5-trial smoke run as the optimization result.
+> ⚠️ Its output is **not currently citable** — see [§4.11](#411-known-defects-and-open-issues). The optimization records it reads were repaired on 2026-09-05, so METRIC 5 is now sound, but METRICS 1–8 on disk still date from 2026-07-30 and describe a superseded system. Re-run this script end to end before citing any of them.
 
 ### Populate the RAG knowledge base from live APIs
 
