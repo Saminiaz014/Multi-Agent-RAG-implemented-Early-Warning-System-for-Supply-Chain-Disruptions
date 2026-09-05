@@ -26,7 +26,10 @@ A **Decision Support System (DSS)** that detects, explains, and contextualises d
 - [1. Problem and Scope](#1-problem-and-scope)
 - [2. Research Questions](#2-research-questions)
 - [3. Methodology](#3-methodology)
-  - [3.1 Research design](#31-research-design) · [3.2 Requirements](#32-design-requirements) · [3.3 Architecture](#33-system-architecture) · [3.4 Detection models](#34-detection-models) · [3.5 Evidence discipline](#35-evidence-discipline) · [3.6 Weighting](#36-weight-determination) · [3.7 Aggregation](#37-risk-aggregation) · [3.8 Explainability & RAG](#38-explainability-and-retrieval) · [3.9 Implementation](#39-implementation)
+  - [3.1 Research design](#31-research-design) · [3.2 Requirements](#32-design-requirements) · [3.3 Architecture](#33-system-architecture)
+  - [3.4 Ingestion](#34-layer-1--ingestion) · [3.5 Detection agents](#35-layer-2--detection-agents) — [shipping](#351-shippingagent) · [market](#352-marketagent) · [geopolitical](#353-geopoliticalagent) · [disaster](#354-disasteragent) · [news](#355-newsagent) · [routing](#356-routingagent--dormant)
+  - [3.6 Aggregation](#36-layer-3--risk-aggregation) · [3.7 Explainability](#37-layer-4--explainability) · [3.8 Retrieval](#38-layer-5--retrieval) · [3.9 Presentation](#39-layer-6--presentation)
+  - [3.10 Evidence discipline](#310-evidence-discipline) · [3.11 Weighting](#311-weight-determination-and-optimization) · [3.12 Configuration](#312-configuration-and-region-overlays) · [3.13 Verification](#313-verification-methodology) · [3.14 Summary](#314-implementation-summary)
 - [4. Evaluation](#4-evaluation)
   - [4.1 Design](#41-evaluation-design) · [4.2 Data](#42-dataset-and-ground-truth) · [4.3 Baselines](#43-baselines-tiers-and-circularity) · [4.4 Metrics](#44-metrics) · [4.5 Results](#45-results) · [4.6 Negative finding](#46-the-central-negative-finding) · [4.7 Root cause](#47-root-cause-analysis--why-hormuz-sits-at-chance) · [4.8 Rejected hypotheses](#48-hypotheses-tested-and-rejected) · [4.9 Optimization](#49-weight-optimization-results) · [4.10 Validity](#410-threats-to-validity--what-cannot-be-claimed) · [4.11 Defects](#411-known-defects-and-open-issues)
 - [Project Structure](#project-structure) · [Installation](#installation) · [Running](#running)
@@ -66,31 +69,59 @@ Purely predictive systems are insufficient here. A risk score with no attributio
 
 # 3. Methodology
 
+This chapter describes the research approach, the requirements the artifact was built to satisfy, and the design and implementation of every layer of the system. Each section states the **analysis** — the reasoning behind a decision and the alternative it rejects — followed by the **implementation** that realises it in code.
+
+The organising principle throughout is that a design decision is only defensible if the alternative was considered and the reason for rejecting it is recorded. Where a decision later proved wrong, that is stated at the point of use rather than in a separate errata.
+
+---
+
 ## 3.1 Research design
 
-The work follows **Design Science Research**: an artifact is built to address a practical problem, then evaluated against criteria fixed in advance. The artifact is the DSS; the evaluation is the method comparison in [§4](#4-evaluation).
+### Analysis
 
-The methodological commitment that shapes everything below is that **an evaluation must be able to fail**. Three design decisions enforce this — a temporal split applied identically to every method, tiers that instantiate real agent classes rather than column averages, and an explicit circularity rating attached to every method. Each is described in [§4.1](#41-evaluation-design). They are what allow the negative results in [§4.6](#46-the-central-negative-finding) to be trusted rather than explained away.
+The work follows **Design Science Research**: an artifact is constructed to address a practical problem, then evaluated against criteria fixed before the results are known. The artifact is the decision support system described in §3.3–§3.9; the evaluation is the method comparison in [§4](#4-evaluation).
+
+The methodological commitment that shapes every subsequent decision is that **an evaluation must be able to fail**. It is trivially easy to build a detection benchmark that flatters the system under test: score the model on rows it was fitted to, compare against baselines that were not tuned, choose a label the model's own inputs construct, and report the best of several runs. Each of those produces a number that is real, reproducible, and worthless.
+
+Three design decisions guard against this, and they are described in full in [§4.1](#41-evaluation-design):
+
+1. **One temporal split, applied identically to every method** — nothing is scored on rows it was fitted to, and the split is temporal rather than random so the future cannot leak into the past.
+2. **Tiers instantiate real agent classes** — an ablation that approximates a tier by averaging feature columns measures nothing about the agents.
+3. **Every method carries a circularity rating** — because the ground-truth label is derived from vessel counts, any method reading vessel counts against a long baseline predicts it partly by construction, and that must be visible on the face of every results table.
+
+These are what allow the negative findings in [§4.6](#46-the-central-negative-finding) and [§4.7](#47-root-cause-analysis--why-hormuz-sits-at-chance) to be trusted rather than explained away. They are stated here, in the methodology, because they are design commitments made before the results existed — not defences constructed afterwards.
+
+### The consequence for what this system claims
+
+A second commitment follows from the first. Because the evaluation was built to be able to fail, and did fail on two of four regions, the claim the artifact makes is narrower than the one originally hypothesised. The system is not presented as a better detector. It is presented as a system that produces **auditable, attributable, decision-ready alerts**, evaluated by a method that quantifies what that costs in detection performance. The full statement is at the top of this document; the evidence for the cost is [§4.5](#45-results).
+
+---
 
 ## 3.2 Design requirements
 
-Derived from the problem statement in [§1](#1-problem-and-scope):
+### Analysis
 
-| # | Requirement | Realised by |
-|---|---|---|
-| R1 | Separate ingestion, detection, and decision support so each can change independently | Layered architecture, [§3.3](#33-system-architecture) |
-| R2 | Handle heterogeneous structured and unstructured sources | Six connectors behind one ABC |
-| R3 | Attribute every score to a named domain | Per-agent breakdown in `RiskEngine` |
-| R4 | Attribute every score to named input features | SHAP surrogate, [§3.8](#38-explainability-and-retrieval) |
-| R5 | Ground alerts in comparable past events | RAG retrieval, [§3.8](#38-explainability-and-retrieval) |
-| R6 | Keep every number auditable by a domain expert | No end-to-end learned model, [§3.4](#34-detection-models) |
-| R7 | Degrade gracefully when a source or agent is unavailable | Weight renormalisation, [§3.7](#37-risk-aggregation) |
+Requirements are derived from the problem statement in [§1](#1-problem-and-scope), specifically from the observation that a risk score without attribution cannot support a decision. R3–R6 exist because of that; R1, R2 and R7 exist because the system must survive contact with real, intermittent, heterogeneous data sources.
+
+| # | Requirement | Rationale | Realised by |
+|---|---|---|---|
+| **R1** | Separate ingestion, detection, and decision support so each can change independently | Sources change far more often than detection logic | Layered architecture with two ABCs, [§3.3](#33-system-architecture) |
+| **R2** | Handle heterogeneous structured and unstructured sources | Evidence arrives as transit counts, prices, event records, and news text | Six connectors behind one contract, [§3.4](#34-layer-1--ingestion) |
+| **R3** | Attribute every score to a named domain | A manager must know *which* domain raised the alarm | Per-agent breakdown in `RiskEngine.compute_risk`, [§3.6](#36-layer-3--risk-aggregation) |
+| **R4** | Attribute every score to named input features | Domain attribution alone does not say *what moved* | SHAP surrogate, [§3.7](#37-layer-4--explainability) |
+| **R5** | Ground alerts in comparable past events | Precedent is what converts a number into a judgement | Threshold-gated RAG, [§3.8](#38-layer-5--retrieval) |
+| **R6** | Keep every number auditable by a domain expert | An unauditable score cannot be defended in a review | No end-to-end learned model, [§3.5](#35-layer-2--detection-agents) |
+| **R7** | Degrade gracefully when a source or agent is unavailable | Free-tier APIs fail, and some domains have no evidence in some regions | Weight renormalisation at two levels, [§3.6](#36-layer-3--risk-aggregation) |
+
+**R7 is load-bearing and easy to underestimate.** Five of the six live sources are free-tier services that fail intermittently, one domain has no usable free source at all, and three of the four regions have at least one domain with no documented driver. A system that required all six agents to report would produce nothing for most region-days. Renormalisation appears twice — inside an agent over its own features ([§3.5](#35-layer-2--detection-agents)) and across agents in the aggregator ([§3.6](#36-layer-3--risk-aggregation)) — because absence occurs at both levels.
+
+---
 
 ## 3.3 System architecture
 
 ### Analysis
 
-The pipeline is a strict one-way flow. Each stage has a single responsibility and a defined output contract, so a stage can be replaced without touching its neighbours — the property that made it possible to swap five connectors from synthetic to live data without changing a single agent.
+The pipeline is a strict one-way flow with no feedback path. Each stage has one responsibility and a defined output contract, so a stage can be replaced without touching its neighbours. This is not architectural decoration: it is the property that made it possible to migrate five connectors from synthetic generation to live APIs without modifying a single agent, and to mute an entire agent domain across all four regions without touching the aggregator.
 
 ```
 connector (ingestion)      raw domain frame, daily index
@@ -108,50 +139,148 @@ SHAP surrogate · RAG retrieval · Streamlit dashboard
 Optuna optimizer · evaluation harnesses
 ```
 
+### The two contracts
+
+Everything in the system is built against one of two abstract base classes. Both are deliberately small — a contract that specifies too much prevents exactly the substitution it exists to enable.
+
+**`BaseConnector`** (`src/ingestion/base_connector.py`) declares two abstract methods:
+
+| Method | Contract |
+|---|---|
+| `fetch()` | Return a raw domain frame on a daily index, from whichever mode is configured |
+| `validate(df)` | Schema, domain and gap checks; return the cleaned frame |
+| `fetch_and_validate()` | Concrete convenience wrapper; agents call this |
+
+**`BaseAgent`** (`src/agents/base_agent.py`) declares four abstract methods plus a `DetectionResult` dataclass:
+
+| Method | Contract |
+|---|---|
+| `fit(df)` | Calibrate any model or baseline the agent needs |
+| `detect(df)` | Produce `anomaly_score ∈ [0,1]` and `is_anomaly` per row |
+| `set_weights(...)` | Override intra-agent feature weights — the L1 layer the optimizer searches |
+| `set_threshold(...)` | Override the detection cutoff — part of the L3 layer |
+| `fit_detect(df)` | Concrete convenience wrapper |
+
+`set_weights` and `set_threshold` are abstract rather than optional because **every agent must be tunable by the optimizer**. An agent that hardcoded its weights would silently drop out of the L1 search space in [§3.11](#311-weight-determination-and-optimization).
+
+### The six-stage lifecycle
+
+Beyond the ABC, all six agents implement the same six-stage lifecycle by convention. The ABC does not enforce stages 2, 4 and 5 because not every agent needs a meaningful implementation of each — the disaster agent's `preprocess` is nearly a pass-through — but every agent provides them, so the orchestrator and the evaluation harness can treat agents uniformly.
+
+| Stage | Purpose | Consumed by |
+|---|---|---|
+| `fit` | Calibrate scaler, forest, or baseline window | Once per pipeline run |
+| `preprocess` | Derive features, fill gaps, compute rolling statistics, scale | `detect` |
+| `detect` | Score every row into `[0,1]`, flag against threshold | `validate`, and the evaluation harness |
+| `validate` | Suppress false positives via persistence and corroboration gates | `output` |
+| `output` | Collapse contiguous flagged rows into structured window reports | Dashboard, API |
+| `run` / `run_dataframe` | Orchestrate the above and return reports or a frame | `Orchestrator` |
+
+**A consequence that matters for reading [§4](#4-evaluation):** the method comparison harness scores agents via `detect(preprocess(frame))` and **never calls `validate()`**. Everything in the validation stage — every persistence gate and corroboration rule described below — is therefore invisible to the AUC numbers in [§4.5](#45-results). This is the reason one of the two rejected hypotheses in [§4.8](#48-hypotheses-tested-and-rejected) turned out to be structurally inert.
+
 ### Implementation
 
 | Layer | Responsibility | Code |
 |---|---|---|
-| **1 — Ingestion** | Fetch, validate, and normalise each domain to a daily index | `src/ingestion/*_connector.py`, all extending `BaseConnector` |
-| **2 — Detection** | Per-domain anomaly scoring | `src/agents/*_agent.py`, all extending `BaseAgent` |
-| **3 — Aggregation** | Fuse agent scores into a composite risk + level | `src/aggregation/risk_engine.py` |
+| **1 — Ingestion** | Fetch, validate, normalise each domain to a daily index | `src/ingestion/*_connector.py` |
+| **2 — Detection** | Per-domain anomaly scoring | `src/agents/*_agent.py` |
+| **3 — Aggregation** | Fuse agent scores into a composite risk and level | `src/aggregation/risk_engine.py` |
 | **4 — Explainability** | Attribute the composite to input features | `src/explainability/shap_explainer.py` |
 | **5 — Retrieval** | Ground the alert in historical precedent | `src/rag/context_retriever.py` |
-| **6 — Presentation** | Decision view and analysis view | `src/dashboard/`, `src/api/endpoints.py` |
+| **6 — Presentation** | Decision view, analysis view, REST API | `src/dashboard/`, `src/api/endpoints.py` |
+| **Orchestration** | Wire the above, per region | `src/orchestrator.py`, `main.py` |
 
-Each connector retains `csv` and `synthetic` modes alongside `api`. `synthetic` is the only mode carrying ground-truth labels, which is why the optimizer and the 8-metric suite still use it.
+---
 
-### Layer 1 in detail — live data sources
+## 3.4 Layer 1 — Ingestion
 
-Five of the six agents read a live, free public API; the sixth is dormant by decision ([§3.5](#35-evidence-discipline)).
+### Analysis
+
+Every connector supports three modes, selected per connector by `source_mode` or `data_mode`. The three exist for genuinely different purposes, and conflating them would undermine the evaluation.
+
+| Mode | Purpose | Carries labels? |
+|---|---|---|
+| `api` | Live data from the domain's real source. The evidence basis for [§4](#4-evaluation) | No |
+| `csv` | A downloaded static extract. Reproducible, offline, no rate limits | Sometimes |
+| `synthetic` | Generated data with injected disruption scenarios | **Yes** |
+
+**`synthetic` is not a placeholder mode.** It is the only mode that carries ground-truth `is_disruption` labels, which is why the Optuna optimizer and the 8-metric suite still run on it: they need a label the data generator placed deliberately, not one inferred from the data. The real evaluation set built in [§4.2](#42-dataset-and-ground-truth) uses `api` mode and derives its label statistically — with the circularity consequences recorded in [§4.1](#41-evaluation-design).
+
+### Live data sources
+
+Five of the six agents read a live, free public API. The sixth is dormant by decision ([§3.10](#310-evidence-discipline)).
 
 | Agent | Live source | Access | Notes |
 |---|---|---|---|
 | **Shipping** | [IMF PortWatch](https://portwatch.imf.org) Daily Chokepoints (ArcGIS FeatureServer) | **No credentials** | Daily transits per chokepoint, 2019–2026, all four regions. The evidence-grade backbone of the evaluation set |
-| **Market** | [FRED API](https://fred.stlouisfed.org/docs/api/fred/) | Free (key) | Brent Crude `DCOILBRENTEU`, Freight PPI `PCU4831114831111`, Freight Services Index `PCUATFREIATFREI` |
+| **Market** | [FRED API](https://fred.stlouisfed.org/docs/api/fred/) | Free (key) | Brent Crude `DCOILBRENTEU`, Freight PPI `PCU4831114831111`, Freight Services `PCUATFREIATFREI` |
 | **Geopolitical** | [ACLED](https://acleddata.com) | Free (OAuth) | Battles/Explosions → `military_activity_index`; Strategic developments → `diplomatic_incident_score`; Protests/Riots → inverse `regime_stability_index` |
-| **Natural Disaster** | [GDACS](https://www.gdacs.org) + [USGS](https://earthquake.usgs.gov/fdsnws/event/1/) | **No credentials** | GDACS Orange/Red alerts only — green-inclusive queries exceed GDACS's silent 100-result cap every month. USGS supplies magnitude and the tsunami flag |
+| **Natural Disaster** | [GDACS](https://www.gdacs.org) + [USGS](https://earthquake.usgs.gov/fdsnws/event/1/) | **No credentials** | GDACS Orange/Red alerts only; USGS supplies magnitude and the tsunami flag |
 | **News Sentiment** | [GDELT DOC API v2](https://api.gdeltproject.org/api/v2/doc/doc) | **No credentials** | Tone scores. Answered for Panama only in the evaluation window |
 | **Routing** | — | — | **Dormant** — no free source supplies evidence-grade rerouting data |
 
-**Two deliberate absences, each an affirmative finding rather than a gap:**
+### Connector-by-connector
 
-- **`sanctions_severity` is not produced.** ACLED carries no sanctions data; OpenSanctions is paywalled and publishes current designations rather than a time series; and sanctions are discrete events, so any daily "severity" curve would be a modelling artefact. `GeopoliticalAgent` renormalises its weights over the three features ACLED does supply. Scoring the missing column as zero would read as *"no sanctions risk"* rather than *"not measured."*
-- **`NewsAgent` renormalises the same way** when GDELT does not answer for a region.
+**`ShippingConnector`** — the most consequential connector, because the ground-truth label is derived from its output.
+
+- `api` mode queries PortWatch's `Daily_Chokepoints_Data` FeatureServer layer for daily transit counts at the chokepoint itself, for every region, 2019-01-01 to present, refreshed daily, with no credentials. `n_total` becomes `vessel_count` and `n_tanker` becomes `tanker_count`; the per-vessel-type counts travel with the frame for provenance and future features.
+- `csv` mode reads a static PortWatch export for a single Persian Gulf port (Shuaiba, Kuwait) — the same provider, a narrower scope.
+- `synthetic` mode generates a 365-day series with three injected disruption scenarios and a ground-truth label.
+- The connector pins the April–May 2026 Hormuz shutdown as known ground truth (`_KNOWN_SHUTDOWN_START` / `_END`). **That window is outside the evaluation frame**, which ends 2025-08-30 — see [§4.2](#42-dataset-and-ground-truth).
+- Raises `ValueError` rather than returning empty when a region has no `portwatch_chokepoint` configured or the API returns no rows: an empty series here means a name mismatch, not a quiet chokepoint.
+
+**`MarketConnector`** — three FRED series on mixed frequencies. Brent is daily; freight PPI and freight services are monthly and are forward-filled to daily. Trade volume is derived from inverse Brent volatility. In `csv` mode the ground-truth label is computed from co-occurring Brent and freight spikes.
+
+**`GeopoliticalConnector`** — delegates ACLED's OAuth lifecycle to `ACLEDExtractor` rather than re-implementing token exchange. Fetches per country, per year, and **warns when a year hits the per-year event cap**, because a capped page is indistinguishable from a complete one. Raises `ValueError` when a region has no `acled_countries` configured — a live query with no country filter would silently return the wrong thing.
+
+**`DisasterConnector`** — queries GDACS `geteventlist` restricted to `Orange;Red` alert levels, and USGS `fdsnws` for seismicity. The alert-level restriction is not conservatism: green-inclusive GDACS queries exceed its **silent 100-result cap** every month, so including them would truncate the response without any error. GDACS hazard codes `FL`, `WF`, `DR` fold into `severe_weather_index`; tropical cyclones drive `cyclone_severity`; USGS supplies `earthquake_severity` on a documented magnitude scale and a real `tsunami_risk` flag.
+
+**`NewsConnector`** — GDELT DOC API v2 tone scores. GDELT answered for only one of four regions across the evaluation window, which is why `NewsAgent` renormalises over present components ([§3.5](#35-layer-2--detection-agents)).
+
+**`RoutingConnector`** — `fetch_api()` raises `NotImplementedError`. This is a recorded decision, not an unfinished task; see [§3.10](#310-evidence-discipline).
+
+### Two deliberate absences
+
+Both are affirmative findings about the evidence rather than gaps in the implementation, and both are handled by renormalisation rather than by imputation:
+
+- **`sanctions_severity` is not produced.** ACLED carries no sanctions data. OpenSanctions is paywalled and publishes current designations rather than a time series. Sanctions are discrete events, so any daily "severity" curve would be a modelling artefact rather than a measurement. Scoring the missing column as zero would read as *"no sanctions risk"* rather than *"not measured"*.
+- **`source_consensus` is absent for GDELT-sourced news.** Same reasoning: zero would read as *"outlets disagree"*.
 
 > **Naming trap.** `ShippingConnector` and `MarketConnector` each carry two similarly named methods. `fetch_from_api()` is the real live path and is what `fetch()` dispatches to in `api` mode. `fetch_api()` is a leftover convenience hook that logs a warning and **silently returns synthetic data**. Call `fetch()` or `fetch_and_validate()`, never `fetch_api()` directly. Several docstrings in these two modules still describe `api` mode as an unimplemented aisstream.io stub and are themselves out of date.
 
-## 3.4 Detection models
+### The unified daily schema
 
-### Analysis
+Whichever mode produced it, every connector emits the same contract: a **daily-frequency frame on a monotonically increasing timestamp index**, with the domain's feature columns and nothing else. Agents therefore never know which mode produced their input, which is what allowed the migration from synthetic to live data to leave the agent layer untouched.
 
-**There is no end-to-end learned model, and this is a deliberate design position rather than an unfinished component.** The only fitted models in the entire scoring path are two Isolation Forests and their scalers. Everything else is explicit arithmetic — weighted composites, rolling z-scores, a sigmoid.
+`validate()` enforces the contract before an agent ever sees the frame:
 
-The consequence is that every number the system produces traces to a formula a domain expert can read and dispute. That is the property the decision-support claim rests on. A gradient-boosted model over the same features would very likely score better on the metrics in [§4.5](#45-results) and would forfeit exactly the thing this system exists to provide.
+Taking `ShippingConnector.validate()` as the reference implementation:
+
+| Check | Behaviour |
+|---|---|
+| `timestamp` and `vessel_count` present | **Assert** — a missing feature column is a contract violation |
+| No NaN in `timestamp` or `vessel_count` | **Assert** |
+| `vessel_count >= 0` | **Assert** — a negative transit count is not recoverable |
+| `congestion_index` within `[0, 1]` | **Assert**, when the column is present |
+| Timestamps monotonically increasing | **Assert** — out-of-order rows silently corrupt every rolling window |
+| Gaps > 2 days | **Warn** and retain, reporting the count and the largest |
+| Gaps ≤ 2 days | **Forward-fill** (`ffill(limit=2)`) |
+
+The asymmetry in the last two rows is deliberate. A weekend gap in a daily series is a reporting artefact and should be filled. A longer gap is a real absence of evidence, and the `limit=2` on the forward-fill is what stops it being papered over — filling a three-week gap would manufacture exactly the calm baseline the level-shift detector in [§3.5.1](#351-shippingagent) measures against, turning missing data into a spurious "traffic is normal" signal.
+
+Assertions rather than exceptions are a deliberate choice at this boundary: these are conditions that should be impossible if the connector above is correct, so they document invariants rather than handle expected failures. Expected failures — a region with no configured chokepoint, an API returning nothing — raise `ValueError` further up, where the orchestrator's `_safe_fetch` can catch them and degrade gracefully.
+
+---
+
+## 3.5 Layer 2 — Detection agents
+
+### Analysis — there is no end-to-end learned model
+
+The only fitted models anywhere in the scoring path are **two Isolation Forests and their `StandardScaler`s**. Every other agent is explicit arithmetic: weighted composites, rolling z-scores, one sigmoid.
+
+This is a deliberate design position and the foundation of R6. The consequence is that every number the system produces traces to a formula a domain expert can read, check, and dispute. A gradient-boosted model over the same features would very likely score better on the metrics in [§4.5](#45-results) — and would forfeit exactly the property the decision-support claim rests on.
 
 The RandomForest in `src/explainability/` is a **post-hoc surrogate**. It explains the score; it never produces it.
-
-### Implementation
 
 | Agent | Model |
 |---|---|
@@ -161,82 +290,194 @@ The RandomForest in `src/explainability/` is a **post-hoc surrogate**. It explai
 | `natural_disaster` | Weighted composite + single-event max override |
 | `routing` | Isolation Forest (200 trees, seed 42) + transit-ratio z-score — **dormant** |
 | `news_sentiment` | Weighted composite of four normalised components |
-| **aggregation** | Renormalised weighted mean + non-linear agreement bonus |
 
-Per-agent formulas: [`docs/SCORING_REFERENCE.md`](docs/SCORING_REFERENCE.md).
+---
 
-## 3.5 Evidence discipline
+### 3.5.1 ShippingAgent
 
-### Analysis
+The most detailed agent, because it carries the most weight and because its behaviour is the root cause of the central negative result in [§4.7](#47-root-cause-analysis--why-hormuz-sits-at-chance).
 
-An agent can be off for three distinct reasons, and conflating them would misrepresent the system's coverage. Each exclusion below is an **affirmative finding about the evidence**, not missing data:
+**Features.** Three base columns — `vessel_count`, `avg_delay_hours`, `congestion_index` — plus two optional PortWatch columns auto-discovered when present: `tanker_count`, and `vessel_count_7dma` from which `vessel_count_trend` is derived.
 
-- **Active** — built, run, and weighted.
-- **Passive** — a per-region evidence judgement. The domain is real, but no documented driver exists at that chokepoint in the observation window. It would activate if evidence appeared.
-- **Dormant** — a project-scope decision (`DORMANT_AGENTS`). No region may activate it; enforced at registry validation.
+#### `fit(df)` — calibrate without leakage
 
-| Agent | Hormuz | Panama | Bab el-Mandeb | Malacca |
-|---|---|---|---|---|
-| shipping | active | active | active | active |
-| market | active | active | active | **passive** |
-| geopolitical | active | **passive** | active | active |
-| natural_disaster | active | active | **passive** | active |
-| routing | **dormant** | **dormant** | **dormant** | **dormant** |
-| news_sentiment | active | active | active | active |
-
-**Exclusion reasons:**
-
-- **market / Malacca** — all four documented Malacca events carry a null market field. Removed as a data-standards violation, not on plausibility grounds.
-- **geopolitical / Panama** — the documented disruption is purely hydrological.
-- **natural_disaster / Bab el-Mandeb** — the documented event is a security campaign; `disaster_relevance: none`.
-- **routing / all four** — uniform muting. `fetch_api()` is a `NotImplementedError` stub, so the agent only ever emitted synthetic values.
-
-**The asymmetry worth writing up:** Bab el-Mandeb's routing evidence is the *strongest in the benchmark* — 85 % of large containerships diverted via the Cape of Good Hope, +3,500–4,000 nm and +10–14 days per voyage, a documented percentage rather than an extrapolation — and routing is muted there *in spite of* that, because no free source supplies it as a time series.
-
-**Consequence that must be stated:** with routing dormant everywhere, no evaluation can measure routing's contribution in any region. Evaluation results alone cannot settle whether to re-enable it.
-
-### Implementation
-
-`src/core/regions.py` holds the registry. `DORMANT_AGENTS` is a module-level `frozenset`; per-region activation lives in each `RegionConfig` and is overlaid from `config/regions/*.yaml`. Registry validation raises if a region config activates a dormant agent, so reviving routing is a deliberate edit to `DORMANT_AGENTS` rather than an accidental YAML toggle. Passive agents are simply absent from a region's active set and are handled by the renormalisation in [§3.7](#37-risk-aggregation).
-
-## 3.6 Weight determination
-
-### Analysis
-
-Weights exist at three layers, all searchable by the optimizer:
-
-| Layer | What it weights | Location | Optimized? |
-|---|---|---|---|
-| **L1** intra-agent | features within one agent | `agent.set_weights()` | yes |
-| **L2** inter-agent | agents against each other | `RiskEngine.weights` | yes |
-| **L3** thresholds | detection cutoffs, risk bands, agreement bonuses | `set_threshold()` + `RiskEngine` | yes |
-
-`weight_mode` in `config/settings.yaml` selects `hand_tuned` (current default) or `optimized`.
-
-**The hand-tuned risk bands are empirically calibrated, not chosen by intuition.** They are the p60 / p85 / p97 quantiles of the composite score on *calm* (label-negative) days, pooled across all four regions 2019–2026 — **9,183 days**:
-
-```yaml
-thresholds:
-  risk_critical: 0.90   # p97 of calm days
-  risk_high:     0.69   # p85
-  risk_medium:   0.51   # p60  -> ~60% of calm days read LOW
-  risk_low:      0.30
+```python
+if "is_disruption" in train.columns:
+    train = train.loc[~train["is_disruption"].astype(bool)]
 ```
 
-They were recalibrated when the shipping agent stopped batch-normalising its forest score. Batch min-max forced every scored window onto `[0,1]` by its own extremes, so the old `0.8 / 0.6 / 0.4` boundaries were tuned to a compressed, window-relative distribution. On absolute scores the calm median rose to ≈0.47. The new bands are the **same quantiles of calm behaviour expressed on the new scale — a re-scaling, not a loosening**.
+The scaler and forest are fitted **only on label-negative rows** when a ground-truth column is present, so the notion of "normal" the forest learns is not contaminated by the disruptions it must later detect.
 
-### Implementation
+> **A caveat that matters for [§4.8](#48-hypotheses-tested-and-rejected).** On the real evaluation path this filter never fires, because the harness passes only `timestamp` and `shipping__*` columns to the agent — `y_true` never reaches it. The forest producing the Hormuz result was therefore trained on mixed normal and disruption days. This was discovered while testing a hypothesis that assumed the opposite.
 
-| Concern | Code |
-|---|---|
-| Weight config and `weight_mode` switching | `src/optimization/weight_config.py` · `config/optimized_weights.yaml` |
-| Optuna study, parameter space, constraints | `src/optimization/weight_optimizer.py` |
-| Objective evaluation and split discipline | `src/optimization/pipeline_evaluator.py` |
-| Split construction | `src/optimization/data_split.py` |
+The forest is `IsolationForest(contamination=0.1, random_state=42, n_estimators=200)`. Its raw scores are then anchored:
 
-Optimization procedure and results: [§4.9](#49-weight-optimization-results).
+```python
+train_scores = -self._iforest.decision_function(scaled)
+self._iforest_low  = np.percentile(train_scores, 5)
+self._iforest_high = np.percentile(train_scores, 95)
+```
 
-## 3.7 Risk aggregation
+**Percentiles, not min/max.** A single extreme training row would otherwise set the ceiling and compress everything beneath it into a narrow band.
+
+#### `preprocess(data)` — project into the trained space
+
+Selects active features, derives optional ones, forward-fills gaps, and applies the **already-fitted** scaler. New data is projected into the training space rather than re-standardised against itself.
+
+#### `level_shift_score(vessel_count)` — the duration signal
+
+The shock detectors cannot hold a flag across a sustained disruption. Two of the three base features — `congestion_index` and `avg_delay_hours` — are themselves derived from `vessel_count` against a 30-day rolling baseline, so once traffic settles at a lower level that baseline follows it down and both return to calm values. **Measured on the evaluation set their correlation with a sustained-disruption label is −0.06 and −0.05: no signal at all**, leaving one useful feature of three.
+
+The duration score measures how far traffic sits below its own *trailing annual* baseline:
+
+```python
+rolling  = vessel_count.rolling(30, min_periods=10).mean()
+baseline = vessel_count.shift(30).rolling(365, min_periods=91).median()
+shortfall = (baseline - rolling) / baseline
+magnitude = (shortfall / 0.40).clip(0, 1)          # 40% drop = full strength
+
+below       = (shortfall > 0.10).astype(float)      # floor, or noise accumulates
+persistence = below.rolling(14, min_periods=14).mean()
+score = (magnitude * persistence).clip(0, 1)
+```
+
+The baseline is **trailing and shifted**, not rolling, precisely because a rolling baseline adapts to the new level and reads a settled disruption as calm. The persistence factor means a one-off dip scores near zero however deep, while a shift that holds for a fortnight reaches full strength.
+
+> **This score is not evidence of detection skill against a shipping-derived label.** It is computed from the very series such a label is built from and will predict one nearly by construction. It earns its place **operationally** — an alert should persist while the disruption does — not evaluatively. This is why every tier in [§4.5](#45-results) is rated `high` circularity.
+
+#### `detect(data)` — and the masking bug
+
+```python
+iforest_norm = clip((−decision_function(scaled) − low) / (high − low), 0, 1)
+max_z_norm   = min(max(|scaled|, axis=1) / z_threshold, 1)
+shock        = 0.70 · iforest_norm + 0.30 · max_z_norm
+
+duration = level_shift_score(raw_vessel_count)
+combined = np.maximum(shock, duration)
+```
+
+Two decisions here, one right and one wrong.
+
+**Right — normalising against the fit-time range, not the scored batch.** Batch min-max destroys the signal a sustained disruption carries: when every day in a window is anomalous, rescaling by that window's own extremes maps its least-anomalous day to 0 and its most to 1, so a uniformly disrupted month and a uniformly calm one both span `[0,1]`. Anchoring to the fit-time distribution makes scores absolute and comparable across windows. This change is what forced the risk-band recalibration in [§3.11](#311-weight-determination-and-optimization).
+
+**Wrong — `max()` rather than a blend.** The code comment defends `max()` on the grounds that the two components answer different questions ("did something just change?" versus "are we still below normal?") and are meant to be true at different times, so averaging would let a calm shock detector drag down an active duration signal.
+
+The reasoning is sound and the outcome is not. Measured on the Hormuz test window, `shock` sits at **0.55 on calm days** while `duration` only reaches **0.44 on disrupted ones**, so `max()` returns `shock` nearly everywhere and **erases the working signal**. It prevents dilution and causes **masking** instead. Full decomposition in [§4.7](#47-root-cause-analysis--why-hormuz-sits-at-chance).
+
+#### `validate(signals)` — two-stage false-positive suppression
+
+A row is `validated=True` only when **both** hold:
+
+1. **Persistence** — the flag is part of a run of at least **2** consecutive flagged rows. There is no upper cap, so a multi-month shutdown is flagged in full.
+2. **Multi-feature** — at least **2** active features show `|z| > 1.5` on that row, so lone-feature outliers are dropped.
+
+Recall that the evaluation harness never calls this method.
+
+#### `output(validated_signals)`
+
+Collapses contiguous validated rows into window reports carrying start/end dates, duration, peak score, mean score, and the features that were elevated.
+
+---
+
+### 3.5.2 MarketAgent
+
+**Features.** `brent_crude_usd`, `trade_volume_index`, `freight_rate_index`, plus optional `freight_services_pct_change`.
+
+**A different detection strategy, deliberately.** Market series are strongly autocorrelated and trend-bearing; an isolation forest over raw levels would flag every sustained price regime as anomalous. Instead each feature is scored against its own **trailing rolling window** (30 days, with a 5-year baseline configuration), so the question asked is "is today unusual relative to the recent past?" rather than "is today unusual relative to all history?".
+
+```python
+z = (value − rolling_mean) / rolling_std        # sd ≤ 1e-9 → z = 0
+anomaly_score = min( Σ wᵢ·|zᵢ| / z_threshold , 1.0 )
+```
+
+Degenerate flat windows are handled explicitly: when the rolling standard deviation collapses below `1e-9` the feature contributes `z = 0` rather than an infinity.
+
+**`validate` — oil-led corroboration.** A row survives only when all three hold:
+
+1. the flag is part of a run of at least **2** days;
+2. `|oil_zscore| > z_threshold` — oil is treated as the lead indicator;
+3. **at least one** of `|trade_volume_zscore|` or `|freight_zscore|` also exceeds the threshold.
+
+The optional freight-services feature contributes to the anomaly score but is **deliberately excluded from the corroboration test**, so the gate behaves identically in synthetic and FRED modes. This is a small decision with a real consequence: it keeps the validation logic comparable across data modes rather than silently stricter on live data.
+
+---
+
+### 3.5.3 GeopoliticalAgent
+
+**Features and weights.** Four features with hand-set intra-agent weights:
+
+| Feature | Weight | Direction |
+|---|---|---|
+| `sanctions_severity` | 0.35 | higher = worse |
+| `military_activity_index` | 0.25 | higher = worse |
+| `diplomatic_incident_score` | 0.25 | higher = worse |
+| `regime_stability_index` | 0.15 | **inverted** — a stable regime lowers risk |
+
+**Renormalisation over present features.** ACLED supplies no sanctions data, so the highest-weighted feature is absent on every live run. Rather than invent it, the agent scores over what is present and rescales the remaining weights to sum to 1:
+
+```python
+raw = Σ  wₖ · valueₖ        for features actually present
+used = Σ wₖ
+composite = raw / used
+```
+
+Rescaling is **proportional, so relative importance is preserved**: with sanctions (0.35) absent, military and diplomatic rise 0.25 → 0.385 and stability 0.15 → 0.231. The score stays comparable across sources because it is always a weighted *mean* over `[0,1]` features, never a partial sum that would read as artificially calm.
+
+The absence is logged as a **warning, not silently**: a genuinely missing column and a source that never supplies one look identical at this point in the code, and only one of those is acceptable. If no scoring feature is present at all, the agent raises rather than returning zero.
+
+**Sigmoid compression.** The composite is passed through `1 / (1 + exp(−6·(raw − 0.5)))`, centred so a raw score of 0.5 maps to 0.5 and extremes saturate gracefully rather than clipping.
+
+**Validation.** Persistence over **3** days (longer than shipping's 2, because geopolitical signals are noisier day to day) plus at least **2** features above an elevation threshold of 0.4.
+
+---
+
+### 3.5.4 DisasterAgent
+
+**Features and weights.** `earthquake_severity` (0.35), `tsunami_risk` (0.30), `cyclone_severity` (0.20), `severe_weather_index` (0.15).
+
+**A single-event override, and why.** The disaster signal is **sparse by construction**: most days sit at near-zero baseline noise. A purely weighted composite would dilute a single catastrophic event across four features and score a major earthquake below threshold. So the agent takes the larger of the two:
+
+```python
+composite  = Σ wᵢ · featureᵢ
+max_single = max(all four features)
+anomaly_score = clip( max(composite, max_single), 0, 1 )
+is_anomaly    = (composite >= 0.30) or (max_single >= 0.40)
+```
+
+This is the same `max()` construction that causes masking in the shipping agent — but here it is correct, because the components are genuinely alternative evidence of the same thing rather than two detectors with different calm-day baselines. The distinction is worth stating explicitly: `max()` is safe when the inputs share a scale and a meaning, and dangerous when they do not.
+
+**Validation.** Single-day events are acceptable — an earthquake does not need to persist — so the only filter is a minimum severity of 0.10, suppressing sub-threshold noise.
+
+---
+
+### 3.5.5 NewsAgent
+
+**Components and weights.** Four normalised components: `sentiment` (0.40), `consensus` (0.25), `velocity` (0.20), `volume` (0.15).
+
+```python
+neg_sent      = clip(−recency_weighted_score, 0, 1)
+consensus     = clip(source_consensus, 0, 1)          # None for GDELT
+velocity      = clip(−sentiment_velocity, 0, 1)       # sentiment dropping fast
+volume_factor = clip(article_volume / volume_rolling_30d / 2.0, 0, 1)
+```
+
+Negative velocity is the interesting component: it captures sentiment *dropping fast*, which leads a disruption more reliably than sentiment being low, since a persistently negative corridor reads as low without anything new happening.
+
+**The same renormalisation as geopolitical**, for the same reason and with the same warning-not-silence discipline: `source_consensus` is absent for GDELT-sourced data, and scoring it as zero would read as "outlets disagree" rather than "not measured", silently damping every score by its 0.25 weight.
+
+**A feature that never enters any score.** `sentiment_magnitude` is part of the declared schema but is not read by `detect()`. It is listed among the disclosed inconsistencies in [§4.11](#411-known-defects-and-open-issues).
+
+---
+
+### 3.5.6 RoutingAgent — dormant
+
+Five features (`rerouting_percentage`, `avg_route_deviation_km`, `transit_volume_ratio`, `vessels_holding`, `alternative_route_traffic`) and a working Isolation Forest implementation, muted in all four regions. The reasoning is evidential rather than technical and is set out in [§3.10](#310-evidence-discipline).
+
+One code-level consequence is worth recording here: **routing still normalises its Isolation Forest by batch min-max**, the exact practice the shipping agent was deliberately moved away from. It went dormant before it was migrated, so the defect is latent rather than active — but it would bite immediately if the agent were revived.
+
+---
+
+## 3.6 Layer 3 — Risk aggregation
 
 ### Analysis
 
@@ -251,42 +492,279 @@ Optimization procedure and results: [§4.9](#49-weight-optimization-results).
 8. level     = high / medium / low by threshold
 ```
 
-**Step 3 is what satisfies R7.** Renormalising over *active* agents makes a passive or dormant agent harmless: its weight redistributes across the agents that did report, rather than contributing a zero that drags the composite down. Without it, muting routing in all four regions would have silently depressed every score by its weight.
+**Step 3 is what satisfies R7 at the agent level.** Renormalising over *active* agents makes a passive or dormant agent harmless: its weight redistributes across the agents that did report, rather than contributing a zero that drags the composite down. Without this, muting routing across all four regions would have silently depressed every score in the system by routing's 0.15 weight — a 15 % reduction that would have been invisible in the output and would have quietly invalidated the hand-calibrated risk bands.
 
-**Step 6 is the only non-linearity in the entire scoring path.** It encodes the intuition that three domains agreeing is worth more than the sum of three domains individually.
+**Step 6 is the only non-linearity in the entire scoring path.** It encodes the judgement that three independent domains agreeing is worth more than the arithmetic sum of three domains individually — corroboration across domains is qualitatively different from a single loud domain.
+
+Agents are excluded with a logged warning in two cases: no configured weight, and no scores produced. Both are conditions that should be visible rather than absorbed.
 
 ### Implementation
 
-`src/aggregation/risk_engine.py`. Note that **four composite paths exist and are not identical** — see [§4.11](#411-known-defects-and-open-issues) before citing any number.
+`src/aggregation/risk_engine.py`. Beyond `compute_risk` it returns a full breakdown for downstream consumption — `contributing_agents` with per-agent `{score, weight, contribution}`, `agent_agreement`, a human-readable `reason` string, and metadata recording the active agent count and the redistributed weights. **That breakdown is what satisfies R3**; it is the difference between an alert that says "risk 0.74" and one that says "risk 0.74, driven by geopolitical (0.31) and shipping (0.24), three domains in agreement."
 
-## 3.8 Explainability and retrieval
+The agreement threshold is the module constant `_AGREEMENT_THRESHOLD = 0.5`, and the bonuses default to `1.15` and `1.25` but are read from config so the optimizer can tune them. **The threshold is not tunable while the bonuses it gates are** — a disclosed inconsistency, [§4.11](#411-known-defects-and-open-issues).
+
+> **Four composite paths exist and are not identical.** `RiskEngine.compute_risk`, `RiskEngine.compute_risk_timeseries`, `Orchestrator.run_timeseries_analysis`, and `PipelineEvaluator._aggregate_daily` differ in granularity, and one of them omits the agreement bonus. Always state which produced a reported number — see [§4.11](#411-known-defects-and-open-issues).
+
+---
+
+## 3.7 Layer 4 — Explainability
 
 ### Analysis
 
-Two mechanisms answer two different user questions, and they are deliberately complementary:
+R3 is satisfied by the aggregator's per-agent breakdown, but domain attribution answers only half the question. "Geopolitical drove this" does not tell a manager *what moved*; "military activity is 2.4σ above its baseline" does.
 
-- **"Which features drove this score?"** — a SHAP surrogate over the feature space produces per-feature attributions and a top-drivers list.
-- **"Has this happened before?"** — a retrieval layer matches the current multi-domain signal profile against a curated knowledge base of historical disruptions.
+The system therefore fits a **RandomForest surrogate** to reproduce the pipeline's composite score from the canonical input features, then explains the surrogate with a SHAP `TreeExplainer`. TreeExplainer gives fast, exact Shapley values on a tree model, which a KernelExplainer over the real pipeline could not.
 
-Feature attribution alone tells a manager *what moved*; precedent tells them *what it meant last time*. The decision-support argument in [§1](#1-problem-and-scope) needs both.
+**The honest statement of what this buys and what it costs.** The surrogate is a model of the pipeline, not the pipeline. Its attributions are exact *for the surrogate*, and are only as faithful to the real system as the surrogate's fit. The fit quality is reported alongside every explanation as `surrogate_r2` rather than being assumed, so a reader can judge whether the attribution is trustworthy on a given run.
+
+An alternative was available: because the scoring path is explicit arithmetic ([§3.5](#35-layer-2--detection-agents)), exact analytic attributions could in principle be derived without any surrogate. That would be strictly better and is listed as future work.
 
 ### Implementation
 
-- **SHAP** — `src/explainability/shap_explainer.py`. A RandomForest surrogate is fitted to reproduce the composite, then explained. **The surrogate sees 20 of the features, not all** — see [§4.11](#411-known-defects-and-open-issues) item 6.
-- **RAG** — `src/rag/context_retriever.py`, ChromaDB with a local ONNX embedding model (no API key). Knowledge base: 10 curated historical cases in `data/knowledge_base/disruption_cases.json` — `cyclone_gonu_2007`, `hormuz_mine_threat_2010`, `somali_piracy_2011`, `japan_earthquake_2011`, `iran_sanctions_2012`, `west_coast_port_strikes_2014`, `hormuz_2019`, `ever_given_2021`, `covid_port_congestion_2021`, `houthi_redsea_2024`. Retrieval is threshold-gated so a quiet day does not attach spurious precedent.
-- **Action rubric** — `src/evaluation/decision_effectiveness.py` maps a risk level and its drivers to a recommended action through a transparent rubric, **deliberately not another model**.
+`src/explainability/shap_explainer.py`. `RandomForestRegressor(n_estimators=100, random_state=42)` over **20 canonical features** in `ALL_FEATURE_NAMES`, mapped to their producing domain by `FEATURE_AGENT_MAP`:
 
-## 3.9 Implementation
+| Domain | Features in the surrogate |
+|---|---|
+| Shipping (3) | `vessel_count`, `avg_delay_hours`, `congestion_index` |
+| Market (3) | `brent_crude_usd`, `trade_volume_index`, `freight_rate_index` |
+| Geopolitical (4) | `sanctions_severity`, `military_activity_index`, `diplomatic_incident_score`, `regime_stability_index` |
+| Natural Disaster (4) | `earthquake_severity`, `tsunami_risk`, `cyclone_severity`, `severe_weather_index` |
+| Routing (3) | `rerouting_percentage`, `avg_route_deviation_km`, `transit_volume_ratio` |
+| News (3) | `sentiment_score`, `source_consensus`, `article_volume` |
+
+> **The surrogate sees 20 features, not all of them.** Seven inputs that reach the agents never reach the explainer: `tanker_count`, `vessel_count_trend`, `freight_services_pct_change`, `vessels_holding`, `alternative_route_traffic`, `sentiment_magnitude`, `recency_weighted_score`. Missing columns are filled with `0.0`, which is **indistinguishable from a true zero**. An explanation can therefore omit a driver that genuinely moved the score. Disclosed in [§4.11](#411-known-defects-and-open-issues).
+
+Output per explanation: `top_drivers` (feature, producing agent, SHAP value), a generated natural-language `text`, `expected_value`, and `surrogate_r2`.
+
+---
+
+## 3.8 Layer 5 — Retrieval
+
+### Analysis
+
+Feature attribution says what moved. Precedent says what it meant last time. The decision-support argument in [§1](#1-problem-and-scope) needs both, and the retrieval layer supplies the second.
+
+**Retrieval is threshold-gated, which is the design decision worth defending.** `query_gated()` returns `None` outright when the composite risk score is below `rag.composite_threshold` (0.65). A retrieval system that always returns its top-k will always return something — on a quiet day it returns the least-irrelevant historical case, which a reader will reasonably interpret as "the system thinks this resembles the 2021 Suez blockage." Gating on composite risk means **the absence of precedent is itself informative**.
+
+A second filter applies within a triggered query: matches below `min_similarity` (0.55 cosine) are dropped even when the gate has opened, so a triggered alert with weak precedent returns fewer matches rather than padding to top-k.
+
+### Implementation
+
+`src/rag/context_retriever.py`, ChromaDB with the `all-MiniLM-L6-v2` embedding model running locally via ONNX — **no API key and no network dependency at query time**.
+
+Two collections are queried and merged by similarity:
+
+| Collection | Contents |
+|---|---|
+| `disruption_cases` | 10 curated historical cases, hand-written |
+| `live_extracted_context` | Documents harvested from live APIs by `KnowledgeBaseBuilder` |
+
+The 10 curated cases: `cyclone_gonu_2007`, `hormuz_mine_threat_2010`, `somali_piracy_2011`, `japan_earthquake_2011`, `iran_sanctions_2012`, `west_coast_port_strikes_2014`, `hormuz_2019`, `ever_given_2021`, `covid_port_congestion_2021`, `houthi_redsea_2024`.
+
+A triggered query returns the composite score and the threshold it cleared, the merged matches with source, similarity and metadata, and a formatted summary for display.
+
+---
+
+## 3.9 Layer 6 — Presentation
+
+### Analysis
+
+Two audiences need incompatible things from the same run. A supply-chain manager needs a status word, a recommended action, and a reason, with no scrollbar and no raw numbers to misread. A thesis author needs every metric, every raw signal, and per-day SHAP values.
+
+Rather than compromise on one page, the dashboard is split by audience:
+
+- **Decision View** — single viewport, plain language, status word, recommended action, a MapLibre GL JS pitched 3-D chokepoint map, and a natural-language risk narrative. **No raw scores anywhere**, and that constraint is machine-verified by a test that scans the rendered output for decimal patterns.
+- **Analysis View** — scrollable, all metrics, raw signals, per-day SHAP values, per-chart JPEG export for direct use in the thesis.
+
+The action rubric behind the Decision View maps a risk level and its drivers to a recommended action through a **transparent rule table, deliberately not another model**. Putting a classifier at the last step would reintroduce exactly the unauditable judgement the whole system exists to avoid.
+
+### Implementation
+
+`src/dashboard/` (`app.py` router, `core.py` cached data layer, `decision_view.py`, `analysis_view.py`) and `src/api/endpoints.py`.
+
+The REST API exposes ten endpoints:
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/health` | Liveness |
+| `POST` | `/predict` | Run the pipeline, return composite risk |
+| `POST` | `/explain` | Return the SHAP attribution for a prediction |
+| `GET` | `/agents` | List agents and their state |
+| `POST` | `/agents/toggle` | Enable/disable an agent at runtime |
+| `GET` | `/weights` | Current weight vector and mode |
+| `POST` | `/weights/switch` | Switch `hand_tuned` ↔ `optimized` |
+| `GET` | `/optimization/results` | Optuna study results |
+| `POST` | `/populate` | Trigger knowledge-base population |
+| `GET` | `/status` | System and agent health |
+
+---
+
+## 3.10 Evidence discipline
+
+### Analysis
+
+An agent can be off for three distinct reasons, and conflating them would misrepresent the system's coverage. **Each exclusion below is an affirmative finding about the evidence, not missing data.**
+
+- **Active** — built, run, and weighted.
+- **Passive** — a per-region evidence judgement. The domain is real, but no documented driver exists at that chokepoint in the observation window. It would activate if evidence appeared.
+- **Dormant** — a project-scope decision. No region may activate it; enforced at registry validation.
+
+| Agent | Hormuz | Panama | Bab el-Mandeb | Malacca |
+|---|---|---|---|---|
+| shipping | active | active | active | active |
+| market | active | active | active | **passive** |
+| geopolitical | active | **passive** | active | active |
+| natural_disaster | active | active | **passive** | active |
+| routing | **dormant** | **dormant** | **dormant** | **dormant** |
+| news_sentiment | active | active | active | active |
+
+**Exclusion reasons, each traceable to a documented source:**
+
+- **market / Malacca** — all four documented Malacca events carry a null market field. Removed as a **data-standards violation**, not on plausibility grounds. The distinction matters: the claim is not "markets don't matter in Malacca" but "the benchmark specification does not record a market field for these events."
+- **geopolitical / Panama** — the documented disruption is purely hydrological. The region spec states outright that no geopolitical driver applies. This is the one region where the domain that dominates elsewhere contributes nothing, **which is what makes the multi-agent-value claim falsifiable rather than foreordained**.
+- **natural_disaster / Bab el-Mandeb** — the documented event is a security campaign; `disaster_relevance: none`.
+- **routing / all four** — uniform muting, because `fetch_api()` is a stub and the agent would only ever emit synthetic values.
+
+### The asymmetry worth writing up
+
+Bab el-Mandeb's routing evidence is the **strongest in the entire benchmark**: 85 % of large containerships diverted via the Cape of Good Hope, adding 3,500–4,000 nautical miles and 10–14 days per voyage — a documented percentage, not an extrapolation. Routing is muted there *in spite of* that, because no free source supplies it as a daily time series.
+
+This is the clearest illustration of the difference between "we know this happened" and "we can measure this daily." The system's coverage is bounded by the second, not the first.
+
+### The consequence that must be stated
+
+With routing dormant everywhere, **no evaluation can measure routing's contribution in any region**. The tier ablation in [§4.6](#46-the-central-negative-finding) is silent on it. Evaluation results alone therefore cannot settle whether to re-enable it; that decision needs a data source, not a metric.
+
+### Implementation
+
+`src/core/regions.py` holds the registry. `DORMANT_AGENTS` is a module-level `frozenset`; per-region activation lives in each `RegionConfig` and is overlaid from `config/regions/*.yaml`. Registry validation **raises** if a region config activates a dormant agent, so reviving routing is a deliberate edit to `DORMANT_AGENTS` rather than an accidental YAML toggle.
+
+`RETIRED_REGION_ALIASES` maps the retired `red_sea` and `suez` keys onto `bab_el_mandeb` so historical knowledge-base documents still resolve; migrated documents keep their original text, which still names Suez, so the distinction stays visible to anyone reading them.
+
+---
+
+## 3.11 Weight determination and optimization
+
+### Analysis
+
+Weights exist at three layers, all searchable:
+
+| Layer | What it weights | Location | Optimized? |
+|---|---|---|---|
+| **L1** intra-agent | features within one agent | `agent.set_weights()` | yes |
+| **L2** inter-agent | agents against each other | `RiskEngine.weights` | yes |
+| **L3** thresholds | detection cutoffs, risk bands, agreement bonuses | `set_threshold()` + `RiskEngine` | yes |
+
+`weight_mode` in `config/settings.yaml` selects `hand_tuned` (current default) or `optimized`. Hand-tuned L2 weights: shipping 0.25, geopolitical 0.25, market 0.15, routing 0.15, natural_disaster 0.10, news_sentiment 0.10.
+
+### The risk bands are calibrated, not chosen
+
+This is the part most likely to be assumed arbitrary and is not. The bands are the **p60 / p85 / p97 quantiles of the composite score on calm (label-negative) days**, pooled across all four regions 2019–2026 — **9,183 days**:
+
+```yaml
+thresholds:
+  risk_critical: 0.90   # p97 of calm days
+  risk_high:     0.69   # p85
+  risk_medium:   0.51   # p60  -> ~60% of calm days read LOW
+  risk_low:      0.30
+```
+
+They were recalibrated when the shipping agent stopped batch-normalising its forest score ([§3.5.1](#351-shippingagent)). Batch min-max had forced every scored window onto `[0,1]` by its own extremes, so the old `0.8 / 0.6 / 0.4` boundaries were tuned to a compressed, window-relative distribution. On absolute scores the calm median rose to ≈0.47, which put most ordinary days at MEDIUM or worse under the old bands.
+
+**The new bands are the same quantiles of calm behaviour expressed on the new scale — a re-scaling, not a loosening.** Stating it that way is the difference between a defensible recalibration and a suspicious one.
+
+### Optimization procedure
+
+Optuna with a TPE sampler (seed 42), median pruner, 100 trials, 1-hour cap, and Dirichlet-style renormalisation per weight group so a sampled weight vector always sums to 1. Hard constraints reject incoherent configurations outright — `risk_high ≤ risk_medium`, and `agreement_bonus_5 ≤ agreement_bonus_3`.
+
+**Objective:**
+
+```
+0.50 · F1  +  0.30 · lead_time_score  −  0.20 · FPR
+```
+
+where `lead_time_score` is the earliest MEDIUM alert within 5 days before onset, divided by 5. The three terms encode the operational trade-off directly: correctness, earliness, and the cost of crying wolf.
+
+**Test-split discipline.** The test split is touched exactly once, after the study concludes. `PipelineEvaluator.evaluated_splits` is an audit trail that records every split evaluated during the study, so the claim can be checked rather than trusted.
+
+Results, and a blocking issue that currently prevents them from being cited: [§4.9](#49-weight-optimization-results) and [§4.11](#411-known-defects-and-open-issues).
+
+---
+
+## 3.12 Configuration and region overlays
+
+### Analysis
+
+Four regions share one pipeline. The alternative — a region parameter threaded through every constructor — was rejected because it puts region logic in code that has no business knowing about regions, and because it makes "what is different about Panama?" a question answered by grepping rather than by reading one file.
+
+Instead, configuration is **layered**: a base `settings.yaml` carries everything region-independent, and each `config/regions/<key>.yaml` overlays only what genuinely differs. The overlay mirrors the base file's key paths exactly, so a reader can diff them mentally.
+
+The overlays are also where **evidence judgements are recorded in prose**. Panama's `geopolitical: enabled: false` sits under a comment explaining that the documented disruption is hydrological and that this is the region which makes the multi-agent claim falsifiable. That reasoning belongs next to the switch it justifies, not in a document that can drift away from it.
+
+### Implementation
+
+`src/core/config_manager.py`:
+
+| Function | Purpose |
+|---|---|
+| `load_base_config()` | Read `config/settings.yaml` |
+| `load_region_overlay(region)` | Read `config/regions/<key>.yaml`, resolving retired aliases |
+| `_deep_merge(base, overlay)` | Recursive merge — overlay wins at the leaf |
+| `load_config_for_region(region)` | The composed configuration the pipeline actually runs on |
+| `resolve_active_region()` | CLI `--region` → `SUPPLY_CHAIN_REGION` → `hormuz` default |
+| `available_regions()` | Enumerate configured regions |
+
+Region resolution order is deliberate: an explicit flag beats an environment variable beats a default, so a scripted run cannot be silently redirected by a stale shell export.
+
+---
+
+## 3.13 Verification methodology
+
+### Analysis
+
+The test suite is not only a correctness net; several of its modules exist to **hold design claims to account** that would otherwise drift into aspiration. Three are worth describing because they test properties this chapter asserts.
+
+**Region isolation is verified end-to-end, not by configuration.** `test_config_manager.py` checks that the composed configuration agrees with the region registry. That is necessary and insufficient: a passive agent could still be constructed, scored, and weighted despite its `enabled: false` flag, and only a full pipeline run reveals it. `test_region_isolation.py` therefore runs `run_full_pipeline()` for all four regions through a module-scoped fixture and asks a different question of each result — that no disabled agent appears in the output, that no dormant agent is built anywhere, and that weights redistribute as [§3.6](#36-layer-3--risk-aggregation) claims.
+
+**The no-raw-scores constraint is machine-checked.** The Decision View's promise in [§3.9](#39-layer-6--presentation) is that a manager never sees a raw score. That is a claim about rendered output, so `test_dashboard.py` scans the rendered page for decimal patterns and fails if one appears. A design commitment enforced only by reviewer diligence would not survive a year of edits.
+
+**Region overlays are checked for copy-paste.** `test_region_config_completeness.py` asserts that every region supplies each of the three region-specific connector settings **and that the values are distinct per region rather than copied from Hormuz**. The second half is the useful half: a config that is present but inherited verbatim from the first region looks complete and behaves as if the region abstraction were never applied.
+
+### The suite
+
+| Area | Modules | Tests |
+|---|---|---|
+| Ingestion and connectors | `test_ingestion.py`, `test_region_specific_connectors.py` | 93 |
+| Extractors and knowledge base | `test_extractors.py`, `test_disaster_combined_extractor.py` | 60 |
+| Agents | `test_agents.py`, `test_new_agents.py`, `test_scenarios.py` | 73 |
+| Regions and config | `test_region_configs.py`, `test_config_manager.py`, `test_regions.py`, `test_region_isolation.py`, `test_region_config_completeness.py` | 54 |
+| Dashboard | `test_dashboard_ux.py`, `test_dashboard_regions.py`, `test_dashboard.py` | 66 |
+| API | `test_api_6agent.py`, `test_api_regions.py` | 24 |
+| Aggregation | `test_risk_engine.py` | 17 |
+| Explainability, RAG, evaluation, optimization | `test_evaluation.py`, `test_optimization.py`, `test_shap_6agent.py`, `test_rag_6domain.py`, `test_phase4_depth.py` | 33 |
+| **Total** | **23 modules** | **420** |
+
+All HTTP is mocked in the extractor and connector tests, so the suite runs offline and deterministically. `test_fred_api.py` is a standalone live diagnostic script, not collected by pytest and not counted above.
+
+**What the suite does not verify.** It confirms the system behaves as designed; it says nothing about whether the design detects disruptions. That question belongs entirely to [§4](#4-evaluation), and the answer there is substantially less favourable than a green test suite might suggest. The two are independent, and conflating them would be the most misleading thing this document could do.
+
+---
+
+## 3.14 Implementation summary
 
 | | |
 |---|---|
-| **Scale** | 60 source modules · 25 test modules · 420 tests |
+| **Scale** | 60 source modules · 25 test modules · **420 tests, all passing** (~3m35s) |
 | **Stack** | Python 3.10+, pandas, scikit-learn, SHAP, ChromaDB, Optuna, FastAPI, Streamlit |
-| **Config** | `config/settings.yaml` base + `config/regions/*.yaml` overlays, merged by `src/core/config_manager.py` |
+| **Fitted models** | Two Isolation Forests + scalers (shipping, routing) and one post-hoc RandomForest surrogate. Nothing else is learned |
+| **Config** | `config/settings.yaml` base + `config/regions/*.yaml` overlays |
 | **Region registry** | `src/core/regions.py` — `RegionConfig`, `DORMANT_AGENTS`, `RETIRED_REGION_ALIASES`, validation |
-| **Orchestration** | `src/orchestrator.py`; CLI entry `main.py` |
+| **Orchestration** | `src/orchestrator.py`; CLI entry `main.py --region <key>` |
 
-Full layout in [Project Structure](#project-structure); construction history in [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md).
+`Orchestrator` builds only the enabled agents for the active region (`_build_enabled_agents`), routes each agent to its own connector frame (`_frame_for_agent`), and **degrades gracefully**: a failing connector or agent is logged and skipped rather than aborting the run, which is R7 at the orchestration level.
+
+Full file layout in [Project Structure](#project-structure). Construction history — including the reasoning behind decisions later revised — in [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md).
 
 ---
 
@@ -817,7 +1295,7 @@ Extracts → deduplicates by document id → backs up to `data/knowledge_base/li
 
 Document ids are region-scoped (`acled_{region}_{country}_{year}`). They were not originally: countries shared between chokepoints produced identical ids, so the second region's rows were silently dropped by the deduplicator. Any extractor spanning overlapping country sets needs the same treatment.
 
-> **Historical note.** Earlier runs of this script are reported in [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md) with document counts that include the `ambee` extractor and the `red_sea` / `suez` region keys. Both are retired — Ambee returns zero documents with a valid key, and the two region keys were folded into `bab_el_mandeb`. Current sources are in [§3.3](#layer-1-in-detail--live-data-sources).
+> **Historical note.** Earlier runs of this script are reported in [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md) with document counts that include the `ambee` extractor and the `red_sea` / `suez` region keys. Both are retired — Ambee returns zero documents with a valid key, and the two region keys were folded into `bab_el_mandeb`. Current sources are in [§3.4](#live-data-sources).
 
 ### API server
 
@@ -858,7 +1336,7 @@ pytest tests/test_agents.py::test_market_agent_evaluation -v -s
 | `agents.shipping.detection_method` | `isolation_forest` | Algorithm for shipping anomaly detection |
 | `agents.shipping.contamination` | `0.1` | Expected anomaly fraction for Isolation Forest |
 | `agents.shipping.threshold` | `0.65` | Minimum combined score to raise a shipping flag (eval harness uses 0.55) |
-| `agents.shipping.z_threshold` | `3.0` | Z-score normalisation cap for the secondary fallback channel |
+| `agents.shipping.z_threshold` | `2.0` | Z-score normalisation cap for the secondary fallback channel (code default is 3.0; settings.yaml sets 2.0) |
 | `agents.market.enabled` | `true` | Toggle market agent (enabled in Phase 3 so the default run exercises all six agents) |
 | `agents.market.detection_method` | `zscore` | Algorithm for market anomaly detection |
 | `agents.market.z_threshold` | `2.5` | Per-feature absolute z-score elevation cutoff (eval harness uses 1.2) |
