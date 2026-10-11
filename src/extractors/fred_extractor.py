@@ -36,7 +36,7 @@ DISRUPTION_PERIODS: list[dict] = [
     {"name": "hormuz_2019_tanker_attacks", "start": "2019-05-01", "end": "2019-08-31",
      "region": "hormuz", "agents": ["market", "geopolitical"]},
     {"name": "ever_given_2021", "start": "2021-03-15", "end": "2021-04-30",
-     "region": "bab_el_mandeb", "agents": ["market", "routing", "shipping"]},
+     "region": "bab_el_mandeb", "agents": ["market", "shipping"]},
     {"name": "iran_sanctions_2012", "start": "2011-11-01", "end": "2013-03-31",
      "region": "hormuz", "agents": ["market", "geopolitical"]},
     {"name": "houthi_red_sea_2024", "start": "2023-11-01", "end": "2024-06-30",
@@ -45,7 +45,7 @@ DISRUPTION_PERIODS: list[dict] = [
      "region": "hormuz", "agents": ["market", "natural_disaster"]},
     # Gatun Lake drought cut Panama Canal daily transits by roughly a third.
     {"name": "panama_drought_2023", "start": "2023-07-01", "end": "2024-06-30",
-     "region": "panama", "agents": ["market", "routing", "shipping"]},
+     "region": "panama", "agents": ["market", "shipping"]},
 ]
 
 

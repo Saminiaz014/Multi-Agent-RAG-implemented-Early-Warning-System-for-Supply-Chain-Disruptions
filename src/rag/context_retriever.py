@@ -42,7 +42,6 @@ _DOMAIN_DESCRIPTIONS: dict[str, str] = {
     "market": "elevated market stress with oil price spike and freight rate increase",
     "geopolitical": "elevated geopolitical tension with sanctions, military activity, or diplomatic incidents",
     "natural_disaster": "natural disaster impacting port infrastructure and regional maritime access",
-    "routing": "significant vessel rerouting, route deviation, and alternative corridor congestion",
     "news_sentiment": "negative news sentiment and high media volume about the Strait of Hormuz region",
 }
 

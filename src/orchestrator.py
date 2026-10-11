@@ -30,19 +30,17 @@ from src.ingestion import (
     GeopoliticalConnector,
     MarketConnector,
     NewsConnector,
-    RoutingConnector,
     ShippingConnector,
 )
 
 logger = logging.getLogger(__name__)
 
-# Config agent-name → connector class for the four event/domain agents that
+# Config agent-name → connector class for the three event/domain agents that
 # each consume their own single-domain frame (unlike shipping+market, which
 # are merged onto a shared daily index).
 _DOMAIN_CONNECTORS: dict[str, type] = {
     "geopolitical": GeopoliticalConnector,
     "natural_disaster": DisasterConnector,
-    "routing": RoutingConnector,
     "news_sentiment": NewsConnector,
 }
 
@@ -99,7 +97,7 @@ class Orchestrator:
         )
 
         # Own the four single-domain connectors (geopolitical, natural
-        # disaster, routing, news). Each is config-driven via its
+        # disaster, news). Each is config-driven via its
         # ``agents.<name>`` block (``data_mode`` / ``csv_path``) and only
         # built when that agent is enabled, so a disabled agent is never
         # ingested or detected.
@@ -221,7 +219,7 @@ class Orchestrator:
         in ``config["agents"]`` is auto-built and registered (honouring the
         active ``weight_mode``). Shipping + market run on the merged daily
         frame; the four single-domain agents (geopolitical, natural disaster,
-        routing, news) each run on their own connector's frame. Any agent or
+        news) each run on their own connector's frame. Any agent or
         connector that fails is logged and skipped — one failure never aborts
         the run.
 
@@ -412,7 +410,7 @@ class Orchestrator:
                     agent.name,
                 )
                 continue
-            # Domain agents (geopolitical/disaster/routing/news) consume their
+            # Domain agents (geopolitical/disaster/news) consume their
             # own single-domain frame; shipping + market share the merged frame.
             frame = self._frame_for_agent(agent.name, combined)
             if frame is None:
@@ -543,7 +541,7 @@ class Orchestrator:
 
         Args:
             name: Config agent name — one of ``geopolitical``,
-                ``natural_disaster``, ``routing``, ``news_sentiment``.
+                ``natural_disaster``, ``news_sentiment``.
 
         Returns:
             The connector's fetched DataFrame.
@@ -673,7 +671,6 @@ class Orchestrator:
         from src.agents.geopolitical_agent import GeopoliticalAgent
         from src.agents.market_agent import MarketAgent
         from src.agents.news_agent import NewsAgent
-        from src.agents.routing_agent import RoutingAgent
         from src.agents.shipping_agent import ShippingAgent
 
         agents_cfg = self.config.get("agents", {}) or {}
@@ -695,12 +692,11 @@ class Orchestrator:
         else:
             logger.info("Agent 'market' disabled — not registered.")
 
-        # The four single-domain agents — only when both enabled and the
+        # The three single-domain agents — only when both enabled and the
         # matching connector was built.
         domain_classes: dict[str, type] = {
             "geopolitical": GeopoliticalAgent,
             "natural_disaster": DisasterAgent,
-            "routing": RoutingAgent,
             "news_sentiment": NewsAgent,
         }
         for name, agent_cls in domain_classes.items():
@@ -725,7 +721,7 @@ class Orchestrator:
         """Build a single-row 20-feature DataFrame from current pipeline state.
 
         Shipping and market features are read from the last row of ``combined``.
-        Domain agent features (geopolitical, natural_disaster, routing,
+        Domain agent features (geopolitical, natural_disaster,
         news_sentiment) are read from the last row of each agent's cached raw
         frame in ``self._last_agent_frames``.  Absent columns are filled 0.0.
         """

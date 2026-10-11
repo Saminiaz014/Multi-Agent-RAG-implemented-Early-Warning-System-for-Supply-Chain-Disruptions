@@ -9,7 +9,6 @@ inter_agent_weights:
   market: 0.109107
   geopolitical: 0.119071
   natural_disaster: 0.094715
-  routing: 0.061106
   news_sentiment: 0.125275
 intra_agent_weights:
   shipping:
@@ -29,9 +28,6 @@ intra_agent_weights:
     tsunami: 0.355513
     cyclone: 0.189371
     severe_weather: 0.213087
-  routing:
-    model_score: 0.504684
-    transit_zscore: 0.495316
   news_sentiment:
     sentiment: 0.421899
     consensus: 0.245863
@@ -47,6 +43,5 @@ thresholds:
   geopolitical_threshold: 0.389233
   disaster_threshold: 0.457571
   disaster_single_event: 0.560856
-  routing_threshold: 0.570548
   news_negative_threshold: -0.393848
   news_consensus_threshold: 0.205372

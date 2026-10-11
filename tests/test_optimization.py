@@ -63,7 +63,7 @@ def test_data_splits(data_manager: DataSplitManager) -> None:
     for split_name, frames in splits.items():
         assert set(frames) == {
             "shipping", "market", "geopolitical",
-            "natural_disaster", "routing", "news_sentiment",
+            "natural_disaster", "news_sentiment",
         }
         for conn_name, frame in frames.items():
             assert len(frame) == 365, f"{split_name}/{conn_name} not 365 rows"
@@ -154,7 +154,7 @@ def _sample_results() -> list[DetectionResult]:
     rng = np.random.default_rng(0)
     names = [
         "shipping", "market", "geopolitical",
-        "natural_disaster", "routing", "news_sentiment",
+        "natural_disaster", "news_sentiment",
     ]
     out = []
     for n in names:
@@ -183,7 +183,7 @@ def test_weight_mode_switch(config: dict, tmp_path: Path) -> None:
             {
                 "inter_agent_weights": {
                     "shipping": 0.50, "market": 0.05, "geopolitical": 0.05,
-                    "natural_disaster": 0.05, "routing": 0.30, "news_sentiment": 0.05,
+                    "natural_disaster": 0.05, "news_sentiment": 0.05,
                 },
                 "thresholds": {
                     "risk_high": 0.55, "risk_medium": 0.30,

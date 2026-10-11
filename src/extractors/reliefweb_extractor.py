@@ -29,11 +29,11 @@ MARITIME_DISASTER_TYPES = [
 
 HISTORICAL_DISASTERS: list[dict] = [
     {"query": "Cyclone Gonu", "country": "Oman", "region": "hormuz",
-     "agents": ["natural_disaster", "routing"]},
+     "agents": ["natural_disaster"]},
     {"query": "earthquake tsunami", "country": "Japan", "region": "malacca",
      "agents": ["natural_disaster", "shipping"]},
     {"query": "tsunami earthquake", "country": "Indonesia", "region": "malacca",
-     "agents": ["natural_disaster", "routing"]},
+     "agents": ["natural_disaster"]},
     {"query": "flood storm", "country": "Egypt", "region": "bab_el_mandeb",
      "agents": ["natural_disaster"]},
 ]

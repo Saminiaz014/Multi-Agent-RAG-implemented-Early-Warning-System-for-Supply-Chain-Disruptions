@@ -34,7 +34,6 @@ from src.agents.disaster_agent import DisasterAgent
 from src.agents.geopolitical_agent import GeopoliticalAgent
 from src.agents.market_agent import MarketAgent
 from src.agents.news_agent import NewsAgent
-from src.agents.routing_agent import RoutingAgent
 from src.agents.shipping_agent import ShippingAgent
 
 logger = logging.getLogger(__name__)
@@ -147,11 +146,6 @@ class PipelineEvaluator:
             thr["disaster_threshold"], thr.get("disaster_single_event")
         )
 
-        routing = RoutingAgent(config={})
-        routing.set_weights(
-            intra["routing"]["model_score"], intra["routing"]["transit_zscore"]
-        )
-        routing.set_threshold(thr["routing_threshold"])
 
         news = NewsAgent(config={})
         news.set_weights(
@@ -167,7 +161,6 @@ class PipelineEvaluator:
             "market": market,
             "geopolitical": geo,
             "natural_disaster": disaster,
-            "routing": routing,
             "news_sentiment": news,
         }
 

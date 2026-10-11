@@ -1,4 +1,4 @@
-# Region overlay: Bab el-Mandeb — the one region where routing is ACTIVE.
+# Region overlay: Bab el-Mandeb.
 #
 # Structure mirrors config/settings.yaml's key paths; see hormuz.yaml's header
 # for the overlay mapping. Agent keys are the pipeline's real config keys
@@ -26,26 +26,6 @@ agents:
     # security/geopolitical campaign, not a natural disaster." This is an
     # affirmative absence found in the region's evidence review.
     enabled: false
-  routing:
-    # PASSIVE — by temporary GLOBAL muting, NOT because the evidence is weak.
-    # See the "ROUTING AGENT: GLOBALLY PASSIVE" block in src/core/regions.py
-    # for the full rationale and its caveat.
-    #
-    # This region's routing evidence is the strongest in the benchmark: 85% of
-    # large (7,500+ TEU) containerships diverted via the Cape of Good Hope by
-    # end-Dec 2023 (+3,500-4,000 nm / +10-14 days per voyage) — genuine route
-    # DEVIATION, which is what the AIS-deviation model detects, and a literal
-    # documented percentage rather than an extrapolation
-    # (docs/eval01-archived/EVIDENCE_PROVENANCE.md). On evidence alone this
-    # would be the one region with routing ACTIVE.
-    #
-    # It is muted anyway, to defer per-region muting decisions to
-    # post-evaluation. Supporting note: routing_connector.fetch_api() is still
-    # a NotImplementedError stub, so enabling it would select the synthetic or
-    # CSV path, not live diversion data.
-    #
-    # If routing is revisited, re-enable THIS region first.
-    enabled: false
   news_sentiment:
     enabled: true
     # AUTHORED (not copied from settings.yaml, which only has Hormuz's block).
@@ -68,7 +48,7 @@ agents:
 #     news_sentiment agents, which need REGIONAL context — the Houthi campaign
 #     driving this chokepoint plays out across the whole Red Sea corridor and
 #     into Yemen, not within sight of the strait.
-#   - AIS feeds shipping/routing, which measure transits THROUGH the
+#   - AIS feeds the shipping agent, which measures transits THROUGH the
 #     chokepoint itself; widening that box to the full Red Sea would count
 #     vessels that never approach Bab el-Mandeb.
 #

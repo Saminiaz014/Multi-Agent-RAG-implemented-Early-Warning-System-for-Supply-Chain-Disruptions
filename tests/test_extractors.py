@@ -519,7 +519,7 @@ class TestSerpAPIExtractor:
         for case in HISTORICAL_QUERIES:
             all_agents.update(case["primary_agents"])
         assert all_agents == {
-            "shipping", "market", "geopolitical", "natural_disaster", "routing", "news_sentiment",
+            "shipping", "market", "geopolitical", "natural_disaster", "news_sentiment",
         }
 
 

@@ -119,7 +119,6 @@ class WeightOptimizer:
                 "market": trial.suggest_float("inter_market", 0.05, 0.35),
                 "geopolitical": trial.suggest_float("inter_geopolitical", 0.05, 0.50),
                 "natural_disaster": trial.suggest_float("inter_disaster", 0.02, 0.25),
-                "routing": trial.suggest_float("inter_routing", 0.05, 0.35),
                 "news_sentiment": trial.suggest_float("inter_news", 0.02, 0.25),
             }
             total = sum(raw.values())
@@ -130,7 +129,6 @@ class WeightOptimizer:
         # --- Layer 1: intra-agent weights ---
         if self._opt_intra:
             shipping_if = trial.suggest_float("shipping_if_weight", 0.4, 0.9)
-            routing_model = trial.suggest_float("routing_model_weight", 0.3, 0.8)
 
             m_oil = trial.suggest_float("market_oil", 0.2, 0.6)
             m_trade = trial.suggest_float("market_trade", 0.1, 0.5)
@@ -177,10 +175,6 @@ class WeightOptimizer:
                     "cyclone": d_cy / d_tot,
                     "severe_weather": d_sw / d_tot,
                 },
-                "routing": {
-                    "model_score": routing_model,
-                    "transit_zscore": 1.0 - routing_model,
-                },
                 "news_sentiment": {
                     "sentiment": n_sent / n_tot,
                     "consensus": n_cons / n_tot,
@@ -207,7 +201,6 @@ class WeightOptimizer:
                 "disaster_single_event": trial.suggest_float(
                     "disaster_single_event", 0.25, 0.6
                 ),
-                "routing_threshold": trial.suggest_float("routing_threshold", 0.4, 0.8),
                 "news_negative_threshold": trial.suggest_float(
                     "news_neg_threshold", -0.5, -0.1
                 ),

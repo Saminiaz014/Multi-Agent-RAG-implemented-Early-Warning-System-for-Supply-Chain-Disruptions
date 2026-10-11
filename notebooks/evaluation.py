@@ -229,7 +229,7 @@ def build_faithfulness_data(n: int = 365, seed: int = 44) -> tuple[pd.DataFrame,
 
     Scenario B (days 140-165): geopolitical + shipping anomalies
     (sanctions, military, low vessel count).  Scenario C (days 200-220):
-    natural-disaster + routing anomalies (earthquake, tsunami, rerouting).
+    natural-disaster anomalies (earthquake, tsunami, cyclone).
     The two anomaly sets share no feature, so the SHAP surrogate must learn
     two orthogonal patterns and its top-3 attributions land on genuinely
     anomalous features — the property :func:`compute_faithfulness` measures.
@@ -256,9 +256,6 @@ def build_faithfulness_data(n: int = 365, seed: int = 44) -> tuple[pd.DataFrame,
         "tsunami_risk": rng.uniform(0.00, 0.10, n),
         "cyclone_severity": rng.uniform(0.00, 0.10, n),
         "severe_weather_index": rng.uniform(0.00, 0.10, n),
-        "rerouting_percentage": rng.uniform(0.00, 0.08, n),
-        "avg_route_deviation_km": rng.uniform(0.0, 80.0, n),
-        "transit_volume_ratio": rng.uniform(0.90, 1.10, n),
         "sentiment_score": rng.uniform(0.20, 0.80, n),
         "source_consensus": rng.uniform(0.30, 0.70, n),
         "article_volume": rng.uniform(10.0, 80.0, n),
@@ -275,7 +272,7 @@ def build_faithfulness_data(n: int = 365, seed: int = 44) -> tuple[pd.DataFrame,
     for i in range(200, 221):
         df.at[i, "earthquake_severity"] = rng.uniform(0.85, 1.00)
         df.at[i, "tsunami_risk"] = rng.uniform(0.75, 1.00)
-        df.at[i, "rerouting_percentage"] = rng.uniform(0.35, 0.50)
+        df.at[i, "cyclone_severity"]     = rng.uniform(0.85, 1.00)
         flags[i] = True
 
     return df, flags
@@ -294,16 +291,15 @@ def _faithfulness_risk(features_df: pd.DataFrame, inter_weights: dict[str, float
     vessel_low = 1.0 - np.clip(features_df["vessel_count"].to_numpy(float) / 180.0, 0.0, 1.0)
     geo = 0.6 * features_df["sanctions_severity"].to_numpy(float) + 0.4 * features_df["military_activity_index"].to_numpy(float)
     disaster = 0.6 * features_df["earthquake_severity"].to_numpy(float) + 0.4 * features_df["tsunami_risk"].to_numpy(float)
-    routing = np.clip(features_df["rerouting_percentage"].to_numpy(float) / 0.5, 0.0, 1.0)
+    cyclone = np.clip(features_df["cyclone_severity"].to_numpy(float), 0.0, 1.0)
 
     w = {k: float(inter_weights.get(k, 0.0)) for k in
-         ("shipping", "geopolitical", "natural_disaster", "routing")}
+         ("shipping", "geopolitical", "natural_disaster")}
     wsum = sum(w.values())
     risk = (
         w["geopolitical"] * geo
         + w["shipping"] * vessel_low
         + w["natural_disaster"] * disaster
-        + w["routing"] * routing
     )
     if wsum > 0:
         risk = risk / wsum
@@ -409,7 +405,7 @@ def metric_3_diversity(evaluator: PipelineEvaluator, modes: dict[str, dict]) -> 
     configs = {
         "6-agent": {
             "shipping", "market", "geopolitical",
-            "natural_disaster", "routing", "news_sentiment",
+            "natural_disaster", "news_sentiment",
         },
         "2-agent": {"shipping", "market"},
         "1-agent": {"shipping"},
@@ -595,25 +591,25 @@ _RAG_SCENARIOS = [
         "name": "B_geo_shipping",
         "signals": {
             "shipping": 0.85, "geopolitical": 0.82, "news_sentiment": 0.72,
-            "market": 0.60, "routing": 0.40, "natural_disaster": 0.08,
+            "market": 0.60, "natural_disaster": 0.08,
         },
         "expected_agents": ["shipping", "geopolitical"],
     },
     {
-        "name": "C_disaster_routing",
+        "name": "C_disaster",
         "signals": {
-            "natural_disaster": 0.90, "shipping": 0.68, "routing": 0.55,
+            "natural_disaster": 0.90, "shipping": 0.68,
             "market": 0.28, "geopolitical": 0.18, "news_sentiment": 0.12,
         },
         "expected_agents": ["natural_disaster", "shipping"],
     },
     {
-        "name": "routing_vessel_diversion",
+        "name": "vessel_diversion",
         "signals": {
-            "routing": 0.88, "shipping": 0.76, "market": 0.42,
+            "shipping": 0.76, "market": 0.42,
             "geopolitical": 0.22, "natural_disaster": 0.08, "news_sentiment": 0.10,
         },
-        "expected_agents": ["routing", "shipping"],
+        "expected_agents": ["shipping"],
     },
 ]
 

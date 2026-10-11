@@ -59,20 +59,6 @@ def test_only_the_registry_active_agents_score(
         )
 
 
-def test_routing_is_passive_in_every_region(region_results: dict[str, dict]) -> None:
-    """Phase 11's global routing muting, verified end-to-end.
-
-    Asserted separately from the registry check above because the muting is a
-    deliberate, temporary, cross-region decision rather than a per-region
-    evidence call — it should fail loudly and by name if it is ever undone by
-    accident. See the ROUTING AGENT block in src/core/regions.py.
-    """
-    for region, result in region_results.items():
-        assert "routing" not in result["agent_scores"], f"{region}: routing scored"
-        weights_used = result.get("metadata", {}).get("weights_used", {}) or {}
-        assert not weights_used.get("routing"), f"{region}: routing carried weight"
-
-
 def test_passive_agents_are_never_weighted(region_results: dict[str, dict]) -> None:
     """A passive agent must not dilute the composite by holding weight."""
     for region, result in region_results.items():
@@ -117,13 +103,12 @@ def test_every_agent_key_is_active_somewhere_or_documented(
 ) -> None:
     """No agent silently vanishes from all four regions without a reason.
 
-    Routing is the one agent passive everywhere; that is intentional and
     documented, so it is the sole permitted exception.
     """
     scored_anywhere = {
         agent for result in region_results.values() for agent in result["agent_scores"]
     }
     never_scored = set(AGENT_KEYS) - scored_anywhere
-    assert never_scored == {"routing"}, (
-        f"unexpected agents inactive in every region: {sorted(never_scored - {'routing'})}"
+    assert never_scored == set(), (
+        f"unexpected agents inactive in every region: {sorted(never_scored)}"
     )

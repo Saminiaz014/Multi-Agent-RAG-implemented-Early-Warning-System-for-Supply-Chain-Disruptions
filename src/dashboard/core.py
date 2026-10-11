@@ -95,7 +95,7 @@ _NEWS_BACKUP_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "live_extracted_
 
 ALL_AGENTS: list[str] = [
     "shipping", "market", "geopolitical",
-    "natural_disaster", "routing", "news_sentiment",
+    "natural_disaster", "news_sentiment",
 ]
 
 AGENT_COLORS: dict[str, str] = {
@@ -103,7 +103,6 @@ AGENT_COLORS: dict[str, str] = {
     "market": "#2ca02c",
     "geopolitical": "#d62728",
     "natural_disaster": "#ff7f0e",
-    "routing": "#9467bd",
     "news_sentiment": "#17becf",
 }
 
@@ -157,7 +156,7 @@ _ROUTES: dict[str, list[dict]] = {
         {
             "key": "eastbound_tss",
             "name": "Eastbound TSS — outbound to Gulf of Oman",
-            "agents": ["shipping", "routing", "geopolitical"],
+            "agents": ["shipping", "geopolitical"],
             "coords": [(54.80, 26.15), (55.45, 26.40), (56.05, 26.55),
                        (56.45, 26.30), (56.75, 25.75), (57.00, 25.05)],
         },
@@ -389,7 +388,7 @@ def decide_action(
         rule = "risk_level == medium → monitor"
     elif sustained:
         rule = "risk HIGH for > 5 consecutive days (sustained) → escalate"
-    elif top_driver_agent in ("routing", "shipping"):
+    elif top_driver_agent == "shipping":
         rule = f"risk HIGH ∧ top driver agent = {top_driver_agent} (physical) → reroute"
     elif action == "escalate":
         rule = (
@@ -777,9 +776,9 @@ def route_risk_series(
             region's active agents**. Without this a corridor listing a
             regionally-passive agent would fold a signal into its trend that
             the region never runs — Hormuz's eastbound corridor lists
-            ``routing``, which Phase 11 muted everywhere. The corridor keeps
+            a domain that is not enabled for the corridor. The corridor keeps
             listing it so the scoping stays honest about what the corridor is
-            about, and it starts contributing again if routing is re-enabled.
+            about, and it contributes again if that domain is enabled.
 
     Returns:
         The route's composite risk series.

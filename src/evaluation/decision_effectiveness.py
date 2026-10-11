@@ -35,7 +35,7 @@ ACTIONS: list[str] = ["no_action", "monitor", "reroute", "escalate"]
 _DEFAULT_LABELS_PATH = Path("data/knowledge_base/decision_labels.json")
 
 # Agent domains that imply a *physical* disruption (rerouting is the lever).
-_PHYSICAL_AGENTS: frozenset[str] = frozenset({"routing", "shipping"})
+_PHYSICAL_AGENTS: frozenset[str] = frozenset({"shipping"})
 # Agent domains that imply a *crisis* dimension (escalation is the lever).
 _CRISIS_AGENTS: frozenset[str] = frozenset({"geopolitical", "natural_disaster"})
 # Historical-similarity floor above which a retrieved escalate-precedent counts.
@@ -215,7 +215,7 @@ def predict_action(
     * ``low``    -> ``no_action``
     * ``medium`` -> ``monitor``
     * ``high`` + sustained (HIGH for >5 consecutive days)        -> ``escalate``
-    * ``high`` + top driver agent in {routing, shipping}         -> ``reroute``
+    * ``high`` + top driver agent == shipping                    -> ``reroute``
     * ``high`` + top driver agent in {geopolitical, natural_disaster}
       with a >0.75-similar historical case labelled ``escalate`` -> ``escalate``
     * otherwise                                                  -> ``monitor``

@@ -1,5 +1,5 @@
 """
-Covers, per agent (geopolitical, natural_disaster, routing, news_sentiment):
+Covers, per agent (geopolitical, natural_disaster, news_sentiment):
 
 1. Connector synthetic mode — schema, ranges, disruption-day count.
 2. Connector CSV mode — round-trip via ``save_raw`` / ``load_csv``.
@@ -24,7 +24,6 @@ from src.ingestion import (
     GeopoliticalConnector,
     MarketConnector,
     NewsConnector,
-    RoutingConnector,
     ShippingConnector,
 )
 from src.agents import (
@@ -32,7 +31,6 @@ from src.agents import (
     GeopoliticalAgent,
     MarketAgent,
     NewsAgent,
-    RoutingAgent,
     ShippingAgent,
 )
 
@@ -252,68 +250,6 @@ class TestDisasterAgent:
             assert {"signals", "active_events", "location"}.issubset(w.keys())
 
 
-# ---------------------------------------------------------------------------
-# Routing
-# ---------------------------------------------------------------------------
-
-
-class TestRoutingConnector:
-    def test_synthetic_shape_and_columns(self) -> None:
-        df = RoutingConnector().fetch()
-        assert len(df) == 365
-        expected = {
-            "timestamp",
-            "rerouting_percentage",
-            "avg_route_deviation_km",
-            "transit_volume_ratio",
-            "vessels_holding",
-            "alternative_route_traffic",
-            "composite_routing_risk",
-            "is_disruption",
-        }
-        assert expected.issubset(set(df.columns))
-
-    def test_synthetic_ranges(self) -> None:
-        df = RoutingConnector().fetch()
-        assert df["rerouting_percentage"].between(0.0, 100.0).all()
-        assert df["transit_volume_ratio"].between(0.0, 1.0).all()
-        assert df["composite_routing_risk"].between(0.0, 1.0).all()
-        assert (df["vessels_holding"] >= 0).all()
-
-    def test_csv_round_trip(self, tmp_path: Path) -> None:
-        target = tmp_path / "routing.csv"
-        RoutingConnector(
-            config={"data_mode": "synthetic", "csv_path": str(target)}
-        ).save_raw(target)
-        df = RoutingConnector(
-            config={"data_mode": "csv", "csv_path": str(target)}
-        ).fetch()
-        assert len(df) == 365
-
-    def test_api_mode_raises(self) -> None:
-        with pytest.raises(NotImplementedError):
-            RoutingConnector(config={"data_mode": "api"}).fetch()
-
-
-class TestRoutingAgent:
-    def test_detection_lifts_scores_during_disruption(self) -> None:
-        df = RoutingConnector().fetch()
-        agent = RoutingAgent()
-        agent.fit(df)
-        validated = agent.run_dataframe(df)
-        mask = df["is_disruption"].to_numpy(dtype=bool)
-        scores = validated["anomaly_score"]
-        normal = float(scores[~mask].mean())
-        disrupt = float(scores[mask].mean())
-        print(f"\n[routing] anomaly_score: normal={normal:.3f} disruption={disrupt:.3f}")
-        assert disrupt > normal * 1.5
-
-    def test_run_returns_window_dicts(self) -> None:
-        windows = RoutingAgent().run(RoutingConnector().fetch())
-        assert windows
-        for w in windows:
-            assert w["agent"] == "routing"
-            assert w["model_version"] == "hormuz_v1.0"
 
 
 # ---------------------------------------------------------------------------
@@ -490,7 +426,6 @@ def test_six_agent_integration_scenarios_rank_correctly() -> None:
     mkt_df = MarketConnector(source_mode="synthetic", config={}).fetch()
     geo_df = GeopoliticalConnector().fetch()
     dis_df = DisasterConnector().fetch()
-    rt_df = RoutingConnector().fetch()
     nw_df = NewsConnector().fetch()
 
     agents = {
@@ -498,7 +433,6 @@ def test_six_agent_integration_scenarios_rank_correctly() -> None:
         "market": (MarketAgent(config={"z_threshold": 1.2, "threshold": 0.4}), mkt_df),
         "geopolitical": (GeopoliticalAgent(), geo_df),
         "natural_disaster": (DisasterAgent(), dis_df),
-        "routing": (RoutingAgent(), rt_df),
         "news_sentiment": (NewsAgent(), nw_df),
     }
 
@@ -521,7 +455,7 @@ def test_six_agent_integration_scenarios_rank_correctly() -> None:
     engine = RiskEngine(config)
     agg = engine.aggregate(detection_results)
     assert "composite_score" in agg
-    assert {"shipping", "market", "geopolitical", "natural_disaster", "routing", "news_sentiment"}.issubset(
+    assert {"shipping", "market", "geopolitical", "natural_disaster", "news_sentiment"}.issubset(
         agg["agent_scores"].keys()
     )
 

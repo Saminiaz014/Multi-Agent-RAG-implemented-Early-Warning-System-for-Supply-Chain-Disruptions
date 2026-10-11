@@ -124,7 +124,7 @@ def test_predict_action_importable():
     assert callable(app.predict_action)
     assert app.predict_action("low", None, None) in app.ACTIONS
 
-    action, rule = app.decide_action("high", "routing", False, None)
+    action, rule = app.decide_action("high", "shipping", False, None)
     assert action == "reroute"
     assert "reroute" in rule
 
@@ -207,7 +207,7 @@ def test_decision_badge_valid_action():
     cases = [
         ("low", "", False, None),
         ("medium", "market", False, None),
-        ("high", "routing", False, None),
+        ("high", "shipping", False, None),
         ("high", "geopolitical", False, None),                       # no context
         ("high", "geopolitical", False, {}),                         # empty context
         ("high", "geopolitical", False, {"similarity": 0.9, "action": "escalate"}),

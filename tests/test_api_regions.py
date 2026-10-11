@@ -46,7 +46,6 @@ class TestListAndInspect:
         assert panama["display_name"] == "Panama Canal"
         assert "geopolitical" in panama["passive_agents"]
         assert "hydrological" in panama["passive_reasons"]["geopolitical"]
-        assert "routing" in panama["passive_agents"]
         # Longitude is genuinely negative — a sign flip would put it in Africa.
         assert panama["longitude"] < 0
 
@@ -68,13 +67,6 @@ class TestListAndInspect:
         data = client.get("/api/regions/current").json()
         assert data["key"] == get_active_region()
         assert data["is_active"] is True
-
-    def test_every_region_reports_routing_passive(self, client: TestClient) -> None:
-        """Phase 11's global routing muting, visible through the API."""
-        for region in client.get("/api/regions/list").json()["regions"]:
-            assert "routing" in region["passive_agents"], region["key"]
-            assert "routing" not in region["active_agents"], region["key"]
-
 
 class TestSwitch:
     """The one endpoint that mutates state."""

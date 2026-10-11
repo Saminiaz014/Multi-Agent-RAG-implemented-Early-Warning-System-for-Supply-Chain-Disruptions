@@ -21,6 +21,8 @@ risk summary is still printed with whatever data is available.
 
 import argparse
 import logging
+
+from src.core.regions import AGENT_KEYS
 import sys
 from pathlib import Path
 
@@ -136,7 +138,7 @@ def run_pipeline(mode: str | None = None, region: str | None = None) -> dict:
     Delegates ingestion → detection → aggregation to
     :meth:`~src.orchestrator.Orchestrator.run_full_pipeline`, which wires every
     agent enabled in ``config["agents"]`` into the pipeline (shipping + market
-    on the merged daily frame; geopolitical, disaster, routing, news each on
+    on the merged daily frame; geopolitical, disaster and news each on
     their own connector frame), honours the active ``weight_mode``, and
     degrades gracefully when an individual agent or connector fails.
 
@@ -203,7 +205,7 @@ def run_pipeline(mode: str | None = None, region: str | None = None) -> dict:
         note=(
             f"region={config.get('_active_region', 'hormuz')} | "
             f"weight_mode={metadata.get('weight_mode', 'hand_tuned')} | "
-            f"agents_active={len(metadata.get('agents_active', []))}/6"
+            f"agents_active={len(metadata.get('agents_active', []))}/{len(AGENT_KEYS)}"
         ),
     )
     return result
@@ -394,7 +396,6 @@ def _print_summary(
         ("market", "Market"),
         ("geopolitical", "Geopolitical"),
         ("natural_disaster", "Disaster"),
-        ("routing", "Routing"),
         ("news_sentiment", "News"),
     ]
     n_agents = len(agent_scores)
@@ -414,7 +415,7 @@ def _print_summary(
         w = float(weights.get(key, 0.0))
         lines.append(row(f"  {label:<12}: {score:.2f}  (w={w:.2f})"))
     lines.append("╟" + "─" * width + "╢")
-    lines.append(row(f"  Agents     : {n_agents}/6 contributing"))
+    lines.append(row(f"  Agents     : {n_agents}/{len(AGENT_KEYS)} contributing"))
     lines.append(row(f"  Windows    : ship={shipping_windows} mkt={market_windows}"))
     if note:
         lines.append("╠" + "═" * width + "╣")

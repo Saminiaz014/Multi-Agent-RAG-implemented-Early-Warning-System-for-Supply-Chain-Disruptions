@@ -9,7 +9,7 @@
 # news_sentiment) — NOT "disaster"/"news".
 #
 # Every value below is copied verbatim from settings.yaml's current Hormuz
-# configuration EXCEPT agents.routing.enabled — see the note there. This file
+# configuration. This file
 # is inert until a loader consumes it (Phase 11.3+); creating it changes no
 # behaviour.
 region:
@@ -30,27 +30,6 @@ agents:
     enabled: true
     # Key into agents.natural_disaster.monitoring_points (settings.yaml).
     location: "hormuz"
-  routing:
-    # PASSIVE — the one deviation from settings.yaml, which currently has
-    # routing.enabled: true for Hormuz.
-    #
-    # Rationale: Hormuz has no viable sea alternate into the Persian Gulf
-    # (config/benchmark/hormuz.yaml: reroutable: false), so
-    # avg_route_deviation_km has no real-world analogue —
-    # routing_connector.py's own module docstring calls it "a modeled proxy,
-    # not a measured quantity". routing_connector.fetch_api() is also still a
-    # NotImplementedError stub, so no live routing data exists for any region.
-    #
-    # !! REGRESSION-GATE WARNING for Phase 11.3 !!
-    # Applying this overlay to Hormuz will drop the routing agent from the
-    # default run and therefore CHANGE Hormuz's composite risk scores. That
-    # directly conflicts with Phase 11's stated gate ("Hormuz regression gate
-    # confirmed, bit-for-bit with #44"). Decide explicitly before wiring:
-    # either keep routing enabled for Hormuz to preserve the gate, or accept
-    # that the gate becomes "bit-for-bit except routing" and re-baseline.
-    # Also covered by the temporary GLOBAL routing muting — see the
-    # "ROUTING AGENT: GLOBALLY PASSIVE" block in src/core/regions.py.
-    enabled: false
   news_sentiment:
     enabled: true
     # Verbatim from settings.yaml agents.news_sentiment.location_context.

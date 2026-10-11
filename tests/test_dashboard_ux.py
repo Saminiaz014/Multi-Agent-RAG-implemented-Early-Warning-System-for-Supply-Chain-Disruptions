@@ -59,11 +59,10 @@ class TestRegionCorridors:
     def test_corridor_risk_excludes_agents_passive_in_the_region(self) -> None:
         """A corridor's trend must not fold in a signal the region doesn't run.
 
-        Hormuz's eastbound corridor lists ``routing``, which Phase 11 muted
-        everywhere. The corridor keeps listing it (that is genuinely what the
-        corridor is about, and it should come back if routing is re-enabled),
-        so ``route_risk_series`` intersects with the region's active set —
-        without that, the trend renormalises over a muted agent.
+        A corridor may list an agent that its region does not enable, so
+        ``route_risk_series`` intersects the corridor's agent list with the
+        region's active set — without that, the trend would renormalise over
+        an agent that never reported.
         """
         from src.dashboard.core import (
             composite_series,
@@ -82,13 +81,18 @@ class TestRegionCorridors:
                 expected = composite_series(ts, params, set(route["agents"]) & active)
                 assert scoped.equals(expected), f"{region}/{route['key']}"
 
-        # And the intersection actually bites on the known case.
-        eastbound = next(
-            r for r in get_routes("hormuz") if r["key"] == "eastbound_tss"
-        )
-        assert "routing" in eastbound["agents"]
-        assert not route_risk_series(ts, params, eastbound, "hormuz").equals(
-            route_risk_series(ts, params, eastbound)
+        # And the intersection actually bites: a corridor that lists an agent
+        # its region does not run must score differently once scoped. Panama
+        # does not run geopolitical, so a corridor listing it is the test case.
+        synthetic = {
+            "key": "synthetic_check",
+            "name": "Synthetic corridor",
+            "agents": ["shipping", "geopolitical"],
+            "coords": [],
+        }
+        assert "geopolitical" not in get_region("panama").active_agents()
+        assert not route_risk_series(ts, params, synthetic, "panama").equals(
+            route_risk_series(ts, params, synthetic)
         )
 
     def test_map_framing_surrounds_the_regions_corridors(self) -> None:
@@ -256,7 +260,7 @@ class TestTextCleanup:
         caption = captions[0]
         assert "Synthetic" in caption
         # Panama's passive agents are named, since their lines are absent.
-        assert "geopolitical" in caption and "routing" in caption
+        assert "geopolitical" in caption
         # …and the self-evident instruction is gone.
         assert "legend" not in caption.lower()
 
@@ -333,7 +337,6 @@ class TestAgentContributions:
             titles = {a.replace("_", " ").title() for a in active}
 
             assert set(frame.columns) == titles, region
-            assert "Routing" not in frame.columns, region
 
     def test_indexed_on_the_display_axis(self) -> None:
         from src.dashboard.core import compute_timeseries

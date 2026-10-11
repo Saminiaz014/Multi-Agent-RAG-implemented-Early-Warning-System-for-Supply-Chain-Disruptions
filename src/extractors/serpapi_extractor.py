@@ -56,7 +56,7 @@ HISTORICAL_QUERIES: list[dict] = [
           "context": "Gulf of Oman tanker incidents 2019"},
      ]},
     {"case_id": "ever_given_2021", "region": "bab_el_mandeb",
-     "primary_agents": ["routing", "shipping"],
+     "primary_agents": ["shipping"],
      "queries": [
          {"q": '"Ever Given" "Suez Canal" blocked after:2021-03-20 before:2021-04-15',
           "context": "Ever Given Suez Canal blockage March 2021"},
@@ -64,7 +64,7 @@ HISTORICAL_QUERIES: list[dict] = [
           "context": "Suez Canal shipping disruption and rerouting 2021"},
      ]},
     {"case_id": "houthi_red_sea_2024", "region": "bab_el_mandeb",
-     "primary_agents": ["geopolitical", "routing", "news_sentiment"],
+     "primary_agents": ["geopolitical", "news_sentiment"],
      "queries": [
          {"q": 'Houthi "Red Sea" shipping attack after:2023-11-01 before:2024-03-31',
           "context": "Houthi Red Sea shipping attacks 2023-2024"},
@@ -80,7 +80,7 @@ HISTORICAL_QUERIES: list[dict] = [
           "context": "Iran Hormuz closure threat 2010-2011"},
      ]},
     {"case_id": "somali_piracy_2011", "region": "bab_el_mandeb",
-     "primary_agents": ["routing", "shipping"],
+     "primary_agents": ["shipping"],
      "queries": [
          {"q": 'Somalia piracy shipping "Gulf of Aden" after:2011-01-01 before:2011-12-31',
           "context": "Somali piracy peak 2011"},
@@ -120,7 +120,7 @@ HISTORICAL_QUERIES: list[dict] = [
           "context": "Iran oil sanctions impact on Hormuz 2012"},
      ]},
     {"case_id": "cyclone_gonu_2007", "region": "hormuz",
-     "primary_agents": ["natural_disaster", "routing"],
+     "primary_agents": ["natural_disaster"],
      "queries": [
          {"q": '"Cyclone Gonu" Oman port shipping after:2007-06-01 before:2007-07-31',
           "context": "Cyclone Gonu Oman June 2007"},

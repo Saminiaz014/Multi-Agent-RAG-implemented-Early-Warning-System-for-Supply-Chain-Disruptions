@@ -55,10 +55,6 @@ ALL_FEATURE_NAMES: list[str] = [
     "tsunami_risk",
     "cyclone_severity",
     "severe_weather_index",
-    # Routing (3)
-    "rerouting_percentage",
-    "avg_route_deviation_km",
-    "transit_volume_ratio",
     # News Sentiment (3)
     "sentiment_score",
     "source_consensus",
@@ -81,9 +77,6 @@ FEATURE_AGENT_MAP: dict[str, str] = {
     "tsunami_risk": "natural_disaster",
     "cyclone_severity": "natural_disaster",
     "severe_weather_index": "natural_disaster",
-    "rerouting_percentage": "routing",
-    "avg_route_deviation_km": "routing",
-    "transit_volume_ratio": "routing",
     "sentiment_score": "news_sentiment",
     "source_consensus": "news_sentiment",
     "article_volume": "news_sentiment",
@@ -95,7 +88,6 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
     "market": 0.15,
     "geopolitical": 0.25,
     "natural_disaster": 0.10,
-    "routing": 0.15,
     "news_sentiment": 0.10,
 }
 
@@ -376,7 +368,6 @@ class SurrogateShapExplainer:
         Example output::
 
             "Risk is HIGH (0.82) [optimized weights]. Primary drivers:
-            vessel rerouting increased (+0.28, routing agent),
             sanctions severity elevated (+0.22, geopolitical agent),
             negative news sentiment (+0.18, news_sentiment agent)."
 
@@ -536,14 +527,12 @@ def build_shap_training_data(
     from src.agents.geopolitical_agent import GeopoliticalAgent
     from src.agents.market_agent import MarketAgent
     from src.agents.news_agent import NewsAgent
-    from src.agents.routing_agent import RoutingAgent
     from src.agents.shipping_agent import ShippingAgent
     from src.ingestion import (
         DisasterConnector,
         GeopoliticalConnector,
         MarketConnector,
         NewsConnector,
-        RoutingConnector,
         ShippingConnector,
     )
 
@@ -580,7 +569,6 @@ def build_shap_training_data(
     _domain_specs: list[tuple[str, Any, Any]] = [
         ("geopolitical", GeopoliticalConnector, GeopoliticalAgent),
         ("natural_disaster", DisasterConnector, DisasterAgent),
-        ("routing", RoutingConnector, RoutingAgent),
         ("news_sentiment", NewsConnector, NewsAgent),
     ]
     for name, connector_cls, agent_cls in _domain_specs:
@@ -621,11 +609,6 @@ def build_shap_training_data(
             "tsunami_risk",
             "cyclone_severity",
             "severe_weather_index",
-        ],
-        "routing": [
-            "rerouting_percentage",
-            "avg_route_deviation_km",
-            "transit_volume_ratio",
         ],
         "news_sentiment": ["sentiment_score", "source_consensus", "article_volume"],
     }
@@ -742,11 +725,6 @@ def _proxy_risk_scores(
             _norm("tsunami_risk"),
             _norm("cyclone_severity"),
             _norm("severe_weather_index"),
-        ]).mean(axis=1),
-        "routing": np.column_stack([
-            _norm("rerouting_percentage"),
-            _norm("avg_route_deviation_km"),
-            _norm("transit_volume_ratio", invert=True),
         ]).mean(axis=1),
         "news_sentiment": np.column_stack([
             _norm("sentiment_score", invert=True),

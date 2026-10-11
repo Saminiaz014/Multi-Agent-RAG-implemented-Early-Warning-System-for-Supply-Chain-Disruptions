@@ -82,19 +82,6 @@ def test_yaml_coordinates_match_registry(region: str) -> None:
     assert data["region"]["longitude"] == pytest.approx(registry.longitude)
 
 
-def test_routing_passive_in_every_region_yaml() -> None:
-    """Routing is globally muted across all four region YAMLs.
-
-    Mirrors test_regions.py::test_routing_passive_in_every_region — the YAMLs
-    and the registry must agree on this, and the muting is a deliberate
-    deferral rather than an evidence call (see src/core/regions.py).
-    """
-    for region in list_regions():
-        assert _load_region_yaml(region)["agents"]["routing"]["enabled"] is False, (
-            f"routing should be passive in {region}.yaml"
-        )
-
-
 def test_evidence_based_exclusions_in_yaml() -> None:
     """The two evidence-excluded domains are disabled in their YAMLs."""
     bab = _load_region_yaml("bab_el_mandeb")
@@ -126,11 +113,10 @@ def test_bounding_boxes_are_coherent() -> None:
 
 
 def test_hormuz_overlay_matches_live_settings() -> None:
-    """Hormuz's overlay reproduces settings.yaml, except the routing flag.
+    """Hormuz's overlay reproduces settings.yaml.
 
     Hormuz is the default region, so its overlay must be a faithful copy of
     current behaviour — otherwise applying it in Phase 11.3 would silently
-    change the default pipeline. routing.enabled is the one intended
     deviation (settings.yaml has it true; see hormuz.yaml's regression-gate
     warning).
     """
@@ -146,6 +132,7 @@ def test_hormuz_overlay_matches_live_settings() -> None:
 
     assert overlay["aisstream"]["bbox"] == settings["aisstream"]["monitor_regions"][0]["bbox"]
 
-    # The intended deviation, asserted explicitly so it can't change silently.
-    assert settings["agents"]["routing"]["enabled"] is True
-    assert overlay["agents"]["routing"]["enabled"] is False
+    # Hormuz enables every detection agent, matching settings.yaml.
+    for agent in ("shipping", "market", "geopolitical", "natural_disaster",
+                  "news_sentiment"):
+        assert overlay["agents"][agent]["enabled"] is True, agent

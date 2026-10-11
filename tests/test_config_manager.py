@@ -42,11 +42,11 @@ class TestDeepMerge:
         assert result["extra"] == 1
 
     def test_does_not_mutate_inputs(self) -> None:
-        base = {"agents": {"routing": {"enabled": True}}}
-        result = _deep_merge(base, {"agents": {"routing": {"enabled": False}}})
+        base = {"agents": {"news_sentiment": {"enabled": True}}}
+        result = _deep_merge(base, {"agents": {"news_sentiment": {"enabled": False}}})
 
-        assert base == {"agents": {"routing": {"enabled": True}}}
-        assert result["agents"]["routing"]["enabled"] is False
+        assert base == {"agents": {"news_sentiment": {"enabled": True}}}
+        assert result["agents"]["news_sentiment"]["enabled"] is False
 
     def test_replaces_rather_than_merges_non_dict_values(self) -> None:
         """Lists are replaced, not concatenated — bounding boxes rely on this."""
@@ -110,7 +110,6 @@ class TestMergedConfig:
 
         src/core/regions.py and config/regions/*.yaml already agree with each
         other (test_region_configs.py); this covers the merge between them, and
-        with it Phase 11's global routing muting.
         """
         for region in list_regions():
             agents = load_config_for_region(region)["agents"]

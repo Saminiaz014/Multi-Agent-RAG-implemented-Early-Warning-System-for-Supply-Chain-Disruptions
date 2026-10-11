@@ -36,7 +36,6 @@ _MOCK_RESULT: dict[str, Any] = {
         "market": 0.65,
         "geopolitical": 0.70,
         "natural_disaster": 0.55,
-        "routing": 0.60,
         "news_sentiment": 0.75,
     },
     "risk_score": 0.78,
@@ -46,7 +45,6 @@ _MOCK_RESULT: dict[str, Any] = {
         "market": {"score": 0.65, "weight": 0.15, "contribution": 0.0975},
         "geopolitical": {"score": 0.70, "weight": 0.25, "contribution": 0.175},
         "natural_disaster": {"score": 0.55, "weight": 0.10, "contribution": 0.055},
-        "routing": {"score": 0.60, "weight": 0.15, "contribution": 0.09},
         "news_sentiment": {"score": 0.75, "weight": 0.10, "contribution": 0.075},
     },
     "agent_agreement": 4,
@@ -83,7 +81,7 @@ _MOCK_RESULT: dict[str, Any] = {
         "data_modes": {n: "synthetic" for n in ALL_AGENTS},
         "weight_mode": "hand_tuned",
         "active_agents": 6,
-        "weights_used": {n: round(1 / 6, 6) for n in ALL_AGENTS},
+        "weights_used": {n: round(1 / len(ALL_AGENTS), 6) for n in ALL_AGENTS},
     },
 }
 
@@ -135,7 +133,7 @@ def test_health_6agents():
     """/health reports the six known agents and which are active right now.
 
     Phase 12.3 made the service region-aware, so ``agents_active`` is the
-    *active region's* agent set rather than all six — routing is muted in every
+    *active region's* agent set rather than a fixed list.
     region, and other domains are passive per region. Expectations come from
     the registry so this tracks the served region instead of a stale constant.
     """
@@ -148,7 +146,6 @@ def test_health_6agents():
     assert data["status"] == "ok"
     assert set(data["agents_active"]) == expected_active
     assert set(data["agents_active"]) <= set(ALL_AGENTS)
-    assert "routing" not in data["agents_active"]  # globally muted in Phase 11
     assert data["total_agents"] == len(data["agents_active"])
     assert "weight_mode" in data
     assert "knowledge_base_doc_count" in data
@@ -166,13 +163,13 @@ def test_predict_6agents(client):
     assert "composite_score" in data
     assert "risk_level" in data
     assert "contributing_agents" in data
-    assert len(data["contributing_agents"]) == 6, (
-        f"Expected 6 contributing_agents, got {len(data['contributing_agents'])}: "
+    assert len(data["contributing_agents"]) == 5, (
+        f"Expected 5 contributing_agents, got {len(data['contributing_agents'])}: "
         f"{list(data['contributing_agents'].keys())}"
     )
     assert set(data["contributing_agents"].keys()) == set(ALL_AGENTS)
     assert "agent_scores" in data
-    assert len(data["agent_scores"]) == 6
+    assert len(data["agent_scores"]) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +206,7 @@ def test_agents_list():
         resp = c.get("/agents")
     assert resp.status_code == 200
     agents = resp.json()
-    assert len(agents) == 6
+    assert len(agents) == 5
     names = {a["name"] for a in agents}
     assert names == set(ALL_AGENTS)
     for agent in agents:
@@ -293,7 +290,7 @@ def test_weights_endpoint():
     assert "thresholds" in data
 
     weights = data["inter_agent_weights"]
-    assert len(weights) == 6, f"Expected 6 inter_agent_weights, got {len(weights)}"
+    assert len(weights) == 5, f"Expected 5 inter_agent_weights, got {len(weights)}"
     assert set(weights.keys()) == set(ALL_AGENTS)
 
     total = sum(weights.values())

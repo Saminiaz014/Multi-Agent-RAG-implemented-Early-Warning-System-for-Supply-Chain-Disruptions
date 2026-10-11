@@ -5,7 +5,6 @@ from src.ingestion.disaster_connector import DisasterConnector
 from src.ingestion.geopolitical_connector import GeopoliticalConnector
 from src.ingestion.market_connector import MarketConnector
 from src.ingestion.news_connector import NewsConnector
-from src.ingestion.routing_connector import RoutingConnector
 from src.ingestion.shipping_connector import ShippingConnector
 
 __all__ = [
@@ -14,6 +13,5 @@ __all__ = [
     "GeopoliticalConnector",
     "MarketConnector",
     "NewsConnector",
-    "RoutingConnector",
     "ShippingConnector",
 ]

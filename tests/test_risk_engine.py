@@ -101,7 +101,6 @@ _SIX_CONFIG = {
         "market": 0.15,
         "geopolitical": 0.25,
         "natural_disaster": 0.10,
-        "routing": 0.15,
         "news_sentiment": 0.10,
     },
     "thresholds": {
@@ -112,12 +111,11 @@ _SIX_CONFIG = {
     },
 }
 
-_ALL_SIX = (
+_ALL_AGENTS = (
     "shipping",
     "market",
     "geopolitical",
     "natural_disaster",
-    "routing",
     "news_sentiment",
 )
 
@@ -138,9 +136,9 @@ def test_classify_risk_thresholds(engine6: RiskEngine) -> None:
 def test_compute_risk_weighted_calculation(engine6: RiskEngine) -> None:
     # All six agents at a uniform 0.4 score: below the agreement threshold, so
     # no bonus, and normalised weights sum to 1.0 → risk equals the score.
-    results = [_make_result(name, [0.4]) for name in _ALL_SIX]
+    results = [_make_result(name, [0.4]) for name in _ALL_AGENTS]
     out = engine6.compute_risk(results)
-    assert out["metadata"]["active_agents"] == 6
+    assert out["metadata"]["active_agents"] == 5
     assert out["agent_agreement"] == 0
     assert np.isclose(out["risk_score"], 0.4)
     assert np.isclose(sum(out["metadata"]["weights_used"].values()), 1.0)
@@ -175,8 +173,8 @@ def test_compute_risk_single_agent_is_full_weight(engine6: RiskEngine) -> None:
 
 def test_compute_risk_agreement_bonus_3plus(engine6: RiskEngine) -> None:
     # 3 agents above 0.5, 3 below → x1.15 bonus applies.
-    high = [_make_result(n, [0.6]) for n in _ALL_SIX[:3]]
-    low = [_make_result(n, [0.2]) for n in _ALL_SIX[3:]]
+    high = [_make_result(n, [0.6]) for n in _ALL_AGENTS[:3]]
+    low = [_make_result(n, [0.2]) for n in _ALL_AGENTS[3:]]
     out = engine6.compute_risk(high + low)
     assert out["agent_agreement"] == 3
     base = sum(v["contribution"] for v in out["contributing_agents"].values())
@@ -185,15 +183,15 @@ def test_compute_risk_agreement_bonus_3plus(engine6: RiskEngine) -> None:
 
 def test_compute_risk_agreement_bonus_5plus(engine6: RiskEngine) -> None:
     # 5+ agents above 0.5 → larger x1.25 bonus (not stacked with x1.15).
-    results = [_make_result(n, [0.6]) for n in _ALL_SIX]
+    results = [_make_result(n, [0.6]) for n in _ALL_AGENTS]
     out = engine6.compute_risk(results)
-    assert out["agent_agreement"] == 6
+    assert out["agent_agreement"] == 5
     base = sum(v["contribution"] for v in out["contributing_agents"].values())
     assert np.isclose(out["risk_score"], min(base * 1.25, 1.0))
 
 
 def test_compute_risk_score_capped_at_one(engine6: RiskEngine) -> None:
-    results = [_make_result(n, [0.95]) for n in _ALL_SIX]
+    results = [_make_result(n, [0.95]) for n in _ALL_AGENTS]
     out = engine6.compute_risk(results)
     assert out["risk_score"] <= 1.0
 
@@ -206,7 +204,7 @@ def test_compute_risk_zero_active_agents(engine6: RiskEngine) -> None:
 
 
 def test_compute_risk_all_zero_scores(engine6: RiskEngine) -> None:
-    results = [_make_result(n, [0.0]) for n in _ALL_SIX]
+    results = [_make_result(n, [0.0]) for n in _ALL_AGENTS]
     out = engine6.compute_risk(results)
     assert out["risk_score"] == 0.0
     assert out["risk_level"] == "low"
@@ -215,17 +213,16 @@ def test_compute_risk_all_zero_scores(engine6: RiskEngine) -> None:
 
 def test_compute_risk_timeseries_scenario_ranking(engine6: RiskEngine) -> None:
     # Normal: all quiet. Scenario A: geopolitical-led, partial firing (medium).
-    # Scenario B: all six firing hard (high, highest score of the three).
-    normal = [_make_result(n, [0.1]) for n in _ALL_SIX]
+    # Scenario B: all five firing hard (high, highest score of the three).
+    normal = [_make_result(n, [0.1]) for n in _ALL_AGENTS]
     scenario_a = [
         _make_result("geopolitical", [0.6]),
         _make_result("news_sentiment", [0.55]),
         _make_result("shipping", [0.5]),
         _make_result("market", [0.45]),
-        _make_result("routing", [0.5]),
         _make_result("natural_disaster", [0.05]),
     ]
-    scenario_b = [_make_result(n, [0.85]) for n in _ALL_SIX]
+    scenario_b = [_make_result(n, [0.85]) for n in _ALL_AGENTS]
 
     df = engine6.compute_risk_timeseries(
         {

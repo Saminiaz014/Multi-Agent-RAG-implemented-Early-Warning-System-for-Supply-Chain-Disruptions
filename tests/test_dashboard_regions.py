@@ -54,7 +54,6 @@ class TestLoadAppConfig:
         for key in AVAILABLE_REGIONS.values():
             config = load_app_config(key)
             assert config["_active_region"] == key
-            assert config["agents"]["routing"]["enabled"] is False
 
     def test_defaults_to_hormuz(self) -> None:
         """A no-argument call matches the CLI's default, not an empty config."""

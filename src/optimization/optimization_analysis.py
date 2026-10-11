@@ -37,7 +37,6 @@ _INTRA_AGENTS = (
     "market",
     "geopolitical",
     "natural_disaster",
-    "routing",
     "news_sentiment",
 )
 

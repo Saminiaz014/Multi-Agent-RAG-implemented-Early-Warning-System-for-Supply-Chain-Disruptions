@@ -158,11 +158,6 @@ def apply_weights_to_agent(agent, layout: dict) -> bool:
             agent.set_threshold(
                 thr["disaster_threshold"], thr.get("disaster_single_event")
             )
-    elif name == "routing":
-        w = intra.get("routing", {})
-        agent.set_weights(w.get("model_score", 0.60), w.get("transit_zscore", 0.40))
-        if "routing_threshold" in thr:
-            agent.set_threshold(thr["routing_threshold"])
     elif name == "news_sentiment":
         w = intra.get("news_sentiment", {})
         agent.set_weights(
@@ -187,7 +182,6 @@ def _hand_tuned_layout(config: dict) -> dict:
 
     shipping_cfg = agents.get("shipping", {}) or {}
     market_cfg = agents.get("market", {}) or {}
-    routing_w = agent_weights("routing")
     thresholds_cfg = config.get("thresholds", {}) or {}
 
     return {
@@ -204,10 +198,6 @@ def _hand_tuned_layout(config: dict) -> dict:
             or {"sanctions": 0.35, "military": 0.25, "diplomatic": 0.25, "stability": 0.15},
             "natural_disaster": agent_weights("natural_disaster")
             or {"earthquake": 0.35, "tsunami": 0.30, "cyclone": 0.20, "severe_weather": 0.15},
-            "routing": {
-                "model_score": float(routing_w.get("model_score", 0.60)),
-                "transit_zscore": float(routing_w.get("transit_zscore", 0.40)),
-            },
             "news_sentiment": agent_weights("news_sentiment")
             or {"sentiment": 0.40, "consensus": 0.25, "velocity": 0.20, "volume": 0.15},
         },
@@ -228,9 +218,6 @@ def _hand_tuned_layout(config: dict) -> dict:
                 (agents.get("natural_disaster", {}) or {}).get(
                     "single_event_threshold", 0.40
                 )
-            ),
-            "routing_threshold": float(
-                (agents.get("routing", {}) or {}).get("threshold", 0.55)
             ),
             "news_negative_threshold": float(
                 (agents.get("news_sentiment", {}) or {}).get("negative_threshold", -0.30)

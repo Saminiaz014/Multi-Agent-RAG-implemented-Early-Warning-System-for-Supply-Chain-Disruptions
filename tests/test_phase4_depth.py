@@ -33,7 +33,7 @@ from src.rag.context_retriever import ContextRetriever
 
 #  - Scenario A: days   0–139  → background noise (low risk, no anomalies)
 #  - Scenario B: days 140–165  → geopolitical + shipping disruption
-#  - Scenario C: days 200–220  → natural disaster + routing disruption
+#  - Scenario C: days 200–220  → natural disaster disruption
 
 
 def _make_scenarios(n: int = 365, seed: int = 42) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
@@ -50,8 +50,8 @@ def _make_scenarios(n: int = 365, seed: int = 42) -> tuple[pd.DataFrame, np.ndar
     Risk formula uses 6 features split cleanly across two disruption types:
       Scenario B (geo+shipping): sanctions (0.20), military (0.15),
                                   vessel_count (0.15) — low vessel = high risk
-      Scenario C (disaster+routing): earthquake (0.25), tsunami (0.15),
-                                      rerouting (0.10)
+      Scenario C (disaster): earthquake (0.25), tsunami (0.15),
+                            cyclone (0.10)
     Weights sum to 1.0.  Each group's top-3 formula features are all
     anomalous on the matching disruption days, so SHAP faithfulness ≥ 0.8.
     """
@@ -73,9 +73,6 @@ def _make_scenarios(n: int = 365, seed: int = 42) -> tuple[pd.DataFrame, np.ndar
         "tsunami_risk":              rng.uniform(0.00, 0.10, n),
         "cyclone_severity":          rng.uniform(0.00, 0.10, n),
         "severe_weather_index":      rng.uniform(0.00, 0.10, n),
-        "rerouting_percentage":      rng.uniform(0.00, 0.08, n),
-        "avg_route_deviation_km":    rng.uniform(0.0, 80.0, n),
-        "transit_volume_ratio":      rng.uniform(0.90, 1.10, n),
         "sentiment_score":           rng.uniform(0.20, 0.80, n),
         "source_consensus":          rng.uniform(0.30, 0.70, n),
         "article_volume":            rng.uniform(10.0, 80.0, n),
@@ -92,13 +89,13 @@ def _make_scenarios(n: int = 365, seed: int = 42) -> tuple[pd.DataFrame, np.ndar
         df.at[i, "vessel_count"]            = rng.uniform(35.0, 65.0)   # formula w=0.15
         flags[i] = True
 
-    # ---- Scenario C: natural disaster + routing (days 200–220) ----
+    # ---- Scenario C: natural disaster (days 200–220) ----
     # vessel_count left at normal baseline so that low-vessel signal stays
-    # exclusive to Scenario B, forcing the RF to use earthquake/tsunami/rerouting.
+    # exclusive to Scenario B, forcing the RF to use earthquake/tsunami/cyclone.
     for i in range(200, 221):
         df.at[i, "earthquake_severity"]  = rng.uniform(0.85, 1.00)      # formula w=0.25
         df.at[i, "tsunami_risk"]         = rng.uniform(0.75, 1.00)      # formula w=0.15
-        df.at[i, "rerouting_percentage"] = rng.uniform(0.35, 0.50)      # formula w=0.10
+        df.at[i, "cyclone_severity"]     = rng.uniform(0.85, 1.00)      # formula w=0.10
         flags[i] = True
 
     # ---- Risk scores: strictly derived from the 6 formula features ----
@@ -111,7 +108,7 @@ def _make_scenarios(n: int = 365, seed: int = 42) -> tuple[pd.DataFrame, np.ndar
         + 0.15 * (1.0 - np.clip(df["vessel_count"] / 180.0, 0.0, 1.0))
         + 0.25 * df["earthquake_severity"]
         + 0.15 * df["tsunami_risk"]
-        + 0.10 * np.clip(df["rerouting_percentage"] / 0.50, 0.0, 1.0)
+        + 0.10 * np.clip(df["cyclone_severity"], 0.0, 1.0)
     ).to_numpy()
     risk = np.clip(risk, 0.0, 1.0)
 
@@ -130,7 +127,7 @@ def scenario_data():
 _HT_CFG = {
     "weights": {
         "shipping": 0.25, "market": 0.15, "geopolitical": 0.25,
-        "natural_disaster": 0.10, "routing": 0.15, "news_sentiment": 0.10,
+        "natural_disaster": 0.10, "news_sentiment": 0.10,
     },
     "thresholds": {"risk_critical": 0.80, "risk_high": 0.60, "risk_medium": 0.40},
 }
@@ -138,7 +135,7 @@ _HT_CFG = {
 _OPT_CFG = {
     "weights": {
         "shipping": 0.491, "market": 0.109, "geopolitical": 0.119,
-        "natural_disaster": 0.095, "routing": 0.061, "news_sentiment": 0.125,
+        "natural_disaster": 0.095, "news_sentiment": 0.125,
     },
     "thresholds": {"risk_critical": 0.80, "risk_high": 0.582, "risk_medium": 0.260},
 }
@@ -234,17 +231,15 @@ _EVAL_SCENARIOS = [
             "geopolitical": 0.82,
             "news_sentiment": 0.72,
             "market": 0.60,
-            "routing": 0.40,
             "natural_disaster": 0.08,
         },
         "expected_agents": ["shipping", "geopolitical"],
     },
     {
-        "name": "C_disaster_routing",
+        "name": "C_disaster",
         "signals": {
             "natural_disaster": 0.90,
             "shipping": 0.68,
-            "routing": 0.55,
             "market": 0.28,
             "geopolitical": 0.18,
             "news_sentiment": 0.12,
@@ -252,16 +247,15 @@ _EVAL_SCENARIOS = [
         "expected_agents": ["natural_disaster", "shipping"],
     },
     {
-        "name": "routing_vessel_diversion",
+        "name": "vessel_diversion",
         "signals": {
-            "routing": 0.88,
             "shipping": 0.76,
             "market": 0.42,
             "geopolitical": 0.22,
             "natural_disaster": 0.08,
             "news_sentiment": 0.10,
         },
-        "expected_agents": ["routing", "shipping"],
+        "expected_agents": ["shipping"],
     },
 ]
 

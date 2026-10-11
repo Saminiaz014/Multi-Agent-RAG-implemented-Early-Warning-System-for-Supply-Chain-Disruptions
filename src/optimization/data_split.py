@@ -34,7 +34,6 @@ from src.ingestion import (
     GeopoliticalConnector,
     MarketConnector,
     NewsConnector,
-    RoutingConnector,
     ShippingConnector,
 )
 
@@ -48,7 +47,6 @@ _CONNECTORS: dict[str, tuple[type, dict]] = {
     "market": (MarketConnector, {"source_mode": "synthetic"}),
     "geopolitical": (GeopoliticalConnector, {"config": {"data_mode": "synthetic"}}),
     "natural_disaster": (DisasterConnector, {"config": {"data_mode": "synthetic"}}),
-    "routing": (RoutingConnector, {"config": {"data_mode": "synthetic"}}),
     "news_sentiment": (NewsConnector, {"config": {"data_mode": "synthetic"}}),
 }
 

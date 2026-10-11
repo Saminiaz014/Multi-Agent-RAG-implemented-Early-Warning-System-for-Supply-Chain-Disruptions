@@ -41,9 +41,9 @@ CHOKEPOINT_QUERIES: dict[str, list[str]] = {
 
 HISTORICAL_EVENT_QUERIES: list[dict] = [
     {"query": "Ever Given Suez Canal blocked", "date_from": "2021-03-20", "date_to": "2021-04-15",
-     "region": "bab_el_mandeb", "agents": ["routing", "shipping"]},
+     "region": "bab_el_mandeb", "agents": ["shipping"]},
     {"query": "Houthi Red Sea shipping attack", "date_from": "2023-11-01", "date_to": "2024-03-31",
-     "region": "bab_el_mandeb", "agents": ["geopolitical", "routing", "news_sentiment"]},
+     "region": "bab_el_mandeb", "agents": ["geopolitical", "news_sentiment"]},
     {"query": "Iran sanctions oil embargo tanker", "date_from": "2024-01-01", "date_to": "2024-12-31",
      "region": "hormuz", "agents": ["geopolitical", "market"]},
 ]

@@ -27,7 +27,7 @@ A **Decision Support System (DSS)** that detects, explains, and contextualises d
 - [2. Research Questions](#2-research-questions)
 - [3. Methodology](#3-methodology)
   - [3.1 Research design](#31-research-design) · [3.2 Requirements](#32-design-requirements) · [3.3 Architecture](#33-system-architecture)
-  - [3.4 Ingestion](#34-layer-1--ingestion) · [3.5 Detection agents](#35-layer-2--detection-agents) — [shipping](#351-shippingagent) · [market](#352-marketagent) · [geopolitical](#353-geopoliticalagent) · [disaster](#354-disasteragent) · [news](#355-newsagent) · [routing](#356-routingagent--dormant)
+  - [3.4 Ingestion](#34-layer-1--ingestion) · [3.5 Detection agents](#35-layer-2--detection-agents) — [shipping](#351-shippingagent) · [market](#352-marketagent) · [geopolitical](#353-geopoliticalagent) · [disaster](#354-disasteragent) · [news](#355-newsagent)
   - [3.6 Aggregation](#36-layer-3--risk-aggregation) · [3.7 Explainability](#37-layer-4--explainability) · [3.8 Retrieval](#38-layer-5--retrieval) · [3.9 Presentation](#39-layer-6--presentation)
   - [3.10 Evidence discipline](#310-evidence-discipline) · [3.11 Weighting](#311-weight-determination-and-optimization) · [3.12 Configuration](#312-configuration-and-region-overlays) · [3.13 Verification](#313-verification-methodology) · [3.14 Summary](#314-implementation-summary)
 - [4. Evaluation](#4-evaluation)
@@ -217,7 +217,6 @@ Five of the six agents read a live, free public API. The sixth is dormant by dec
 | **Geopolitical** | [ACLED](https://acleddata.com) | Free (OAuth) | Battles/Explosions → `military_activity_index`; Strategic developments → `diplomatic_incident_score`; Protests/Riots → inverse `regime_stability_index` |
 | **Natural Disaster** | [GDACS](https://www.gdacs.org) + [USGS](https://earthquake.usgs.gov/fdsnws/event/1/) | **No credentials** | GDACS Orange/Red alerts only; USGS supplies magnitude and the tsunami flag |
 | **News Sentiment** | [GDELT DOC API v2](https://api.gdeltproject.org/api/v2/doc/doc) | **No credentials** | Tone scores. Answered for Panama only in the evaluation window |
-| **Routing** | — | — | **Dormant** — no free source supplies evidence-grade rerouting data |
 
 ### Connector-by-connector
 
@@ -236,8 +235,6 @@ Five of the six agents read a live, free public API. The sixth is dormant by dec
 **`DisasterConnector`** — queries GDACS `geteventlist` restricted to `Orange;Red` alert levels, and USGS `fdsnws` for seismicity. The alert-level restriction is not conservatism: green-inclusive GDACS queries exceed its **silent 100-result cap** every month, so including them would truncate the response without any error. GDACS hazard codes `FL`, `WF`, `DR` fold into `severe_weather_index`; tropical cyclones drive `cyclone_severity`; USGS supplies `earthquake_severity` on a documented magnitude scale and a real `tsunami_risk` flag.
 
 **`NewsConnector`** — GDELT DOC API v2 tone scores. GDELT answered for only one of four regions across the evaluation window, which is why `NewsAgent` renormalises over present components ([§3.5](#35-layer-2--detection-agents)).
-
-**`RoutingConnector`** — `fetch_api()` raises `NotImplementedError`. This is a recorded decision, not an unfinished task; see [§3.10](#310-evidence-discipline).
 
 ### Two deliberate absences
 
@@ -288,7 +285,6 @@ The RandomForest in `src/explainability/` is a **post-hoc surrogate**. It explai
 | `market` | Rolling 30-day trailing z-scores, weighted mean of \|z\| |
 | `geopolitical` | Weighted linear composite → sigmoid (gain 6, centre 0.5) |
 | `natural_disaster` | Weighted composite + single-event max override |
-| `routing` | Isolation Forest (200 trees, seed 42) + transit-ratio z-score — **dormant** |
 | `news_sentiment` | Weighted composite of four normalised components |
 
 ---
@@ -469,11 +465,6 @@ Negative velocity is the interesting component: it captures sentiment *dropping 
 
 ---
 
-### 3.5.6 RoutingAgent — dormant
-
-Five features (`rerouting_percentage`, `avg_route_deviation_km`, `transit_volume_ratio`, `vessels_holding`, `alternative_route_traffic`) and a working Isolation Forest implementation, muted in all four regions. The reasoning is evidential rather than technical and is set out in [§3.10](#310-evidence-discipline).
-
-One code-level consequence is worth recording here: **routing still normalises its Isolation Forest by batch min-max**, the exact practice the shipping agent was deliberately moved away from. It went dormant before it was migrated, so the defect is latent rather than active — but it would bite immediately if the agent were revived.
 
 ---
 
@@ -492,7 +483,7 @@ One code-level consequence is worth recording here: **routing still normalises i
 8. level     = high / medium / low by threshold
 ```
 
-**Step 3 is what satisfies R7 at the agent level.** Renormalising over *active* agents makes a passive or dormant agent harmless: its weight redistributes across the agents that did report, rather than contributing a zero that drags the composite down. Without this, muting routing across all four regions would have silently depressed every score in the system by routing's 0.15 weight — a 15 % reduction that would have been invisible in the output and would have quietly invalidated the hand-calibrated risk bands.
+**Step 3 is what satisfies R7 at the agent level.** Renormalising over *active* agents makes a silent agent harmless: its weight redistributes across the agents that did report, rather than contributing a zero that drags the composite down. Without this, a domain disabled for a corridor — geopolitical at Panama, say — would depress every score there by exactly its configured weight, a reduction that would have been invisible in the output and would have quietly invalidated the calibrated risk bands.
 
 **Step 6 is the only non-linearity in the entire scoring path.** It encodes the judgement that three independent domains agreeing is worth more than the arithmetic sum of three domains individually — corroboration across domains is qualitatively different from a single loud domain.
 
@@ -522,7 +513,7 @@ An alternative was available: because the scoring path is explicit arithmetic ([
 
 ### Implementation
 
-`src/explainability/shap_explainer.py`. `RandomForestRegressor(n_estimators=100, random_state=42)` over **20 canonical features** in `ALL_FEATURE_NAMES`, mapped to their producing domain by `FEATURE_AGENT_MAP`:
+`src/explainability/shap_explainer.py`. `RandomForestRegressor(n_estimators=100, random_state=42)` over **17 canonical features** in `ALL_FEATURE_NAMES`, mapped to their producing domain by `FEATURE_AGENT_MAP`:
 
 | Domain | Features in the surrogate |
 |---|---|
@@ -530,10 +521,9 @@ An alternative was available: because the scoring path is explicit arithmetic ([
 | Market (3) | `brent_crude_usd`, `trade_volume_index`, `freight_rate_index` |
 | Geopolitical (4) | `sanctions_severity`, `military_activity_index`, `diplomatic_incident_score`, `regime_stability_index` |
 | Natural Disaster (4) | `earthquake_severity`, `tsunami_risk`, `cyclone_severity`, `severe_weather_index` |
-| Routing (3) | `rerouting_percentage`, `avg_route_deviation_km`, `transit_volume_ratio` |
 | News (3) | `sentiment_score`, `source_consensus`, `article_volume` |
 
-> **The surrogate sees 20 features, not all of them.** Seven inputs that reach the agents never reach the explainer: `tanker_count`, `vessel_count_trend`, `freight_services_pct_change`, `vessels_holding`, `alternative_route_traffic`, `sentiment_magnitude`, `recency_weighted_score`. Missing columns are filled with `0.0`, which is **indistinguishable from a true zero**. An explanation can therefore omit a driver that genuinely moved the score. Disclosed in [§4.11](#411-known-defects-and-open-issues).
+> **The surrogate sees 17 features, not all of them.** Five inputs that reach the agents never reach the explainer: `tanker_count`, `vessel_count_trend`, `freight_services_pct_change`, `sentiment_magnitude`, `recency_weighted_score`. Missing columns are filled with `0.0`, which is **indistinguishable from a true zero**. An explanation can therefore omit a driver that genuinely moved the score. Disclosed in [§4.11](#411-known-defects-and-open-issues).
 
 Output per explanation: `top_drivers` (feature, producing agent, SHAP value), a generated natural-language `text`, `expected_value`, and `surrogate_r2`.
 
@@ -616,7 +606,6 @@ An agent can be off for three distinct reasons, and conflating them would misrep
 | market | active | active | active | **passive** |
 | geopolitical | active | **passive** | active | active |
 | natural_disaster | active | active | **passive** | active |
-| routing | **dormant** | **dormant** | **dormant** | **dormant** |
 | news_sentiment | active | active | active | active |
 
 **Exclusion reasons, each traceable to a documented source:**
@@ -624,21 +613,12 @@ An agent can be off for three distinct reasons, and conflating them would misrep
 - **market / Malacca** — all four documented Malacca events carry a null market field. Removed as a **data-standards violation**, not on plausibility grounds. The distinction matters: the claim is not "markets don't matter in Malacca" but "the benchmark specification does not record a market field for these events."
 - **geopolitical / Panama** — the documented disruption is purely hydrological. The region spec states outright that no geopolitical driver applies. This is the one region where the domain that dominates elsewhere contributes nothing, **which is what makes the multi-agent-value claim falsifiable rather than foreordained**.
 - **natural_disaster / Bab el-Mandeb** — the documented event is a security campaign; `disaster_relevance: none`.
-- **routing / all four** — uniform muting, because `fetch_api()` is a stub and the agent would only ever emit synthetic values.
 
-### The asymmetry worth writing up
 
-Bab el-Mandeb's routing evidence is the **strongest in the entire benchmark**: 85 % of large containerships diverted via the Cape of Good Hope, adding 3,500–4,000 nautical miles and 10–14 days per voyage — a documented percentage, not an extrapolation. Routing is muted there *in spite of* that, because no free source supplies it as a daily time series.
-
-This is the clearest illustration of the difference between "we know this happened" and "we can measure this daily." The system's coverage is bounded by the second, not the first.
-
-### The consequence that must be stated
-
-With routing dormant everywhere, **no evaluation can measure routing's contribution in any region**. The tier ablation in [§4.6](#46-the-central-negative-finding) is silent on it. Evaluation results alone therefore cannot settle whether to re-enable it; that decision needs a data source, not a metric.
 
 ### Implementation
 
-`src/core/regions.py` holds the registry. `DORMANT_AGENTS` is a module-level `frozenset`; per-region activation lives in each `RegionConfig` and is overlaid from `config/regions/*.yaml`. Registry validation **raises** if a region config activates a dormant agent, so reviving routing is a deliberate edit to `DORMANT_AGENTS` rather than an accidental YAML toggle.
+`src/core/regions.py` holds the registry. Per-region activation lives in each `RegionConfig` and is overlaid from `config/regions/*.yaml`. Registry validation **raises** if a region config activates a dormant agent, so retiring or reviving a domain is a deliberate edit to `DORMANT_AGENTS` rather than an accidental YAML toggle.
 
 `RETIRED_REGION_ALIASES` maps the retired `red_sea` and `suez` keys onto `bab_el_mandeb` so historical knowledge-base documents still resolve; migrated documents keep their original text, which still names Suez, so the distinction stays visible to anyone reading them.
 
@@ -656,7 +636,7 @@ Weights exist at three layers, all searchable:
 | **L2** inter-agent | agents against each other | `RiskEngine.weights` | yes |
 | **L3** thresholds | detection cutoffs, risk bands, agreement bonuses | `set_threshold()` + `RiskEngine` | yes |
 
-`weight_mode` in `config/settings.yaml` selects `hand_tuned` (current default) or `optimized`. Hand-tuned L2 weights: shipping 0.25, geopolitical 0.25, market 0.15, routing 0.15, natural_disaster 0.10, news_sentiment 0.10.
+`weight_mode` in `config/settings.yaml` selects `hand_tuned` (current default) or `optimized`. Hand-tuned L2 weights (renormalised over the five agents so they sum to 1): shipping 0.294, geopolitical 0.294, market 0.176, natural_disaster 0.118, news_sentiment 0.118.
 
 ### The risk bands are calibrated, not chosen
 
@@ -757,7 +737,7 @@ All HTTP is mocked in the extractor and connector tests, so the suite runs offli
 |---|---|
 | **Scale** | 60 source modules · 25 test modules · **420 tests, all passing** (~3m35s) |
 | **Stack** | Python 3.10+, pandas, scikit-learn, SHAP, ChromaDB, Optuna, FastAPI, Streamlit |
-| **Fitted models** | Two Isolation Forests + scalers (shipping, routing) and one post-hoc RandomForest surrogate. Nothing else is learned |
+| **Fitted models** | One Isolation Forest + scaler (shipping) and one post-hoc RandomForest surrogate. Nothing else is learned |
 | **Config** | `config/settings.yaml` base + `config/regions/*.yaml` overlays |
 | **Region registry** | `src/core/regions.py` — `RegionConfig`, `DORMANT_AGENTS`, `RETIRED_REGION_ALIASES`, validation |
 | **Orchestration** | `src/orchestrator.py`; CLI entry `main.py --region <key>` |
@@ -1013,7 +993,6 @@ Optuna, TPE sampler (seed 42), median pruner, 100 trials, 1 h cap, Dirichlet-sty
 | market | 0.15 | 0.088 |
 | geopolitical | 0.25 | 0.109 |
 | natural_disaster | 0.10 | 0.095 |
-| routing | 0.15 | 0.130 |
 | news_sentiment | 0.10 | **0.177** |
 
 The optimizer independently concentrates weight on shipping — consistent with the dilution mechanism in [§4.6](#46-the-central-negative-finding), since shipping is the domain the label is derived from. It reaches that conclusion from the synthetic objective alone, without access to the real-data ablation.
@@ -1048,7 +1027,6 @@ Stated explicitly, because a defence will find them otherwise.
 1. **Cannot claim the system beats baselines at detection.** On Hormuz it is at chance (0.502 vs 0.968 for logistic regression). Only Panama (0.909) is competitive.
 2. **Cannot claim agent diversity improves detection.** Measured on real data, AUC *falls* monotonically as agents are added, in every evaluable region.
 3. **Cannot cite tier AUC as clean detection skill.** Every tier is rated `high` circularity — tiers include the shipping level-shift feature, which is the label's own statistic.
-4. **Cannot claim anything about routing.** Dormant in all four regions; never exercised.
 5. **Cannot claim performance on the 2026 Hormuz shutdown.** It is not in the evaluation frame, which ends 2025-08-30.
 6. **Cannot claim slow-onset detection.** The label itself misses it — Panama's 38 % drought decline is almost entirely unlabelled.
 7. **Cannot cite METRIC 5 or any 8-metric number** until the defects in [§4.11](#411-known-defects-and-open-issues) are resolved.
@@ -1071,12 +1049,11 @@ Stated explicitly, because a defence will find them otherwise.
 
 ### Code-level inconsistencies to disclose
 
-1. **Routing normalises its Isolation Forest by batch min-max**, the exact practice shipping was deliberately moved away from. Routing went dormant before it was migrated.
 2. **`Orchestrator.run_timeseries_analysis` omits the agreement bonus** that every other composite path applies.
 3. **The agreement threshold (0.5) is a module constant**, not configurable or optimized — while the bonuses it gates are both.
 4. **Geopolitical computes rolling baselines and deviations that `detect()` never reads**; news does the same with `sentiment_rolling_7d`. `sentiment_magnitude` is a schema feature that never enters any score.
 5. **`PipelineEvaluator.build_agents` hardcodes agent config** instead of reading `settings.yaml`, so the optimizer tunes a slightly different agent than the live pipeline runs.
-6. **The SHAP surrogate sees 20 of the features, not all.** Absent: `tanker_count`, `vessel_count_trend`, `freight_services_pct_change`, `vessels_holding`, `alternative_route_traffic`, `sentiment_magnitude`, `recency_weighted_score`. Missing columns fill with 0.0 — indistinguishable from a true zero.
+6. **The SHAP surrogate sees 17 of the features, not all.** Absent: `tanker_count`, `vessel_count_trend`, `freight_services_pct_change`, `sentiment_magnitude`, `recency_weighted_score`. Missing columns fill with 0.0 — indistinguishable from a true zero.
 7. **The shipping duration score is near-circular** against the level-shift label. Cite operationally, never as detection skill.
 8. **The test suite writes into the figure directory.** `tests/test_phase4_depth.py::test_comparison_plots_saved` calls `generate_comparison_plot(..., save_dir="data/processed/")`, so **running `pytest` silently overwrites `shap_comparison_waterfall.png` and `shap_comparison_importance.png` with plots built from test fixtures**. Any figure taken from that directory must be regenerated from a real pipeline run *after* the last test invocation. The test should write to a `tmp_path` fixture instead.
 
@@ -1166,7 +1143,6 @@ supply-chain-dss/
 │   │   ├── geopolitical_connector.py # ACLED conflict events (live); no sanctions_severity by design
 │   │   ├── disaster_connector.py    # GDACS + USGS (live); replaced the dead Ambee path
 │   │   ├── news_connector.py        # GDELT DOC API v2 (live)
-│   │   └── routing_connector.py     # dormant — fetch_api() raises NotImplementedError by design
 │   ├── agents/
 │   │   ├── base_agent.py       # ABC + DetectionResult dataclass
 │   │   ├── shipping_agent.py   # IsolationForest + Z-score + level_shift_score() duration signal (Phase 14)
@@ -1174,7 +1150,6 @@ supply-chain-dss/
 │   │   ├── geopolitical_agent.py # renormalises weights over features ACLED actually supplies
 │   │   ├── disaster_agent.py   # sparse hazard severity
 │   │   ├── news_agent.py       # renormalises over present features when GDELT is silent
-│   │   └── routing_agent.py    # present but dormant
 │   ├── aggregation/
 │   │   └── risk_engine.py      # weighted composite risk scoring
 │   ├── explainability/
@@ -1195,7 +1170,7 @@ supply-chain-dss/
 │   │   ├── reliefweb_extractor.py   # natural_disaster fallback (needs an approved appname)
 │   │   ├── fred_extractor.py        # market signals around known disruption windows
 │   │   ├── acled_extractor.py       # geopolitical conflict events, OAuth via the `acled` client
-│   │   ├── aisstream_monitor.py     # live-only AIS WebSocket monitor (unused while routing is dormant)
+│   │   ├── aisstream_monitor.py     # live-only AIS WebSocket monitor
 │   │   └── knowledge_base_builder.py # orchestrates all extractors -> dedupe -> ChromaDB upsert
 │   ├── api/
 │   │   └── endpoints.py        # FastAPI — 10 endpoints: /health /predict /explain /agents /agents/toggle /weights /weights/switch /optimization/results /populate /status (Phase 8)
@@ -1219,7 +1194,7 @@ supply-chain-dss/
 │   ├── test_ingestion.py       # shipping + market connector schema, ranges, separation, cross-source correlation
 │   ├── test_risk_engine.py
 │   ├── test_scenarios.py
-│   ├── test_new_agents.py      # geopolitical, natural-disaster, routing, news-sentiment agents + 6-agent integration
+│   ├── test_new_agents.py      # geopolitical, natural-disaster, news-sentiment agents + integration
 │   ├── test_optimization.py    # Optuna weight optimizer, parameter space, objective function, no-leakage guard
 │   ├── test_shap_6agent.py     # 20-feature SHAP surrogate, explain output, text generation, disabled-agent path
 │   ├── test_rag_6domain.py     # 10-case knowledge base, multi-domain query, similarity thresholds, format_context

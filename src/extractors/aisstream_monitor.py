@@ -1,8 +1,8 @@
 """aisstream.io WebSocket monitor for real-time vessel tracking.
 
-Covers: shipping + routing agents (LIVE monitoring only). Historical RAG
+Covers: the shipping agent (LIVE monitoring only). Historical RAG
 population does not use aisstream — there is no historical API; the
-shipping/routing connectors fall back to their synthetic baselines for
+the shipping connector falls back to its synthetic baseline for
 backtesting (see ``src/ingestion``).
 """
 

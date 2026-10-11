@@ -34,7 +34,7 @@ _N = 200  # synthetic training rows (fast; real pipeline uses 364)
 
 
 def _make_features(n: int = _N, seed: int = 42) -> pd.DataFrame:
-    """Return a synthetic n×20 feature DataFrame with realistic value ranges."""
+    """Return a synthetic n×17 feature DataFrame with realistic value ranges."""
     rng = np.random.default_rng(seed)
     data = {
         # Shipping
@@ -55,10 +55,6 @@ def _make_features(n: int = _N, seed: int = 42) -> pd.DataFrame:
         "tsunami_risk": rng.uniform(0, 1, n),
         "cyclone_severity": rng.uniform(0, 1, n),
         "severe_weather_index": rng.uniform(0, 1, n),
-        # Routing
-        "rerouting_percentage": rng.uniform(0, 0.5, n),
-        "avg_route_deviation_km": rng.uniform(0, 800, n),
-        "transit_volume_ratio": rng.uniform(0.5, 1.5, n),
         # News Sentiment
         "sentiment_score": rng.uniform(-1, 1, n),
         "source_consensus": rng.uniform(0, 1, n),
@@ -75,7 +71,6 @@ def _make_risk_scores(features_df: pd.DataFrame, seed: int = 0) -> np.ndarray:
     scores = (
         0.3 * df["congestion_index"]
         + 0.2 * df["sanctions_severity"]
-        + 0.2 * df["rerouting_percentage"] * 2
         + 0.15 * (1 - df["sentiment_score"]) / 2
         + 0.15 * df["earthquake_severity"]
         + rng.normal(0, 0.01, len(df))
@@ -102,7 +97,7 @@ def test_surrogate_full_features() -> None:
     assert r2 > 0.85, f"Surrogate R² {r2:.4f} did not exceed 0.85."
     assert explainer.r2 == pytest.approx(r2)
     assert set(ALL_FEATURE_NAMES) == set(FEATURE_AGENT_MAP.keys())
-    assert len(ALL_FEATURE_NAMES) == 20
+    assert len(ALL_FEATURE_NAMES) == 17
 
 
 def test_explain_scenario_b() -> None:
@@ -113,12 +108,11 @@ def test_explain_scenario_b() -> None:
     explainer = SurrogateShapExplainer()
     explainer.train_surrogate(features_df, risk_scores)
 
-    # High-anomaly scenario: max congestion + max sanctions + heavy rerouting.
+    # High-anomaly scenario: max congestion + max sanctions.
     scenario = features_df.copy()
     scenario.iloc[0] = 0.0  # baseline
     scenario.at[0, "congestion_index"] = 1.0
     scenario.at[0, "sanctions_severity"] = 1.0
-    scenario.at[0, "rerouting_percentage"] = 0.5
     scenario.at[0, "earthquake_severity"] = 1.0
     scenario.at[0, "sentiment_score"] = -1.0
 
@@ -141,7 +135,7 @@ def test_explain_scenario_b() -> None:
 
     # At least one top driver should belong to an expected high-signal agent.
     top_agents = {d["agent"] for d in top_drivers}
-    high_signal_agents = {"shipping", "geopolitical", "routing", "natural_disaster"}
+    high_signal_agents = {"shipping", "geopolitical", "natural_disaster"}
     assert top_agents & high_signal_agents, (
         f"Expected at least one top driver from {high_signal_agents}, got {top_agents}"
     )
@@ -195,7 +189,7 @@ def test_explanation_text_mentions_agents() -> None:
 
     known_agents = {
         "shipping", "market", "geopolitical",
-        "natural disaster", "routing", "news sentiment",
+        "natural disaster", "news sentiment",
     }
     text_lower = text.lower()
     mentioned = [a for a in known_agents if a in text_lower]
@@ -209,16 +203,17 @@ def test_explanation_text_mentions_agents() -> None:
 def test_disabled_agent() -> None:
     """Surrogate trains and explains correctly when one agent's columns are zero.
 
-    Simulates a disabled routing agent by zeroing its three features; the
-    remaining 17 features should still produce a valid explanation.
+    Simulates a disabled natural-disaster agent by zeroing its four features;
+    the remaining features should still produce a valid explanation.
     """
     features_df = _make_features()
-    # Zero out routing columns to simulate a disabled routing agent.
-    routing_cols = ["rerouting_percentage", "avg_route_deviation_km", "transit_volume_ratio"]
+    # Zero out the disaster columns to simulate a disabled agent.
+    disabled_cols = ["earthquake_severity", "tsunami_risk",
+                     "cyclone_severity", "severe_weather_index"]
     features_df_partial = features_df.copy()
-    features_df_partial[routing_cols] = 0.0
+    features_df_partial[disabled_cols] = 0.0
 
-    # Recalculate risk without the routing signal.
+    # Recalculate risk without that signal.
     risk_scores = _make_risk_scores(features_df_partial)
 
     explainer = SurrogateShapExplainer()
@@ -228,21 +223,20 @@ def test_disabled_agent() -> None:
     assert explainer.is_trained
     assert 0.0 <= r2 <= 1.0
 
-    # Explain a test row with zeroed routing features.
+    # Explain a test row with zeroed features.
     test_row = features_df_partial.iloc[[0]].copy()
     result = explainer.explain(test_row)
 
     assert "top_drivers" in result
     assert len(result["top_drivers"]) == 3
 
-    # Routing features should have zero or very small SHAP values.
+    # The zeroed features should have zero or very small SHAP values.
     shap_values = result["shap_values"]
-    routing_shap = [abs(shap_values.get(c, 0.0)) for c in routing_cols]
-    non_routing_shap = [
-        abs(v) for k, v in shap_values.items() if k not in routing_cols
+    disabled_shap = [abs(shap_values.get(c, 0.0)) for c in disabled_cols]
+    other_shap = [
+        abs(v) for k, v in shap_values.items() if k not in disabled_cols
     ]
-    if non_routing_shap:
-        max_non_routing = max(non_routing_shap)
-        assert max(routing_shap) <= max_non_routing + 0.05, (
-            "Zeroed routing features had unexpectedly large SHAP values."
+    if other_shap:
+        assert max(disabled_shap) <= max(other_shap) + 0.05, (
+            "Zeroed features had unexpectedly large SHAP values."
         )

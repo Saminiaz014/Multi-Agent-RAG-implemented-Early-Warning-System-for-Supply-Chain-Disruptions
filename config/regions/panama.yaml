@@ -36,17 +36,6 @@ agents:
     # hormuz, red_sea, malacca, suez). A loader applying this overlay must add
     # one, or DisasterConnector.fetch_api() will have no point to query.
     location: "panama"
-  routing:
-    # PASSIVE — WEAK evidence. Real but minority diversion is documented
-    # (Stolt-Nielsen's 166-vessel fleet via Suez, Maersk's Balboa-Manzanillo
-    # rail land bridge), but the dominant observed response was queueing (avg
-    # wait 11.4 days, max 22.8) and paying record auction premiums ($2.85M) to
-    # hold a slot. A queued vessel's path has not changed, so the
-    # AIS-deviation model cannot see it; no source gives a total-fleet
-    # diversion percentage.
-    # Also covered by the temporary GLOBAL routing muting — see the
-    # "ROUTING AGENT: GLOBALLY PASSIVE" block in src/core/regions.py.
-    enabled: false
   news_sentiment:
     enabled: true
     # AUTHORED — see bab_el_mandeb.yaml's equivalent note.

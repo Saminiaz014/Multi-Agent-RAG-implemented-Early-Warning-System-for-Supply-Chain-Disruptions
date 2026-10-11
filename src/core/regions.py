@@ -23,14 +23,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# The six pipeline agents, in config-key form. Any region's ``agents`` mapping
+# The five pipeline agents, in config-key form. Any region's ``agents`` mapping
 # must cover exactly these — enforced by :func:`_validate_registry` at import.
 AGENT_KEYS: tuple[str, ...] = (
     "shipping",
     "market",
     "geopolitical",
     "natural_disaster",
-    "routing",
     "news_sentiment",
 )
 
@@ -39,19 +38,10 @@ AGENT_KEYS: tuple[str, ...] = (
 #: A *passive* agent is a per-region evidence judgement — the domain is real but
 #: has no documented driver for that chokepoint, and could become active if
 #: evidence appeared. A *dormant* agent is a project-scope decision: it is not
-#: being worked on, and no region may activate it.
-#:
-#: ``routing`` is dormant. It was already passive in all four regions (no
-#: viable sea alternate into the Persian Gulf; only weak, minority diversion
-#: evidence for Panama and Malacca), so no run ever exercised it, and no data
-#: source in the pipeline feeds its features with anything but synthetic
-#: values. Enforced by :func:`_validate_registry` so it cannot be switched back
-#: on region-by-region without a deliberate edit here.
-#:
-#: The :class:`~src.agents.routing_agent.RoutingAgent` class and its connector
-#: are intentionally left in the tree: they are tested, and reviving the domain
-#: should be a config decision, not a rewrite.
-DORMANT_AGENTS: frozenset[str] = frozenset({"routing"})
+#: being worked on, and no region may activate it. The set is currently empty;
+#: it is retained so that :func:`_validate_registry` keeps enforcing the
+#: distinction if a domain is ever retired again.
+DORMANT_AGENTS: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -88,35 +78,6 @@ class RegionConfig:
         return [key for key in AGENT_KEYS if not self.agents.get(key, False)]
 
 
-# ---------------------------------------------------------------------------
-# ROUTING AGENT: GLOBALLY PASSIVE (as of Phase 11)
-# ---------------------------------------------------------------------------
-# Routing is disabled in ALL FOUR regions. Unlike every other passive flag in
-# this file, this is NOT an evidence-driven per-region call — it is a
-# deliberate, temporary, uniform muting.
-#
-# Rationale: defer per-region muting decisions until Phase 14 evaluation shows
-# which agents actually contribute where, rather than deciding now from
-# evidence tiers alone. Supporting this specific choice for routing:
-# routing_connector.fetch_api() is still a NotImplementedError stub, so the
-# agent emits synthetic or CSV signal in every region regardless of how well
-# the real-world driver is documented.
-#
-# IMPORTANT — this overrides the evidence in one direction that matters:
-# Bab el-Mandeb's routing signal is the single most directly evidence-anchored
-# figure in the whole benchmark (85% of large containerships diverted via the
-# Cape of Good Hope, +3,500-4,000 nm / +10-14 days per voyage — a literal
-# documented percentage, not an extrapolation). It is muted here IN SPITE of
-# that evidence, not because of any weakness in it. See the individual
-# passive_reasons entries, which preserve each region's underlying
-# evidence position separately from this blanket muting.
-#
-# CAVEAT for Phase 14: with routing off everywhere, evaluation cannot measure
-# routing's contribution in any region — so Phase 14 results alone will not
-# settle whether to re-enable it. Re-enabling needs the evidence tiers plus a
-# run with routing active, not symmetry and not silence.
-# ---------------------------------------------------------------------------
-
 #: Region keys retired when the extraction vocabulary was realigned to this
 #: registry, mapped to their successor. Extractors and the knowledge-base
 #: migration both read this, so the mapping has exactly one definition.
@@ -147,18 +108,9 @@ REGIONS: dict[str, RegionConfig] = {
             "market": True,
             "geopolitical": True,
             "natural_disaster": True,
-            "routing": False,
             "news_sentiment": True,
         },
-        passive_reasons={
-            "routing": (
-                "No viable sea alternate into the Persian Gulf "
-                "(config/benchmark/hormuz.yaml: reroutable: false), so "
-                "avg_route_deviation_km has no real-world analogue here — "
-                "routing_connector.py's own docstring calls it a modeled "
-                "proxy, not a measured quantity."
-            ),
-        },
+        passive_reasons={},
     ),
     "panama": RegionConfig(
         name="panama",
@@ -171,7 +123,6 @@ REGIONS: dict[str, RegionConfig] = {
             # Evidence-excluded — see passive_reasons.
             "geopolitical": False,
             "natural_disaster": True,
-            "routing": False,
             "news_sentiment": True,
         },
         passive_reasons={
@@ -180,13 +131,6 @@ REGIONS: dict[str, RegionConfig] = {
                 "disruption is purely hydrological/climate-driven (Gatun Lake "
                 "drought). Stated outright in the region's evidence file; "
                 "geopolitical is absent from panama.yaml's active_domains."
-            ),
-            "routing": (
-                "WEAK evidence: real but minority diversion is documented "
-                "(Stolt-Nielsen via Suez, Maersk's rail land bridge), but the "
-                "dominant observed response was queueing and paying auction "
-                "premiums — a queued vessel's path hasn't changed, so the "
-                "AIS-deviation model cannot detect it."
             ),
         },
     ),
@@ -201,9 +145,6 @@ REGIONS: dict[str, RegionConfig] = {
             "geopolitical": True,
             # Evidence-excluded — see passive_reasons.
             "natural_disaster": False,
-            # Muted by the global routing decision above, NOT by weak evidence
-            # — this is the one region whose routing evidence is strongest.
-            "routing": False,
             "news_sentiment": True,
         },
         passive_reasons={
@@ -212,15 +153,6 @@ REGIONS: dict[str, RegionConfig] = {
                 "security/geopolitical campaign, not a natural disaster "
                 "(bab_el_mandeb.yaml: disaster_relevance: none — an "
                 "affirmative absence found in the evidence, not missing data)."
-            ),
-            "routing": (
-                "TEMPORARY GLOBAL MUTING, not an evidence judgement — see the "
-                "ROUTING AGENT block above. The evidence here is the strongest "
-                "in the benchmark (85% of large containerships diverted via "
-                "the Cape of Good Hope — a literal documented percentage) and "
-                "would justify activation; it is muted only to defer the "
-                "per-region decision to post-Phase-14 evaluation. Re-enable "
-                "this one first if routing is revisited."
             ),
         },
     ),
@@ -235,7 +167,6 @@ REGIONS: dict[str, RegionConfig] = {
             "market": False,
             "geopolitical": True,
             "natural_disaster": True,
-            "routing": False,
             "news_sentiment": True,
         },
         passive_reasons={
@@ -244,12 +175,6 @@ REGIONS: dict[str, RegionConfig] = {
                 "— no quantified or qualitative market signal was located. "
                 "Originally included on plausibility grounds and removed as a "
                 "standards violation; this registry preserves that removal."
-            ),
-            "routing": (
-                "WEAK evidence: a targeted search for documented Sunda/Lombok "
-                "diversion due to piracy or haze found none. Both straits are "
-                "real but draft-constrained alternatives; no observed "
-                "diversion response to either driver is documented."
             ),
         },
     ),

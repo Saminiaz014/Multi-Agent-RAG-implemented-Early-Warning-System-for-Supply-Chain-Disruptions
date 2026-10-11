@@ -63,7 +63,7 @@ _NORMAL = range(100, 131)    # quiet stretch between scenarios
 _FIRE = 0.30
 _ALL_AGENTS = {
     "shipping", "market", "geopolitical",
-    "natural_disaster", "routing", "news_sentiment",
+    "natural_disaster", "news_sentiment",
 }
 
 
@@ -166,7 +166,7 @@ def test_scenario_a_medium_risk(env):
 
     fired = env["fired_agents"](_SCEN_A)
     assert "natural_disaster" not in fired, "natural_disaster should not fire in Scenario A (no earthquake)"
-    assert len(fired) == 5, f"Expected exactly 5 of 6 agents to fire in Scenario A, got {sorted(fired)}"
+    assert len(fired) == 4, f"Expected exactly 4 of 5 agents to fire in Scenario A, got {sorted(fired)}"
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +271,6 @@ def test_predict_action_valid_output():
         ("low", None, None, False),
         ("medium", [], None, False),
         ("high", None, None, False),
-        ("high", [{"agent": "routing"}], None, False),
         ("high", [{"agent": "geopolitical"}], {"similarity": 0.9, "action": "escalate"}, False),
         ("high", [{"agent": "geopolitical"}], {"similarity": 0.1}, False),
         ("high", [{"agent": "shipping"}], None, True),
@@ -290,7 +289,6 @@ def test_predict_action_valid_output():
     # Spot-check the documented rules.
     assert predict_action("low", None, None) == "no_action"
     assert predict_action("medium", None, None) == "monitor"
-    assert predict_action("high", [{"agent": "routing"}], None) == "reroute"
     assert predict_action("high", [{"agent": "shipping"}], None, sustained=True) == "escalate"
 
 

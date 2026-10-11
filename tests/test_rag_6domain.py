@@ -5,7 +5,7 @@ Five tests:
 1. test_knowledge_base_completeness  — JSON has >= 10 cases, covers all 6 domains,
                                        every case has all required fields.
 2. test_query_scenario_b             — Multi-domain signal (shipping + geo + disaster
-                                       + routing + news) → top match is multi-domain
+                                       + news) → top match is multi-domain
                                        with similarity > 0.6.
 3. test_query_geopolitical_only      — Only geopolitical elevated → top match has
                                        "geopolitical" in primary_agents.
@@ -38,7 +38,6 @@ ALL_6_DOMAINS = {
     "market",
     "geopolitical",
     "natural_disaster",
-    "routing",
     "news_sentiment",
 }
 
@@ -92,13 +91,12 @@ def test_knowledge_base_completeness() -> None:
 
 def test_query_scenario_b(retriever: ContextRetriever) -> None:
     """Multi-domain signal profile returns a multi-domain case with similarity > 0.6."""
-    # Scenario B: shipping, geopolitical, natural_disaster, routing, news all elevated.
+    # Scenario B: shipping, geopolitical, natural_disaster, news all elevated.
     signals = {
         "shipping": 0.80,
         "market": 0.35,
         "geopolitical": 0.85,
         "natural_disaster": 0.70,
-        "routing": 0.75,
         "news_sentiment": 0.72,
     }
     results = retriever.query(signals, top_k=3)
@@ -130,7 +128,6 @@ def test_query_geopolitical_only(retriever: ContextRetriever) -> None:
         "market": 0.15,
         "geopolitical": 0.90,
         "natural_disaster": 0.10,
-        "routing": 0.10,
         "news_sentiment": 0.12,
     }
     results = retriever.query(signals, top_k=3)
@@ -156,7 +153,6 @@ def test_query_disaster(retriever: ContextRetriever) -> None:
         "market": 0.10,
         "geopolitical": 0.08,
         "natural_disaster": 0.88,
-        "routing": 0.12,
         "news_sentiment": 0.10,
     }
     results = retriever.query(signals, top_k=3)
@@ -189,7 +185,6 @@ def test_format_context(retriever: ContextRetriever) -> None:
     signals = {
         "shipping": 0.70,
         "geopolitical": 0.65,
-        "routing": 0.60,
         "natural_disaster": 0.20,
         "market": 0.30,
         "news_sentiment": 0.55,

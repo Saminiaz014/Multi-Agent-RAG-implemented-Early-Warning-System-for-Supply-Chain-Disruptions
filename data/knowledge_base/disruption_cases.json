@@ -18,7 +18,11 @@
     "impact": "Temporary halt of tanker transit through Gulf of Oman, spike in marine war-risk insurance rates by 10x, oil prices rose 4-5%, heightened US-Iran military tension in the Strait.",
     "duration_days": 14,
     "recovery_days": 30,
-    "primary_agents": ["shipping", "geopolitical", "news_sentiment"],
+    "primary_agents": [
+      "shipping",
+      "geopolitical",
+      "news_sentiment"
+    ],
     "lessons": "Geopolitical attacks on key maritime chokepoints cause rapid insurance repricing and traffic reduction before any physical supply impact materialises; early news sentiment signals precede vessel-count drops by 2-3 days."
   },
   {
@@ -40,8 +44,10 @@
     "impact": "369 vessels queued, $9.6B/day trade halted, container freight rates rose 15%, Cape of Good Hope traffic surged, global just-in-time supply chains disrupted for weeks after refloating.",
     "duration_days": 6,
     "recovery_days": 60,
-    "primary_agents": ["routing", "shipping"],
-    "lessons": "A single vessel grounding at a critical chokepoint can trigger cascading global rerouting; routing anomaly detection would have flagged the traffic cessation within hours of the grounding."
+    "primary_agents": [
+      "shipping"
+    ],
+    "lessons": "A single vessel grounding at a critical chokepoint can trigger cascading global rerouting; shipping-transit anomaly detection would have flagged the traffic cessation within hours of the grounding."
   },
   {
     "id": "houthi_redsea_2024",
@@ -62,8 +68,12 @@
     "impact": "Red Sea container traffic fell 55%, Suez Canal revenues dropped 40%, Cape of Good Hope transits surged 200%, global container freight rates doubled, transit time Asia-Europe increased 10-14 days.",
     "duration_days": 180,
     "recovery_days": 270,
-    "primary_agents": ["shipping", "geopolitical", "routing", "news_sentiment"],
-    "lessons": "Sustained geopolitical attack campaigns against shipping chokepoints create self-reinforcing rerouting loops; news sentiment signals and rerouting percentage both lead vessel-count drops by 5-7 days."
+    "primary_agents": [
+      "shipping",
+      "geopolitical",
+      "news_sentiment"
+    ],
+    "lessons": "Sustained geopolitical attack campaigns against shipping chokepoints create self-reinforcing rerouting loops; news sentiment signals lead vessel-count drops by 5-7 days."
   },
   {
     "id": "hormuz_mine_threat_2010",
@@ -84,7 +94,10 @@
     "impact": "Modest 8% traffic reduction, war-risk insurance premiums rose 20%, oil spot prices elevated, allied naval presence in the strait doubled temporarily.",
     "duration_days": 21,
     "recovery_days": 14,
-    "primary_agents": ["geopolitical", "shipping"],
+    "primary_agents": [
+      "geopolitical",
+      "shipping"
+    ],
     "lessons": "Credible mine-threat scenarios at Hormuz have an outsized market impact relative to actual physical disruption; geopolitical signals lead shipping signals by 3-5 days."
   },
   {
@@ -106,8 +119,10 @@
     "impact": "Shipping industry cost $7B annually in rerouting, security, and ransoms; 28 vessels hijacked with 1,063 hostages at peak; transit times through Gulf of Aden increased 40%.",
     "duration_days": 365,
     "recovery_days": 730,
-    "primary_agents": ["routing", "shipping"],
-    "lessons": "Persistent low-intensity security threats cause structural rerouting shifts rather than acute disruptions; vessel-count and routing anomalies are the primary leading indicators."
+    "primary_agents": [
+      "shipping"
+    ],
+    "lessons": "Persistent low-intensity security threats cause structural rerouting shifts rather than acute disruptions; vessel-count anomalies are the primary leading indicator."
   },
   {
     "id": "japan_earthquake_2011",
@@ -128,7 +143,10 @@
     "impact": "Sendai, Ishinomaki, Hachinohe ports closed for weeks; Japan manufacturing output fell 20%; global automotive supply chains halted; radiation exclusion zones disrupted 15% of Japan Pacific traffic.",
     "duration_days": 90,
     "recovery_days": 180,
-    "primary_agents": ["natural_disaster", "shipping"],
+    "primary_agents": [
+      "natural_disaster",
+      "shipping"
+    ],
     "lessons": "Earthquake and tsunami events cause near-instantaneous port closures with weeks-long recovery; natural disaster severity and proximity scores are the earliest signals, preceding vessel-count drops by 0-6 hours."
   },
   {
@@ -150,7 +168,10 @@
     "impact": "90+ ships at anchor off LA/Long Beach, container spot rates up 400%, average transit time extended by 3-4 weeks, retail supply chains impacted globally, inflation accelerated.",
     "duration_days": 270,
     "recovery_days": 365,
-    "primary_agents": ["shipping", "market"],
+    "primary_agents": [
+      "shipping",
+      "market"
+    ],
     "lessons": "Demand-driven port congestion is signalled by congestion index and freight rate increases simultaneously; shipping anomaly detection combined with market signals provides 2-3 week advance warning of systemic disruption."
   },
   {
@@ -172,7 +193,10 @@
     "impact": "29 ports affected, cargo backlogs of 20-30 vessels per port, US agricultural exporters lost $2.5B, retailers diverted cargo to East Coast adding 2-3 weeks transit time.",
     "duration_days": 90,
     "recovery_days": 120,
-    "primary_agents": ["shipping", "market"],
+    "primary_agents": [
+      "shipping",
+      "market"
+    ],
     "lessons": "Labour-dispute-driven port slowdowns produce gradual vessel-count and congestion anomaly build-up over days rather than acute spikes; market freight-rate signals confirm when the slowdown reaches systemic levels."
   },
   {
@@ -194,7 +218,10 @@
     "impact": "Iran's oil exports fell 60%, Brent crude averaged $111/barrel throughout 2012, Hormuz war-risk insurance premiums spiked, Iranian tanker fleet became effectively stranded due to insurance blacklisting.",
     "duration_days": 365,
     "recovery_days": 730,
-    "primary_agents": ["geopolitical", "market"],
+    "primary_agents": [
+      "geopolitical",
+      "market"
+    ],
     "lessons": "Economic sanctions targeting an oil-producing nation at a critical chokepoint drive sustained oil-price elevation rather than acute spikes; geopolitical and market signals co-move with a 1-2 week lag."
   },
   {
@@ -216,7 +243,9 @@
     "impact": "Sohar and Salalah ports closed 3-4 days, tanker traffic in Gulf of Oman halted, Oman LNG exports disrupted, oil prices spiked modestly, vessels holding positions outside the Gulf of Oman approach.",
     "duration_days": 7,
     "recovery_days": 21,
-    "primary_agents": ["natural_disaster", "routing"],
-    "lessons": "Tropical cyclone events in the Arabian Sea create acute short-duration routing disruptions detectable 24-48 hours in advance via weather tracking; cyclone severity and vessel holding anomalies are the key leading indicators."
+    "primary_agents": [
+      "natural_disaster"
+    ],
+    "lessons": "Tropical cyclone events in the Arabian Sea create acute short-duration transit disruptions detectable 24-48 hours in advance via weather tracking; cyclone severity and vessel holding anomalies are the key leading indicators."
   }
 ]

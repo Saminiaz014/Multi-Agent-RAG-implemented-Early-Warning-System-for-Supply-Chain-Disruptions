@@ -279,7 +279,7 @@ def test_orchestrator_wiring_carries_region_settings() -> None:
 
 def test_all_six_connectors_build_from_every_merged_config() -> None:
     """No connector chokes on a region config, including the passive ones."""
-    from src.ingestion import DisasterConnector, MarketConnector, RoutingConnector
+    from src.ingestion import DisasterConnector, MarketConnector
 
     for region in list_regions():
         config = load_config_for_region(region)
@@ -289,7 +289,6 @@ def test_all_six_connectors_build_from_every_merged_config() -> None:
             MarketConnector(config=config["ingestion"]["market"]),
             GeopoliticalConnector(config=agents["geopolitical"]),
             DisasterConnector(config=agents["natural_disaster"]),
-            RoutingConnector(config=agents["routing"]),
             NewsConnector(config=agents["news_sentiment"]),
         ]
         assert all(c is not None for c in built), region
