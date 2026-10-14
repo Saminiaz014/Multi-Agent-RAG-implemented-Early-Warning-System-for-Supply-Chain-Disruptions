@@ -154,7 +154,7 @@ Without the duration branch: Hormuz FP geopolitical 12/36, TP 6/7; Malacca uncha
 
 The market inputs are global FRED series, so the agent's score series is nearly identical across regions; only the alert sets differ. The agent sits at or near its ceiling on about 30% of days, *calm ones included*. Measured against a calm baseline of 0.78, it can add little to an alert. The market agent was never the top driver of any episode.
 
-### 4.4 FP characterisation (`fp_characterisation.csv`, read-only ChromaDB copy)
+### 4.4 FP characterisation, production KB only (superseded by §7.4)
 
 **Rule:** a knowledge-base document counts if it is region-matched, geopolitical/conflict, and dated between (episode start − 7 days) and the episode end. Geopolitical/conflict means:
 - ACLED daily events, or
@@ -184,7 +184,142 @@ Phase 3 inherits this: precedent grounding for 2023-25 alerts cannot be scored o
 
 ## 6. Reproducibility and versioning
 
-- `python eval/explainability/make_figures.py` rebuilds everything (≈10 min); add `--reuse` to redraw from the existing CSVs.
+- `python eval/explainability/make_figures.py` rebuilds everything (≈15 min); add `--reuse` to redraw from the existing CSVs.
+  - The backfill step is served from `eval/explainability/backfill_raw/` and spends no API quota.
+  - On a machine without that cache it needs `SERPAPI_API_KEY` and ACLED credentials.
 - **Tracked:** code, tests, this report, `thesis/figures/ch4/*.caption.txt`.
-- **Untracked (regenerated):** `aer/`, `*.csv`, `*.json`, the PNG/PDF figures.
+- **Untracked (regenerated):** `aer/`, `*.csv`, `*.json`, the PNG/PDF figures, `backfill_raw/`, `data/knowledge_base/.chromadb_xai/`.
 - `.gitignore` ignores the contents of `thesis/` rather than the directory, which lets the caption exception work. The local `.git/info/exclude` entry was narrowed the same way (`thesis/*`).
+
+## 7. Phase 3: precedent grounding
+
+Rules are pre-registered in `PREREGISTERED_RULES.md` §A–B (commit `ae8c7b7`; amendments `d8cdc62`, `ea1e5bb`). The data is real_eval; the unit is the Tier 5 alert episode. **TP episodes: 5 / 7 / 8 (Hormuz / Bab el-Mandeb / Panama).**
+
+### 7.1 Source validation (2026-10-14)
+
+| Source | Reaches 2023-08 → 2025-08? | Evidence |
+|---|---|---|
+| ACLED event-level | **Yes**, account active | Dated events for all four regions, e.g. Yemen 2024-01-10 (Houthi-sponsored demonstrations), Iran 2024-04-11 (Isfahan farmers' rally), Panama 2023-10-03 (SUNTRACS protest), Malaysia 2024-06-18 (Bersih vigil). |
+| SerpApi Google News, `tbs=cdr` | **Yes** | 250/250 searches available. Jan-2024 test: "Shipping oil through troubled waters" (ASPI, 2024-01-18); "How Houthi Attacks in the Red Sea Threaten Global Shipping" (CFR, 2024-01-12); "Oil tankers divert from Red Sea after US, UK strikes in Yemen" (Reuters, 2024-01-12). |
+| GDELT DOC 2.0 | **No, skipped** | HTTP 429 on the first request, even with spacing. The DOC API is also documented to search only a rolling ~3-month window, so it could not reach 2023-25 regardless. |
+
+### 7.2 Backfill coverage (`backfill_coverage.csv`): news + ACLED documents per region × month
+
+Written to the **eval copy only**: `data/knowledge_base/.chromadb_xai`, collection `backfill_2023_25`, 1,338 documents tagged `backfill: true`. Production `.chromadb` was only read, once, to make that copy.
+
+- **Quota:** 101 SerpApi searches used (100 + 1 validation; 149 left this month), 250 ACLED requests.
+- **Fetch status:** every region-month fetched `ok` (no `fetch_failed`).
+- **Cap:** the 15-per-month cap is always hit by news, which is capped at 10 because Google returns at most 10 per page. ACLED fills 0–7 slots, depending on how many maritime-filtered events the month had. Hormuz has 91 candidates in 25 months; Bab el-Mandeb has 3,696.
+
+| Month | Hormuz | Bab el-Mandeb | Panama | Malacca |
+|---|---|---|---|---|
+| 2023-08 | 10 + 4 | 10 + 5 | 10 + 2 | 8 + 7 |
+| 2023-09 | 10 + 2 | 10 + 5 | 10 + 1 | 7 + 7 |
+| 2023-10 | 10 + 1 | 9 + 6 | 10 + 2 | 10 + 4 |
+| 2023-11 | 10 + 2 | 10 + 5 | 10 + 1 | 9 + 6 |
+| 2023-12 | 10 + 2 | 10 + 5 | 10 + 5 | 10 + 2 |
+| 2024-01 | 10 + 5 | 10 + 5 | 10 + 0 | 10 + 5 |
+| 2024-02 | 10 + 2 | 10 + 5 | 10 + 3 | 10 + 0 |
+| 2024-03 | 10 + 1 | 10 + 5 | 10 + 1 | 8 + 3 |
+| 2024-04 | 10 + 3 | 10 + 5 | 10 + 0 | 9 + 6 |
+| 2024-05 | 10 + 1 | 10 + 5 | 10 + 1 | 9 + 4 |
+| 2024-06 | 10 + 3 | 10 + 5 | 10 + 2 | 7 + 5 |
+| 2024-07 | 10 + 1 | 10 + 5 | 10 + 2 | 9 + 3 |
+| 2024-08 | 10 + 2 | 10 + 5 | 10 + 0 | 7 + 6 |
+| 2024-09 | 10 + 1 | 10 + 5 | 10 + 1 | 10 + 5 |
+| 2024-10 | 10 + 3 | 10 + 5 | 10 + 1 | 9 + 6 |
+| 2024-11 | 10 + 0 | 10 + 5 | 10 + 2 | 6 + 5 |
+| 2024-12 | 10 + 0 | 10 + 5 | 10 + 3 | 8 + 6 |
+| 2025-01 | 10 + 3 | 10 + 5 | 10 + 5 | 9 + 6 |
+| 2025-02 | 10 + 3 | 10 + 5 | 10 + 5 | 8 + 7 |
+| 2025-03 | 10 + 5 | 10 + 5 | 10 + 2 | 10 + 5 |
+| 2025-04 | 10 + 5 | 10 + 5 | 10 + 5 | 10 + 5 |
+| 2025-05 | 10 + 5 | 10 + 5 | 10 + 2 | 10 + 5 |
+| 2025-06 | 10 + 5 | 10 + 5 | 10 + 3 | 10 + 5 |
+| 2025-07 | 10 + 5 | 10 + 5 | 10 + 0 | 10 + 5 |
+| 2025-08 | 10 + 4 | 10 + 5 | 10 + 0 | 10 + 5 |
+| **Total** | 250 + 68 = **318** | 249 + 126 = **375** | 250 + 49 = **299** | 223 + 123 = **346** |
+
+### 7.3 Retrieval diagnostics (`rag_diagnostics.csv`): one query per episode, on its first day
+
+| Measure | Configuration | Hormuz | Bab el-Mandeb | Panama | Malacca |
+|---|---|---|---|---|---|
+| Temporal validity (doc date < alert date) | production | 0.97 | 0.92 | 1.00 | 0.99 |
+| | wrapper (prod KB) / wrapper + backfill | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
+| Region match | production | **0.00** | 0.75 | **0.00** | **0.00** |
+| | wrapper / wrapper + backfill | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
+| Duplicate rate in top 3 | production | **0.33** | **0.33** | **0.36** | **0.33** |
+| | wrapper / wrapper + backfill | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Any hit ≥ 0.55 | all three | 1.00 | 1.00 | 1.00 | 1.00 |
+| Triggered (composite ≥ 0.65) | production | 0.31 | 0.24 | **0.00** | 0.14 |
+| Similarity median [p10, p90] | production | 0.64 [0.60, 0.64] | 0.64 [0.60, 0.64] | 0.60 [0.60, 0.62] | 0.62 [0.60, 0.64] |
+| | wrapper | 0.69 [0.66, 0.72] | 0.69 [0.63, 0.71] | 0.71 [0.65, 0.71] | 0.65 [0.64, 0.67] |
+| | wrapper + backfill | 0.73 [0.70, 0.76] | 0.69 [0.63, 0.71] | 0.80 [0.75, 0.83] | 0.74 [0.71, 0.75] |
+
+What the production retriever actually returns:
+- **Hormuz:** for the 2023-09-12 alert, a 2021 Suez Canal article tagged `bab_el_mandeb`, stored and returned **twice** (the 0.33 duplicate rate), plus the global 2021 COVID port-congestion case.
+- **Every alert gets the same answer.** Its query depends only on which agents exceed 0.4, and the text always names the Strait of Hormuz, so different alerts receive identical precedents.
+- **Panama is never triggered.** No episode reaches the 0.65 gate.
+
+The wrapper removes all three defects (region, date, duplicates) by construction, and the backfill raises similarity in every region except Bab el-Mandeb, which was already covered.
+
+"Any hit ≥ 0.55" is 1.00 for every configuration, including the defective one, so the 0.55 floor is not selective. Relevance therefore has to come from annotation (§7.5), not from the similarity score.
+
+### 7.4 FP characterisation (`fp_characterisation.csv`): tags per pre-registration §B
+
+| Region | FP episodes | KB | risk_without_traffic_drop | unexplained | no_coverage |
+|---|---|---|---|---|---|
+| Hormuz | 34 | production | 0 | 0 | 34 |
+| | | production + backfill | 31 | 2 | 1 |
+| Bab el-Mandeb | 10 | production | 0 | 0 | 10 |
+| | | production + backfill | 10 | 0 | 0 |
+| Panama | 30 | production | 0 | 0 | 30 |
+| | | production + backfill | 21 | 8 | 1 |
+| Malacca | 49 | production | 0 | 0 | 49 |
+| | | production + backfill | 45 | 3 | 1 |
+| **All** | **123** | production + backfill | **107** | **13** | **3** |
+
+By top exact driver (backfill KB):
+- geopolitical-led FP episodes: 40 / 3 / 1 (risk / unexplained / no_coverage);
+- shipping-led FP episodes: 67 / 10 / 2.
+
+**This tag does not discriminate, so it must not be read as "the FPs were real risk".** An exploratory control (*not* pre-registered; `fp_characterisation_base_rate.csv`) applies the same rule to 8-day windows ending on calm, non-alert days:
+
+| Region | FP episode windows | TP episode windows | Calm-day windows |
+|---|---|---|---|
+| Hormuz | 0.82 (n = 34) | 1.00 (n = 5) | 0.85 (n = 439) |
+| Bab el-Mandeb | 1.00 (10) | 1.00 (7) | 1.00 (155) |
+| Panama | 0.63 (30) | 0.63 (8) | 0.51 (490) |
+| Malacca | 0.90 (49) | — | 0.87 (543) |
+
+*Values are the share of windows tagged `risk_without_traffic_drop`.*
+
+**Why it fails:**
+- With uniform monthly coverage of conflict-heavy coastal states, almost any 8-day window contains a matching document.
+- The pre-registered rule is permissive. Any maritime-filtered ACLED event counts, including protests and "strategic developments"; 22 of the 107 tags rest on ACLED alone.
+- The keyword pattern also matches non-geopolitical items. Bab el-Mandeb E002 and E003 match "Shark attacks tourist … Red Sea".
+
+What the backfill *does* establish is coverage: `no_coverage` falls from 123/123 to 3/123. The production-only result in §4.4 was a KB artefact.
+
+### 7.5 Annotation set (for the author)
+
+- **Files:** `eval/explainability/rag_annotation.csv` (blind) and `rag_annotation_key.csv` (labels, similarities, query).
+- **Content:** 60 (episode, document) pairs from 20 episodes (9 TP / 11 FP): Hormuz 6, Bab el-Mandeb 6, Panama 6, Malacca 2. Malacca has a single FP stratum; it was reduced from 3 to 2 episodes by the pre-registered rule.
+- **Sources of the pairs:** SerpApi 52, PortWatch 5, static cases 3. ACLED events never reach the top 3: they are short, factual notes that embed far from a driver-phrased query.
+- **To score:** fill `relevance` (0 / 1 / 2, scale in `PREREGISTERED_RULES.md` §B), then run `python eval/explainability/compute_precision_at_3.py`. It refuses to run while any `relevance` cell is blank.
+
+### 7.6 Scorecard rows added (`scorecard.csv`, replacing the "pending" rows)
+
+| Metric | Hormuz | Bab el-Mandeb | Panama | Malacca |
+|---|---|---|---|---|
+| E8 grounding: ≥ 1 region-matched, pre-alert precedent ≥ 0.55 (episode) | 1.00 | 0.99 [0.96, 1.00] | 1.00 | 1.00 |
+| E5 top exact agent ∈ precedents' `primary_agents` (episode) | 0.62 [0.46, 0.77] | 0.41 [0.28, 0.54] | **0.00** | 0.02 [0.00, 0.07] |
+
+- **E8 is near-trivially high** because the floor is not selective (§7.3). Its informative counterpart is precision@3, pending annotation.
+- **E5 is a weak measure here.** By schema, backfilled news carries `primary_agents = news_sentiment`, so it can only match news-led alerts. Panama's 0.00 is this artefact, not a disagreement.
+- The without-duration variant changes these by ≤ 0.04.
+
+### 7.7 Incidents
+
+- **SerpApi failures:** a read timeout and a double HTTP 503 interrupted the backfill. Both were handled by pre-registered amendments (`d8cdc62`, `ea1e5bb`), and the cache meant no request was paid for twice.
+- **Exposed API key:** the 503's `HTTPError` text contained the request URL, **including the SerpApi API key**, which was written to a local task log. That log has been redacted, and errors are now raised without the URL. **The key should be rotated.**

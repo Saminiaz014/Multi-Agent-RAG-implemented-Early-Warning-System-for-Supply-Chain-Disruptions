@@ -1,7 +1,9 @@
 """Rebuild every Chapter 4 explainability figure with one command.
 
 By default this first regenerates the inputs — Alert Explanation Records
-(``run_aer.py``) and the scorecard outputs (``run_scorecard.py``) — and then
+(``run_aer.py``), the scorecard (``run_scorecard.py``), the knowledge-base
+backfill (``run_backfill.py``, from its raw-response cache) and precedent
+grounding (``run_precedents.py``) — and then
 draws each figure into ``thesis/figures/ch4/`` as PNG (300 dpi), PDF and a
 ``.caption.txt`` carrying the exact numbers shown.
 
@@ -152,6 +154,8 @@ def main() -> int:
     if not args.reuse:
         _run("run_aer")
         _run("run_scorecard")
+        _run("run_backfill")      # served from backfill_raw/ cache: no API quota spent
+        _run("run_precedents")
     composition = pd.read_csv(_HERE / "fp_driver_composition.csv")
     written = figure_f14(composition)
     for path in written:

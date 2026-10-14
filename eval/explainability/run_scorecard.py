@@ -16,8 +16,6 @@ Writes (under ``eval/explainability/``):
 * ``scorecard.csv`` — region x metric x method x variant.
 * ``fp_driver_composition.csv`` — top exact driver of TP vs FP episodes.
 * ``market_saturation.csv`` — how often the market agent sits at its ceiling.
-* ``fp_characterisation.csv`` — knowledge-base evidence near each FP episode
-  (read from a temporary *copy* of ChromaDB).
 
 Usage::
 
@@ -26,12 +24,8 @@ Usage::
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import re
-import shutil
 import sys
-import tempfile
 import warnings
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -83,22 +77,12 @@ from src.explainability.surrogate_comparator import (  # noqa: E402
 )
 
 _OUT = _ROOT / "eval" / "explainability"
-_KB = _ROOT / "data" / "knowledge_base" / ".chromadb"
 TIER = 5
 NOISE_SIGMAS = (0.01, 0.05, 0.10)
 NOISE_DRAWS = 20
 SURROGATES = ("surrogate_prod", "surrogate_refit")
 #: Agents whose within-agent feature attribution is scored for E2 (per brief).
 E2_FEATURE_AGENTS = ("shipping", "market")
-
-#: Words marking a news item as geopolitical / conflict (FP characterisation).
-GEO_PATTERN = re.compile(
-    r"\b(attack\w*|strike\w*|missile\w*|drone\w*|houthi\w*|militar\w*|nav(y|al)|warship\w*|"
-    r"seiz\w*|hijack\w*|pira\w*|sanction\w*|war|conflict\w*|tension\w*|threat\w*|"
-    r"escalat\w*|clash\w*|blockade\w*|militant\w*|terror\w*|hostil\w*)\b",
-    re.IGNORECASE,
-)
-
 
 # ----------------------------------------------------------------- per day
 def _surrogate_feature_phi(shap_feat: dict[str, float], agent: str, players: list[str]) -> dict:
@@ -426,89 +410,6 @@ def market_saturation(aset: AlertSet, days: list[dict]) -> dict:
     }
 
 
-def _kb_documents() -> pd.DataFrame:
-    """All live knowledge-base documents, read from a temporary copy of ChromaDB."""
-    import chromadb
-
-    tmp = Path(tempfile.mkdtemp(prefix="xai_kb_"))
-    try:
-        shutil.copytree(_KB, tmp / "kb")
-        client = chromadb.PersistentClient(path=str(tmp / "kb"))
-        got = client.get_collection("live_extracted_context").get(include=["metadatas", "documents"])
-        frame = pd.DataFrame([{**m, "doc_id": i, "text": t}
-                              for i, m, t in zip(got["ids"], got["metadatas"], got["documents"])])
-        del client
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-    frame["event_date"] = pd.to_datetime(frame["event_date"], errors="coerce")
-    frame["text_hash"] = frame["text"].map(lambda t: hashlib.sha1(str(t).encode("utf-8")).hexdigest())
-    return frame
-
-
-def fp_characterisation(asets: list[AlertSet], days_by_region: dict[str, list[dict]]) -> list[dict]:
-    """Knowledge-base evidence of geopolitical risk around each FP episode."""
-    kb = _kb_documents()
-    news = kb[kb["source_api"].isin(["newsapi", "serpapi"])].copy()
-    news["geo"] = (news.get("title", "").fillna("") + " " + news["text"]).str.contains(GEO_PATTERN)
-    acled_daily = kb[(kb["source_api"] == "acled") & (kb["event_type"] != "conflict_summary")
-                     & (kb["event_type"] != "historical_scenario")]
-    acled_annual = kb[(kb["source_api"] == "acled") & (kb["event_type"] == "conflict_summary")]
-
-    rows = []
-    for aset in asets:
-        days = days_by_region[aset.region]
-        sums: dict[int, Counter] = defaultdict(Counter)
-        for d in days:
-            sums[d["episode"]].update(d["phi_exact"])
-        labels, ids = aset.episode_labels(), aset.episode_ids()
-        test_start = pd.Timestamp(aset.dates[0])
-        test_end = pd.Timestamp(aset.dates[-1])
-        region_news = news[news["region"] == aset.region]
-        coverage = int(((region_news["event_date"] >= test_start)
-                        & (region_news["event_date"] <= test_end)).sum())
-        for k, members in enumerate(aset.episodes):
-            if labels[k] != "FP":
-                continue
-            start = pd.Timestamp(aset.dates[members[0]])
-            end = pd.Timestamp(aset.dates[members[-1]])
-            lo = start - pd.Timedelta(days=7)
-            in_window = region_news[(region_news["event_date"] >= lo)
-                                    & (region_news["event_date"] <= end)]
-            in_window = in_window.drop_duplicates("text_hash")
-            geo_news = in_window[in_window["geo"]]
-            daily = acled_daily[(acled_daily["region"] == aset.region)
-                                & (acled_daily["event_date"] >= lo)
-                                & (acled_daily["event_date"] <= end)]
-            annual = acled_annual[(acled_annual["region"] == aset.region)
-                                  & (acled_annual["event_date"].dt.year == start.year)
-                                  & (acled_annual["event_date"] <= end)]
-            matched = len(geo_news) + len(daily)
-            # How far the nearest region news item of any date is: separates
-            # "no event in the window" from "the knowledge base has no
-            # coverage near this date at all".
-            gaps = [(lo - d).days if d < lo else max((d - end).days, 0)
-                    for d in region_news["event_date"].dropna()]
-            nearest = int(min(gaps)) if gaps else None
-            rows.append({
-                "data_origin": path_d.DATA_ORIGIN, "path": "D", "variant": aset.variant,
-                "region": aset.region, "episode_id": ids[k],
-                "start": start.date().isoformat(), "end": end.date().isoformat(),
-                "n_alert_days": len(members),
-                "top_exact_driver": max(sums[k], key=sums[k].get),
-                "window_start": lo.date().isoformat(), "window_end": end.date().isoformat(),
-                "n_news_any": len(in_window), "n_news_geopolitical": len(geo_news),
-                "n_acled_daily": len(daily),
-                "acled_annual_military_events": float(pd.to_numeric(
-                    annual.get("military_events"), errors="coerce").sum()) if len(annual) else np.nan,
-                "kb_news_docs_in_region_test_window": coverage,
-                "nearest_region_news_days": nearest,
-                "matched_titles": " | ".join(geo_news.get("title", pd.Series(dtype=str))
-                                             .fillna("").head(3)),
-                "tag": "risk_without_traffic_drop" if matched else "unexplained",
-            })
-    return rows
-
-
 # --------------------------------------------------------------------- main
 def _check_against_aer(aset: AlertSet, days: list[dict]) -> None:
     """The scorecard explains the same alerts, with the same values, as the AERs."""
@@ -530,7 +431,6 @@ def main() -> int:
     print(f"surrogate_prod R²: {prod.r2}")
 
     scorecard, composition, saturation = [], [], []
-    fp_inputs: tuple[list, dict] = ([], {})
     for variant in VARIANTS:
         for region in path_d.REGIONS:
             aset = build_alert_set(region, variant)
@@ -552,18 +452,12 @@ def main() -> int:
             scorecard.extend(rows)
             composition.extend(driver_composition(aset, days))
             saturation.append(market_saturation(aset, days))
-            if variant == "with_duration":
-                fp_inputs[0].append(aset)
-                fp_inputs[1][region] = days
             print(f"[{variant}] {region}: {len(days)} alert days, {len(aset.episodes)} episodes")
 
     pd.DataFrame(scorecard).to_csv(_OUT / "scorecard.csv", index=False)
     pd.DataFrame(composition).to_csv(_OUT / "fp_driver_composition.csv", index=False)
     pd.DataFrame(saturation).to_csv(_OUT / "market_saturation.csv", index=False)
-    pd.DataFrame(fp_characterisation(*fp_inputs)).to_csv(_OUT / "fp_characterisation.csv",
-                                                         index=False)
-    print("wrote scorecard.csv, fp_driver_composition.csv, market_saturation.csv, "
-          "fp_characterisation.csv")
+    print("wrote scorecard.csv, fp_driver_composition.csv, market_saturation.csv")
     return 0
 
 
