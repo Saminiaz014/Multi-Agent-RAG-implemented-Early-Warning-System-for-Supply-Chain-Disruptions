@@ -32,6 +32,10 @@ data/processed/
 # ChromaDB persistence
 data/knowledge_base/.chromadb/
 data/knowledge_base/.chromadb_test_*/
+# XAI-02 eval copy of the knowledge base (production DB + 2023-25 backfill)
+data/knowledge_base/.chromadb_xai/
+# Raw API responses cached by the XAI-02 backfill (rebuilt without spending quota)
+eval/explainability/backfill_raw/
 data/knowledge_base/live_extracted_backup.json
 
 # Jupyter
