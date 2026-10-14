@@ -622,7 +622,7 @@ def _render_peak_explanation(ts, peak_day, word, region_label):
     shap_result = explainer.explain(features_df.iloc[[min(peak_day - 1, len(features_df) - 1)]])
     agreement = int(sum(1 for a in ALL_AGENTS if float(ts[a].iloc[peak_day - 1]) > 0.5))
     text, source = generate_risk_narrative(
-        json.dumps(shap_result["top_drivers"]), agreement, word, region_label,
+        json.dumps(shap_result["top_drivers"]), agreement, word, region_label, len(ALL_AGENTS),
     )
     st.markdown(f"<div class='explain-box'>{text}</div>", unsafe_allow_html=True)
     src_note = "AI-generated summary" if source == "llm" else "generated summary"

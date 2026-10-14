@@ -895,7 +895,8 @@ def select_route(route_key: str) -> None:
 _NUM_WORDS = ["zero", "one", "two", "three", "four", "five", "six"]
 
 
-def _compose_narrative(drivers: list[dict], agreement: int, word: str, region_label: str) -> str:
+def _compose_narrative(drivers: list[dict], agreement: int, word: str, region_label: str,
+                       n_agents: int = len(ALL_AGENTS)) -> str:
     """Generic compositional fallback — one algorithm over the live SHAP
     drivers, not hardcoded per-feature-combination strings."""
     phrases = []
@@ -907,16 +908,18 @@ def _compose_narrative(drivers: list[dict], agreement: int, word: str, region_la
     if not phrases:
         return f"Risk in the {region_label} is currently {word.lower()}."
     joined = phrases[0] if len(phrases) == 1 else ", ".join(phrases[:-1]) + " combined with " + phrases[-1]
-    n_word = _NUM_WORDS[min(agreement, 6)]
+    n_word = _NUM_WORDS[min(agreement, len(_NUM_WORDS) - 1)]
+    total_word = _NUM_WORDS[min(n_agents, len(_NUM_WORDS) - 1)]
     return (
         f"Risk in the {region_label} is {word.lower()} primarily due to {joined}; "
-        f"{n_word} of six detection agents currently agree on the disruption signal."
+        f"{n_word} of {total_word} detection agents currently agree on the disruption signal."
     )
 
 
 @st.cache_data(show_spinner=False)
 def generate_risk_narrative(
-    drivers_json: str, agreement: int, word: str, region_label: str
+    drivers_json: str, agreement: int, word: str, region_label: str,
+    n_agents: int = len(ALL_AGENTS),
 ) -> tuple[str, str]:
     """Natural-language risk paragraph for the peak-explanation popup.
 
@@ -943,14 +946,15 @@ def generate_risk_narrative(
                         "logistics manager. Region: " + region_label + ". Status: " + word +
                         ". Top anomaly drivers from an explainability model: " +
                         json.dumps(drivers[:3]) +
-                        f". {agreement} of six detection agents agree. Write only the paragraph."
+                        f". {agreement} of {n_agents} detection agents agree. "
+                        "Write only the paragraph."
                     ),
                 }],
             )
             return msg.content[0].text.strip(), "llm"
         except Exception as exc:  # pragma: no cover - network/key dependent
             logger.warning("LLM narrative failed, using compositional fallback: %s", exc)
-    return _compose_narrative(drivers, agreement, word, region_label), "composed"
+    return _compose_narrative(drivers, agreement, word, region_label, n_agents), "composed"
 
 
 # ===========================================================================
