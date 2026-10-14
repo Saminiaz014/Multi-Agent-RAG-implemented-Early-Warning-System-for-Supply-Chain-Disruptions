@@ -106,7 +106,16 @@ def test_decision_card_lines_are_plain() -> None:
     joined = " ".join(lines)
     assert joined.startswith("Risk ")
     assert "alert line" in joined and "Main drivers" in joined
-    assert "Earlier precedent" in joined
+    assert "Similar past event (historical analogue)" in joined
     assert not re.findall(r"\b\d+\.\d{2,}\b", joined)
     for term in ("anomaly score", "shap value", "z-score"):
         assert term not in joined.lower()
+
+
+def test_decision_card_infeasible_counterfactual_wording() -> None:
+    from src.dashboard.decision_view import _alert_card_lines
+
+    aer = _aer(_ALERT, threshold=0.5)  # shipping would have to fall below its calm 0.4
+    assert aer["counterfactual"]["feasible"] is False
+    joined = " ".join(_alert_card_lines(aer))
+    assert "to fall below its normal level, so not realistic on its own" in joined

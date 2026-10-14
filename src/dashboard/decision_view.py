@@ -674,15 +674,18 @@ def _alert_card_lines(aer: dict) -> list[str]:
         lines.append("Already under the alert line.")
     elif cf["required_score"] is None:
         lines.append("No single signal can bring it under the alert line on its own.")
-    else:
-        tail = "still above its usual level" if cf["feasible"] else "below its usual calm level"
+    elif cf["feasible"]:
         lines.append(f"Clears if {agent} drops {pts(cf['required_score_drop'])} points "
-                     f"({tail}).")
+                     "(still above its usual level).")
+    else:
+        lines.append(f"Would need {agent} to fall below its normal level, so not realistic "
+                     "on its own.")
     if aer.get("precedents"):
         p = aer["precedents"][0]
-        lines.append(f"Earlier precedent: “{p['title']}” ({p['event_date']}).")
+        lines.append(f"Similar past event (historical analogue): “{p['title']}” "
+                     f"({p['event_date']}).")
     else:
-        lines.append("No earlier precedent from this region.")
+        lines.append("No similar past event from this region.")
     return lines
 
 
@@ -693,7 +696,9 @@ def _render_alert_card(aer: dict, word: str) -> None:
     st.markdown(f"<div class='route-row'>{_pill(word)}<br>{body}</div>",
                 unsafe_allow_html=True)
     st.caption("SYNTHETIC evaluation data. Driver shares are exact contributions relative "
-               "to a calm day; the range reflects day-to-day input noise.")
+               "to a calm day; the range reflects day-to-day input noise. Past events are "
+               "limited to this region and dated before the series' own date for this day "
+               "(not the display date).")
 
 
 def _render_decision(ts, params, route, day, top_driver, region=None):

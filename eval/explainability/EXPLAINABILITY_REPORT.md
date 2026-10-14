@@ -465,15 +465,21 @@ Pre-registered in `PREREGISTERED_RULES.md` §D (commit `f0f2253`). Source: `metr
 
 Same day records; only `top_agent` differs.
 
-| | Hand-tuned: P0-surrogate | Hand-tuned: P0-exact | Optimized: P0-surrogate | Optimized: P0-exact |
+Per method:
+
+| Weight mode | Method | Accuracy | Macro-F1 | Recall: reroute | Recall: monitor |
+|---|---|---|---|---|---|
+| Hand-tuned | P0-surrogate | 0.940 | 0.660 | **0.00** (0/6) | 0.85 |
+| Hand-tuned | P0-exact | 0.937 | 0.708 | 0.17 (1/6) | 0.77 |
+| Optimized | P0-surrogate | 0.564 | 0.474 | **0.00** (0/5) | 1.00 |
+| Optimized | P0-exact | 0.578 | **0.726** | **1.00** (5/5) | 1.00 |
+
+Pairwise (P0-exact vs P0-surrogate):
+
+| Weight mode | Days the top agent differs | Days the action differs | Discordant days (exact right / surrogate right) | McNemar exact p |
 |---|---|---|---|---|
-| Accuracy | 0.940 | 0.937 | 0.564 | 0.578 |
-| Macro-F1 | 0.660 | 0.708 | 0.474 | **0.726** |
-| Recall: reroute | **0.00** (0/6) | 0.17 (1/6) | **0.00** (0/5) | **1.00** (5/5) |
-| Recall: monitor | 0.85 | 0.77 | 1.00 | 1.00 |
-| Days on which the top agent differs | 295 / 365 | | 294 / 365 | |
-| Days on which the action differs | 3 | | 5 | |
-| McNemar exact (discordant: exact right / surrogate right) | 2 / 1, **p = 1.00** | | 5 / 0, **p = 0.063** | |
+| Hand-tuned | 295 / 365 | 3 | 2 / 1 | **1.00** |
+| Optimized | 294 / 365 | 5 | 5 / 0 | **0.063** |
 
 **The two attributions disagree on the top agent on ~80% of days.**
 - The surrogate names `news_sentiment` on 214 days and `shipping` on 90. Exact Shapley names `shipping` on 170–201 days.

@@ -87,6 +87,27 @@ Agreement is therefore effectively a count over shipping, geopolitical and news,
 - **Simulated and real reliance.** Measuring appropriate reliance (RAIR/RSR) needs operator-accuracy estimates from a human-subject study. Simulating them with assumed accuracies was dropped, because it would only illustrate the mechanism.
 - **Retrieval relevance at scale.** Precision@3 rests on one annotator (the author). A second annotator would give inter-rater agreement.
 
+## Results → Decision Support: METRIC 8 (Phase 5, SYNTHETIC) — canonical version
+
+**Canonical METRIC 8 for Chapter 4 = P0-exact.** In the day-level action rule, `top_agent` is the agent with the largest **exact Shapley** contribution to that day's composite, measured from the seed-42 calm baselines.
+
+| Weight mode | Accuracy | Macro-F1 | Recall: no action / monitor / reroute / escalate |
+|---|---|---|---|
+| Hand-tuned | 0.937 | 0.708 | 0.96 / 0.77 / 0.17 / 1.00 |
+| Optimized | 0.578 | 0.726 | 0.52 / 1.00 / 1.00 / 1.00 |
+
+**Footnote text:** "With the evaluation notebook's original driver rule, the agent with the largest weight × score, hand-tuned accuracy is 0.948 (macro-F1 0.855) and optimized 0.578 (0.726). The exact-driver rule is reported in the text because it is the attribution the system shows its user; the two differ only on the 7 (hand-tuned) / 5 (optimized) high-risk, non-sustained days on which the rule consults the driver."
+
+**Why the numbers changed since the July run** (stale: hand-tuned 0.866, optimized 0.490; `data/processed/evaluation_results.json`, 2026-07-30). That run predates two code changes that alter every agent score feeding the rule:
+1. **Removal of the routing agent** (`b2306ae`): six agents became five, and the inter-agent weights were renormalised.
+2. **The shipping agent's sustained level-shift (duration) branch** and its absolute isolation-forest normalisation (`f7b87ff`). These changed when risk crosses the HIGH band in the injected scenarios.
+
+Scenario A accuracy rose from 0.07 to 0.73 (hand-tuned), because the shipping signal now holds through the moderate-tension window instead of flickering. The July values must not be cited.
+
+**The optimized weights fall below the naive baseline.** Under the Optuna-optimized weights, METRIC 8 accuracy is 0.578, below the naive 2σ threshold baseline's 0.797. The optimized thresholds lower `risk_medium` to 0.28, so 153 of 318 calm days are pushed into "monitor" (no_action recall 0.52). The optimizer's objective (F1, lead time and FPR on detection) rewards early alerting, and the decision layer pays for it in false monitoring.
+
+This is reportable: optimizing detection did not optimize decisions. It joins the negative findings on the optimized weights (README §4.9).
+
 ## Results → Decision Support: METRIC 8 (Phase 5, SYNTHETIC)
 
 **Refreshed METRIC 8 (current code, seed 44):**
