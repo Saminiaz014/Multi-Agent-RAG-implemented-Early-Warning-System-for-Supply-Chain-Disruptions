@@ -52,7 +52,6 @@ def shapley_agents(
         Agent name -> Shapley value, in the order of ``scores``.
     """
     players = list(scores)
-    n = len(players)
     cache: dict[frozenset, float] = {}
 
     def value(coalition: frozenset) -> float:
@@ -61,6 +60,20 @@ def shapley_agents(
             cache[coalition] = float(value_fn(point))
         return cache[coalition]
 
+    return shapley_from_values(players, value)
+
+
+def shapley_from_values(
+    players: Sequence[str], value: Callable[[frozenset], float]
+) -> dict[str, float]:
+    """Exact Shapley values from a coalition -> value function.
+
+    For callers that can evaluate every coalition at once more cheaply than
+    one at a time (e.g. one batched model call per day): ``value`` maps a
+    frozenset of present players to the game's value.
+    """
+    players = list(players)
+    n = len(players)
     weights = [factorial(k) * factorial(n - k - 1) / factorial(n) for k in range(n)]
     phi: dict[str, float] = {}
     for player in players:

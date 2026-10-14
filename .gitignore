@@ -47,8 +47,17 @@ Thumbs.db
 .idea/
 *.swp
 
-# Thesis writing (FAPS LaTeX template + local drafts) — never commit/push
-thesis/
+# Thesis writing (FAPS LaTeX template + local drafts) — never commit/push.
+# Exception: the Chapter 4 figure captions are tracked so each figure's exact
+# numbers are versioned; the images are rebuilt by
+# eval/explainability/make_figures.py. (Ignoring the directory itself would
+# stop git descending into it, so the pattern ignores its contents instead.)
+thesis/*
+!thesis/figures/
+thesis/figures/*
+!thesis/figures/ch4/
+thesis/figures/ch4/*
+!thesis/figures/ch4/*.caption.txt
 
 # Generated evaluation matrices (rebuilt by scripts from the knowledge base)
 data/eval/

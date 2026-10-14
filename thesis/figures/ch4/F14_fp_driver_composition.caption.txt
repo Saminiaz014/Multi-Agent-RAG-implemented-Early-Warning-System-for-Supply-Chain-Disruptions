@@ -1,0 +1,10 @@
+F14 — Which agent drives true- versus false-positive alert episodes. For every Tier 5 alert episode (consecutive train-p90 alert days, gaps of at most 3 days merged) the driver is the agent with the largest exact Shapley value summed over the episode's days (Path D composite, calm-day baselines). Bars give the share of TP and FP episodes per driver; segment numbers are episode counts. Leading driver of FP episodes: Strait of Hormuz shipping (21/34); Bab el-Mandeb shipping (8/10); Panama Canal shipping (30/30); Strait of Malacca geopolitical (29/49). Leading driver of TP episodes: Strait of Hormuz geopolitical (4/5); Bab el-Mandeb shipping (7/7); Panama Canal shipping (8/8). Shares carry episode-level bootstrap 95% CIs (1,000 resamples).
+Strait of Hormuz FP: Shipping 21/34 (62%, 95% CI 44%–76%), Geopolitical 13/34 (38%, 95% CI 24%–56%)
+Strait of Hormuz TP: Shipping 1/5 (20%, 95% CI 0%–60%), Geopolitical 4/5 (80%, 95% CI 40%–100%)
+Bab el-Mandeb FP: Shipping 8/10 (80%, 95% CI 50%–100%), Geopolitical 2/10 (20%, 95% CI 0%–50%)
+Bab el-Mandeb TP: Shipping 7/7 (100%, 95% CI 100%–100%)
+Panama Canal FP: Shipping 30/30 (100%, 95% CI 100%–100%)
+Panama Canal TP: Shipping 8/8 (100%, 95% CI 100%–100%)
+Strait of Malacca FP: Shipping 20/49 (41%, 95% CI 29%–55%), Geopolitical 29/49 (59%, 95% CI 45%–71%)
+Without the shipping duration branch, geopolitical-led FP episodes: Strait of Hormuz 12/36; Strait of Malacca 29/49.
+TP episodes: 5 / 7 / 8 (Strait of Hormuz / Bab el-Mandeb / Panama Canal). Data: real_eval (2023-08-31 to 2025-08-30 test window).

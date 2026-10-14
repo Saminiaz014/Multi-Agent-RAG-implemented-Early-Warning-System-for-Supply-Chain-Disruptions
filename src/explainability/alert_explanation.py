@@ -160,7 +160,7 @@ def _rank_drivers(phi: Mapping[str, float], breakdowns: Mapping[str, dict]) -> l
     return drivers
 
 
-def _uncertainty(scores: Mapping[str, float], value_fn, threshold: float,
+def score_uncertainty(scores: Mapping[str, float], value_fn, threshold: float,
                  sigma: Mapping[str, float], seed: int, n_draws: int) -> dict[str, float]:
     agents = list(scores)
     values = np.array([scores[a] for a in agents], dtype=float)
@@ -263,7 +263,7 @@ def build_aer(
     }
 
     seed = zlib.crc32(alert_id.encode("utf-8"))
-    uncertainty = _uncertainty(scores, value_fn, threshold, noise_sigma, seed, n_draws)
+    uncertainty = score_uncertainty(scores, value_fn, threshold, noise_sigma, seed, n_draws)
 
     label: dict[str, Any] = {"y_true": y_true}
     if y_true is not None:
