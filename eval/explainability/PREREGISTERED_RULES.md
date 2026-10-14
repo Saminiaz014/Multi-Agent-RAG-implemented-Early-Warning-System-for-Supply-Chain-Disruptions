@@ -88,3 +88,14 @@ Each indicator is scored per alert episode as an AUC for FP (positive) vs TP. Th
 | C1 | **Top exact driver = geopolitical** | 1 if the agent with the largest episode-summed exact Shapley value (Path D, calm baselines) is `geopolitical`, else 0 | 1 → FP |
 
 **Disclosure for C1:** this indicator was proposed *after* seeing Phase 2 descriptives, where geopolitical led 29/49 Malacca FP episodes and 13/34 Hormuz FP episodes, but also 4/5 Hormuz TP episodes. It is registered now, before any triage AUC is computed. The remaining Phase 4 indicators and their cut-offs (margin, agreement count, k80_agent, agent dispersion, exact-vs-surrogate coherence, max precedent similarity, episode length) will be registered in this section before Phase 4 runs.
+
+---
+
+## Amendments
+
+**2026-10-14, A.1 retry rule.** The first backfill run stopped on a SerpApi read timeout (60 s) at `hormuz` 2024-02, after 6 region-months had been cached. The account usage showed the timed-out request was not charged.
+
+- A read timeout or connection error now counts as an HTTP error, so it gets the one permitted retry.
+- The request timeout is raised to 120 s.
+
+Queries, cap, selection and months are unchanged, and no fetched result had been inspected beyond the 2024-01 dry run.
