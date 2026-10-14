@@ -178,21 +178,35 @@ def explain_spike(
     spike: dict,
     drivers: list[tuple[str, float]],
     agreement: int,
+    aer: dict | None = None,
 ) -> tuple[str, str]:
     """Explain one risk spike, cached per region/day/level.
+
+    With ``aer`` (the day's exact Alert Explanation Record) the explanation is
+    the deterministic template of :mod:`src.explainability.narrative` — the
+    primary path, faithful by construction, no API call. Without it, the
+    legacy path: Anthropic if configured, else :func:`_compose`.
 
     Args:
         region: Region key.
         spike: A spike dict from :func:`src.dashboard.core.detect_risk_spikes`.
         drivers: ``(agent, score)`` pairs for that day, strongest first.
         agreement: Number of agents scoring above 0.5 that day.
+        aer: Optional exact explanation record for the spike day.
 
     Returns:
-        ``(text, source)`` where source is ``"llm"`` or ``"composed"``.
+        ``(text, source)`` where source is ``"template"``, ``"llm"`` or ``"composed"``.
     """
     key = (region, int(spike["day"]), str(spike["level"]))
     if key in _CACHE:
         return _CACHE[key]
+
+    if aer is not None:
+        from src.explainability.narrative import narrate
+
+        result = (narrate(aer, "points", get_region(region).display_name)["text"], "template")
+        _CACHE[key] = result
+        return result
 
     level = str(spike["level"])
     prompt = (

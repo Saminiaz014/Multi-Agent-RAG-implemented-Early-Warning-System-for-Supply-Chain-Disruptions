@@ -493,3 +493,85 @@ The stock METRIC 8 rule (argmax of weight × score, no baseline) gets 0.83 hand-
 - **Precedent similarity:** the 0.55 floor is non-selective (§7.3), and precedent evidence does not separate FP alerts from calm days (§7.4, §7.4b).
 
 Simulated reliance (RAIR/RSR under assumed operator accuracies) is listed under **Outlook**: it needs a human-subject estimate of operator accuracy that this thesis does not have.
+
+## 10. Phase 6: narrative and dashboard
+
+### 10.1 Narrative (`src/explainability/narrative.py`)
+
+A deterministic template turns an AER into 6–8 sentences. Each sentence is one claim tied to named AER fields:
+- status vs threshold;
+- the two leading exact contributions;
+- the within-agent terms;
+- the agreement bonus and cap (Path C);
+- the noise range;
+- the counterfactual (or "already under the line");
+- the closest pre-alert precedent;
+- a SYNTHETIC label where applicable.
+
+There are two styles: `decimal` (AERs, Analysis View) and `points` (×100 whole numbers, for the Decision View's no-raw-decimals rule).
+
+`check_claims` verifies any text against the AER without knowing the template. It checks:
+- numbers, bound to the claim kind recognised from the sentence's wording (±1% or half a displayed unit);
+- agent names and their rank order;
+- above/below vs the margin's sign;
+- quoted titles and ISO dates.
+
+**LLM paraphrase:** `narrate(…, paraphrase=…)` accepts a rewrite only if it scores 1.0, otherwise it keeps the template. It is not used: `anthropic` stays uninstalled and no API call is made.
+
+**E9, narrative faithfulness** (`scorecard.csv`, real-data AERs):
+
+| Region | AERs | Faithfulness (supported / claims) | Checker sensitivity (single-number corruptions rejected) |
+|---|---|---|---|
+| Hormuz | 181 | **1.000** | 1,405 / 1,448 (97.0%) |
+| Bab el-Mandeb | 495 | **1.000** | 3,841 / 3,960 (97.0%) |
+| Panama | 197 | **1.000** | 1,535 / 1,576 (97.4%) |
+| Malacca | 188 | **1.000** | 1,445 / 1,504 (96.1%) |
+
+- **Faithfulness of 1.000 holds by construction:** the template can only restate the record. It holds in both styles (2 × 1,061 narratives).
+- **The informative number is the checker's sensitivity**, 96.9% overall. Every 2–3-decimal number was shifted by +0.07. The misses are shifts that land on another value the same sentence may cite (e.g. band low + 0.07 ≈ band high).
+- **Other corruption checks:** on the full set, it rejected 1,052/1,052 agent-order swaps, 1,059/1,059 invented titles and 1,061/1,061 above/below flips. These ran during development and are repeated in `tests/test_xai_narrative.py`.
+
+### 10.2 Decision View (synthetic seed 44, Path C)
+
+**The seed-42 / seed-44 mismatch is fixed.** The page used to take its "top driver" from the SHAP surrogate on row *d* of the surrogate's own seed-42 training year. It now builds an exact AER for the **same seed-44 day it plots** (`core.dashboard_aer`):
+- exact Shapley values of the route's composite (renormalised mean, agreement bonus, cap) over the route's active agents;
+- seed-42 calm baselines and noise scales (`synthetic_calibration`);
+- the alert line = `risk_medium`, where the status word turns High;
+- one region-matched precedent dated before the day's source date, from the production KB (read only).
+
+That record drives the map's top-driver label, the recommended action, the peak explanation and the new card.
+
+**New card, "Why this status"** (right column, above "Recommended action"; whole numbers only, no scrolling). Rendered for the Hormuz Westbound corridor on its peak day (source date 2025-06-04):
+
+> ⚠ **Critical**
+> Risk 100 of 100 · alert line 51
+> Main drivers: Geopolitical +40% · Shipping +33%
+> Plausible range 86–100
+> No single signal can bring it under the alert line on its own.
+> Earlier precedent: "Iran Hormuz Mine Threat and Naval Exercises" (2010-07-01).
+> *SYNTHETIC evaluation data. Driver shares are exact contributions relative to a calm day; the range reflects day-to-day input noise.*
+
+On an ordinary day (day 70) the counterfactual line reads "Clears if shipping drops 70 points (below its usual calm level)". On a calm day (day 20) it reads "No signal is above its usual calm level · Already under the alert line".
+
+**Peak explanation and spike panel:**
+- **"Explain the marked peak"** now shows the `points` template (faithful by construction) instead of the surrogate's drivers.
+- **The spike panel** uses the same template (`llm_explanations.explain_spike(…, aer=…)`, source `template`), and lists exact contribution shares instead of raw two-decimal agent scores. Those raw decimals violated the page's own rule, but rendered only after a click, so the test never saw them.
+- **Legacy paths** (no AER) are unchanged and still tested.
+
+### 10.3 Analysis View
+
+- **New section 2b, "Exact alert explanation":**
+  - a day slider (deep-linked from the Decision View);
+  - a waterfall: calm-day composite → each agent's linear exact contribution → agreement bonus → cap → score, with the alert line;
+  - the agreement-bonus share of the departure from calm, the efficiency residual, and the decimal narrative;
+  - the full AER as JSON;
+  - the region's real-data scorecard rows (E1/E2/E3/E5/E6/E9; exact vs surrogates).
+- **The old per-day SHAP expander** is relabelled "surrogate (trained on seed 42), comparator only", with a caption stating it explains the seed-42 row (out-of-time R² 0.53; 18–42% top-agent agreement on real alerts). Its stale "20-feature, R² > 0.99" export caption is corrected.
+
+### 10.4 Separate commit
+
+`ee16c70` replaces "of six detection agents" in the composed narrative and the LLM prompt (`core.py`) with the actual agent count.
+
+### 10.5 Tests
+
+Full suite: **512 passed** (2026-10-15). That covers the Decision View AppTest's no-raw-decimals and forbidden-terms checks with the new card, the narrative and checker tests, and the frozen-score test.

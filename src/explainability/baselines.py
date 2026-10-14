@@ -46,15 +46,21 @@ def _hand_tuned_params(config: dict) -> dict:
     }
 
 
-def synthetic_baselines(config: dict, params: dict | None = None,
-                        manager=None) -> dict[str, float]:
-    """Median seed-42 train score per agent on non-disruption days.
+def synthetic_calibration(config: dict, params: dict | None = None,
+                          manager=None) -> tuple[dict[str, float], dict[str, float]]:
+    """Calm baselines and noise scales from the seed-42 train realisation.
+
+    Agents are fitted on seed-42 train and scored on it; calm days are the
+    non-disruption days. Returns ``(baselines, sigma)``: each agent's calm
+    median, and its per-day noise scale (std of calm day-to-day changes / sqrt 2,
+    as for the real-data AERs).
 
     Args:
         config: Application config (split seeds).
         params: Evaluator parameter layout; defaults to the hand-tuned one.
         manager: An existing ``DataSplitManager`` to reuse its splits.
     """
+    from src.explainability.alert_explanation import noise_scales
     from src.optimization.data_split import DataSplitManager
     from src.optimization.pipeline_evaluator import PipelineEvaluator
 
@@ -64,12 +70,20 @@ def synthetic_baselines(config: dict, params: dict | None = None,
     calm_dates = set(truth.index[~truth.to_numpy()])
     agents = PipelineEvaluator.build_agents(params or _hand_tuned_params(config))
 
-    out: dict[str, float] = {}
+    baselines: dict[str, float] = {}
+    sigma: dict[str, float] = {}
     for name, agent in agents.items():
         train = splits["train"][name]
         agent.fit(train)
         validated = agent.run_dataframe(train)
-        stamps = pd.to_datetime(validated["timestamp"])
-        mask = stamps.isin(calm_dates).to_numpy()
-        out[name] = float(np.median(validated["anomaly_score"].to_numpy(dtype=float)[mask]))
-    return out
+        scores = validated["anomaly_score"].to_numpy(dtype=float)
+        calm = pd.to_datetime(validated["timestamp"]).isin(calm_dates).to_numpy()
+        baselines[name] = float(np.median(scores[calm]))
+        sigma.update(noise_scales({name: scores}, calm))
+    return baselines, sigma
+
+
+def synthetic_baselines(config: dict, params: dict | None = None,
+                        manager=None) -> dict[str, float]:
+    """Median seed-42 train score per agent on non-disruption days."""
+    return synthetic_calibration(config, params, manager)[0]

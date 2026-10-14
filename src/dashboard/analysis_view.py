@@ -89,6 +89,7 @@ def render() -> None:
 
     _section_1_detection(results)
     _section_2_faithfulness(results)
+    _section_2b_exact_explanation()
     _section_3_diversity(results)
     _section_4_baseline(results)
     _section_5_optimization(results)
@@ -157,7 +158,11 @@ def _section_2_faithfulness(results: dict) -> None:
                        "`generate_comparison_plot()` (tests/test_phase4_depth.py).")
 
     # Per-day SHAP explorer (raw values — belongs here, not on Page 1).
-    with st.expander("Per-day SHAP waterfall (interactive)"):
+    with st.expander("Per-day SHAP bar: surrogate (trained on seed 42), comparator only"):
+        st.caption("Explains the random-forest surrogate on row *day* of its own seed-42 "
+                   "training year, not the seed-44 day plotted elsewhere. Out-of-time "
+                   "R² 0.53; on real data its top agent matches the exact one on 18–42% "
+                   "of alert days. Use section 2b for the exact explanation.")
         day = st.slider("Day", 1, _TOTAL_DAYS,
                         int(st.session_state.get("analysis_focus_day", 155)))
         features_df, _, explainer = get_shap_assets()
@@ -175,9 +180,77 @@ def _section_2_faithfulness(results: dict) -> None:
                          plot_bgcolor="#10151d", margin=dict(l=10, r=10, t=10, b=10),
                          xaxis_title="SHAP value")
         st.plotly_chart(wf, use_container_width=True)
-        export_button(wf, f"m2_shap_day_{day}", f"SHAP feature attribution — day {day}",
-                      "Top-10 SHAP values from the 20-feature RandomForest surrogate "
-                      "(R² > 0.99 vs the live pipeline's composite risk).")
+        export_button(wf, f"m2_shap_day_{day}", f"Surrogate SHAP attribution — day {day}",
+                      "Top-10 SHAP values of the 17-feature random-forest surrogate trained "
+                      "on the seed-42 synthetic year (train R² 0.983, out-of-time 0.528). "
+                      "Comparator only; see the exact explanation.")
+
+
+def _section_2b_exact_explanation() -> None:
+    """Exact explanation of one plotted day: record, waterfall, bonus share, scorecard."""
+    import json
+
+    import plotly.graph_objects as go
+
+    from src.core.regions import get_region
+    from src.dashboard.core import compute_timeseries, dashboard_aer, resolve_mode_params
+
+    st.markdown("### 2b · Exact alert explanation (seed-44 day, Path C)")
+    region = str(st.session_state.get("region", "hormuz"))
+    day = st.slider("Explained day", 1, _TOTAL_DAYS,
+                    int(st.session_state.get("analysis_focus_day", 155)), key="exact_day")
+    ts = compute_timeseries("hand_tuned")
+    params = resolve_mode_params("hand_tuned")
+    aer = dashboard_aer(region, ts, params, set(get_region(region).active_agents()), day)
+
+    bonus = aer.get("bonus_share") or {}
+    labels = ["calm day"] + [d["agent"].replace("_", " ") for d in aer["top_drivers"]]
+    values = [aer["baseline_value"]] + [aer["agent_shapley"][d["agent"]] for d in aer["top_drivers"]]
+    measures = ["absolute"] + ["relative"] * len(aer["top_drivers"])
+    linear = {a: aer["agent_shapley"][a] - bonus.get("bonus_by_agent", {}).get(a, 0.0)
+              - bonus.get("clip_by_agent", {}).get(a, 0.0) for a in aer["agent_shapley"]}
+    values[1:] = [linear[d["agent"]] for d in aer["top_drivers"]]
+    labels += ["agreement bonus", "cap", "score"]
+    values += [bonus.get("bonus_total", 0.0), bonus.get("clip_total", 0.0), aer["score"]]
+    measures += ["relative", "relative", "total"]
+    fig = go.Figure(go.Waterfall(x=labels, y=values, measure=measures,
+                                 connector=dict(line=dict(color="#8d99a8"))))
+    fig.add_hline(y=aer["threshold"], line=dict(color="#d9a514", dash="dash"),
+                  annotation_text="alert line", annotation_font_color="#d9a514")
+    fig.update_layout(height=320, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)",
+                      plot_bgcolor="#10151d", margin=dict(l=10, r=10, t=10, b=10),
+                      yaxis_title="composite risk")
+    c1, c2 = st.columns([1.4, 1])
+    with c1:
+        st.plotly_chart(fig, use_container_width=True)
+        export_button(fig, f"exact_waterfall_day_{day}", f"Exact agent attribution — day {day}",
+                      "Calm-day composite, each agent's exact Shapley value (linear part), the "
+                      "agreement bonus and the cap, summing to the plotted score. SYNTHETIC.")
+    with c2:
+        share = (bonus.get("bonus_total", 0.0) / (aer["score"] - aer["baseline_value"])
+                 if aer["score"] != aer["baseline_value"] else 0.0)
+        st.metric("Agreement-bonus share of the departure from calm", f"{share:.0%}")
+        st.metric("Efficiency residual", f"{aer['efficiency_residual']:.1e}")
+        from src.explainability.narrative import narrate
+
+        st.markdown(narrate(aer, "decimal", get_region(region).display_name)["text"])
+    with st.expander("Full explanation record (JSON)"):
+        st.code(json.dumps(aer, indent=2, default=str), language="json")
+
+    card = _PROJECT_ROOT / "eval" / "explainability" / "scorecard.csv"
+    if card.exists():
+        sc = pd.read_csv(card)
+        sc = sc[(sc.region == region) & (sc.variant == "with_duration")
+                & (sc.level.isin(["episode", "point"]))]
+        keep = sc[sc.metric.isin([
+            "max |efficiency residual| (agent level)", "local error |f(x) - g(x)| on alert days",
+            "agent deletion AUC (lower is better)", "top agent agrees with exact",
+            "k80 agents", "share of alert days with a feasible single-agent counterfactual",
+            "narrative faithfulness (supported claims / claims)"])]
+        st.markdown(f"**Explainability scorecard: {get_region(region).display_name}, "
+                    "real evaluation data (Path D)**")
+        st.dataframe(keep[["metric_id", "metric", "method", "value", "ci_lo", "ci_hi"]]
+                     .round(3), hide_index=True, use_container_width=True)
 
 
 def _section_3_diversity(results: dict) -> None:

@@ -82,6 +82,8 @@ __all__ = [
     "detect_risk_spikes", "agent_contributions",
     "TIMELINE_AXIS_NOTE", "TIMELINE_SOURCE_RANGE",
     "TIMELINE_SYNTHETIC_CAPTION", "relative_day_label", "relative_axis_ticks",
+    # XAI-02 phase 6
+    "dashboard_aer", "synthetic_calibration_cached", "get_precedent_retriever", "source_date",
 ]
 
 # ---------------------------------------------------------------------------
@@ -624,6 +626,72 @@ def get_shap_assets():
     return features_df, risk_scores, explainer
 
 
+@st.cache_resource(show_spinner="Calibrating calm baselines …")
+def synthetic_calibration_cached(weight_mode: str) -> tuple[dict, dict]:
+    """Calm baselines and noise scales from the seed-42 train realisation.
+
+    The reference every dashboard explanation is measured against: agents fitted
+    and scored on the train split the timeline's agents were fitted on.
+    """
+    from src.explainability.baselines import synthetic_calibration
+
+    bundle = _eval_bundle()
+    return synthetic_calibration(load_app_config(), resolve_mode_params(weight_mode),
+                                 bundle["dm"])
+
+
+@st.cache_resource(show_spinner="Loading historical precedents …")
+def get_precedent_retriever():
+    """Region- and date-filtered precedent retrieval over the production KB (read only)."""
+    from src.explainability.precedent_retriever import STATIC_COLLECTION, PrecedentRetriever
+
+    return PrecedentRetriever(_PROJECT_ROOT / "data" / "knowledge_base" / ".chromadb",
+                              [STATIC_COLLECTION, "live_extracted_context"], n_fetch=50)
+
+
+def source_date(day: int) -> pd.Timestamp:
+    """The evaluation split's own timestamp for a 1-based timeline day."""
+    return pd.Timestamp(TIMELINE_SOURCE_RANGE[0]) + pd.Timedelta(days=day - 1)
+
+
+def dashboard_aer(region: str, ts: pd.DataFrame, params: dict, agents: set[str], day: int,
+                  weight_mode: str = "hand_tuned", with_precedent: bool = True) -> dict:
+    """Exact explanation of the plotted risk on one day (Path C, seed 44).
+
+    Explains the same seed-44 row the chart shows — not the surrogate's seed-42
+    training row — with exact Shapley values of :func:`composite_series`
+    (renormalised mean, agreement bonus, cap) over ``agents``, measured from the
+    seed-42 calm baselines. The alert line is ``risk_medium``, where the status
+    word turns from Low to High.
+    """
+    from src.explainability.alert_explanation import build_aer
+    from src.explainability.precedent_retriever import build_query
+
+    inter, thr = params["inter_weights"], params["thresholds"]
+    cols = [a for a in ALL_AGENTS if a in agents and inter.get(a, 0.0) > 0]
+    baselines, sigma = synthetic_calibration_cached(weight_mode)
+    row = ts.iloc[day - 1]
+    record = build_aer(
+        alert_id=f"{region}_synthetic_day{day}", episode_id="", region=region,
+        date=f"{source_date(day):%Y-%m-%d}", path="C", weight_mode=weight_mode,
+        data_origin="synthetic_seed44", tier=len(cols), agents=cols, weights=inter,
+        scores={a: float(row[a]) for a in cols}, baselines=baselines,
+        threshold=float(thr["risk_medium"]),
+        breakdowns={a: {"agent": a, "terms": {}, "branch_winner": None} for a in cols},
+        noise_sigma=sigma, y_true=int(bool(row.get("is_disruption", False))),
+        bonus3=float(thr.get("agreement_bonus_3", 1.15)),
+        bonus5=float(thr.get("agreement_bonus_5", 1.25)), n_draws=200,
+    ).to_dict()
+    if with_precedent:
+        try:
+            hits = get_precedent_retriever().retrieve(
+                region, source_date(day), build_query(region, record["top_drivers"]), top_k=1)
+            record["precedents"] = [h.record() for h in hits]
+        except Exception as exc:  # pragma: no cover - KB missing on a fresh checkout
+            logger.warning("precedent lookup failed: %s", exc)
+    return record
+
+
 @st.cache_resource(show_spinner="Loading the RAG knowledge base …")
 def get_retriever():
     from src.rag.context_retriever import ContextRetriever
@@ -919,16 +987,23 @@ def _compose_narrative(drivers: list[dict], agreement: int, word: str, region_la
 @st.cache_data(show_spinner=False)
 def generate_risk_narrative(
     drivers_json: str, agreement: int, word: str, region_label: str,
-    n_agents: int = len(ALL_AGENTS),
+    n_agents: int = len(ALL_AGENTS), aer_json: str | None = None,
 ) -> tuple[str, str]:
     """Natural-language risk paragraph for the peak-explanation popup.
 
-    Tries the Anthropic API when ``ANTHROPIC_API_KEY`` is configured (no LLM
-    client existed anywhere in this codebase to reuse, so this is the new,
-    optional pattern); otherwise falls back to :func:`_compose_narrative`.
+    Primary path: when ``aer_json`` (an exact Alert Explanation Record) is
+    given, the deterministic template of :mod:`src.explainability.narrative`
+    in whole-number "points" style, faithful by construction.
 
-    Returns ``(text, source)`` with source in {"llm", "composed"}.
+    Legacy path (no AER): tries the Anthropic API when ``ANTHROPIC_API_KEY`` is
+    configured, otherwise :func:`_compose_narrative`.
+
+    Returns ``(text, source)`` with source in {"template", "llm", "composed"}.
     """
+    if aer_json is not None:
+        from src.explainability.narrative import narrate
+
+        return narrate(json.loads(aer_json), "points", region_label)["text"], "template"
     drivers = json.loads(drivers_json)
     if os.environ.get("ANTHROPIC_API_KEY", "").strip():
         try:

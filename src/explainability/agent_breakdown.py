@@ -233,7 +233,7 @@ def effective_terms(result: dict) -> dict[str, float]:
     single event won. Other agents have one additive branch.
     """
     terms = result.get("terms", {})
-    winner = result.get("branch_winner", "")
+    winner = result.get("branch_winner") or ""  # None when no breakdown is available
     if result.get("agent") == "shipping":
         if winner == "duration":
             return {"duration": terms["duration"]}

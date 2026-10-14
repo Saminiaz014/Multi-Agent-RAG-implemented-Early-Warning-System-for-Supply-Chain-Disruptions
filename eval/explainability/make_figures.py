@@ -158,6 +158,8 @@ def main() -> int:
         _run("run_precedents")
         _run("run_triage_inputs")   # Phase 4 C0: bit-identity-checked export
         _run("run_triage")
+        _run("run_metric8")         # Phase 5, synthetic seed 44
+        _run("run_narratives")      # Phase 6: AER narratives + E9
     composition = pd.read_csv(_HERE / "fp_driver_composition.csv")
     written = figure_f14(composition)
     for path in written:

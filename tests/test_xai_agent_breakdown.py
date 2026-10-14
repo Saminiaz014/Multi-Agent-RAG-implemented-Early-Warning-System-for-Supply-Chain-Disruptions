@@ -108,6 +108,12 @@ def test_news_skips_missing_consensus() -> None:
     assert out["terms"]["volume"] == pytest.approx(0.2)
 
 
+def test_effective_terms_without_a_breakdown() -> None:
+    """Dashboard records carry agent scores only: no terms, no winner."""
+    for agent in ("shipping", "natural_disaster", "market"):
+        assert effective_terms({"agent": agent, "terms": {}, "branch_winner": None}) == {}
+
+
 def test_missing_day() -> None:
     out = breakdown("market", None, pd.Series({"anomaly_score": np.nan}))
     assert out["branch_winner"] == "missing"
