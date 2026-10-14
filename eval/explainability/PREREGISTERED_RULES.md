@@ -99,3 +99,9 @@ Each indicator is scored per alert episode as an AUC for FP (positive) vs TP. Th
 - The request timeout is raised to 120 s.
 
 Queries, cap, selection and months are unchanged, and no fetched result had been inspected beyond the 2024-01 dry run.
+
+**2026-10-14, A.1 double failure.** The resumed run stopped when SerpApi returned HTTP 503 on both attempts for `panama` 2024-11. Rule added:
+
+- A region-month whose SerpApi request fails on both attempts gets no news documents. ACLED fills its slots under the normal allocation.
+- The month is recorded as `serpapi_status = fetch_failed` in `backfill_coverage.csv` and is not cached, so the next run retries it.
+- Error messages no longer include the request URL, which had exposed the API key in a local log.
