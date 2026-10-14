@@ -301,6 +301,29 @@ By top exact driver (backfill KB):
 
 What the backfill *does* establish is coverage: `no_coverage` falls from 123/123 to 3/123. The production-only result in §4.4 was a KB artefact.
 
+**Primary outcome: null.** The pre-registered tag does not separate FP episodes from calm days.
+
+#### 7.4b EXPLORATORY: stricter rule (post-hoc amendment `0c2cfff`, one run, `fp_strict_lift.csv`)
+
+The rule was written after the null result and run once on the backfilled documents only:
+- **ACLED:** only Battles, Explosions/Remote violence and Strategic developments count.
+- **News:** a fixed conflict/shipping-attack inclusion list, with an exclusion list (shark, cyber, labour strike, …).
+
+Lift is the FP-window rate ÷ calm-window rate (8-day windows), with a 1,000-resample bootstrap CI.
+
+| Region | Counting docs | FP rate (n) | TP rate (n) | Calm rate (n) | Lift [95% CI] |
+|---|---|---|---|---|---|
+| Hormuz | 99 | 0.53 (34) | 0.40 (5) | 0.54 (439) | 0.99 [0.69, 1.32] |
+| Bab el-Mandeb | 275 | 1.00 (10) | 0.86 (7) | 0.97 (155) | 1.03 [1.01, 1.05] |
+| Panama | 15 | 0.07 (30) | 0.50 (8) | 0.07 (490) | 0.93 [0.00, 2.63] |
+| Malacca | 53 | 0.45 (49) | — | 0.41 (543) | 1.09 [0.75, 1.47] |
+| **Pooled** | 442 | 0.42 (123) | | 0.40 (1,627) | **1.07 [0.88, 1.27]** |
+
+**Still null.**
+- FP alerts are no more likely than ordinary days to coincide with conflict or shipping-attack reporting.
+- Bab el-Mandeb's interval excludes 1 only because both rates sit at the ceiling (2023-25 is the Red Sea crisis throughout), so a lift of 1.03 has no practical meaning.
+- The knowledge base therefore cannot be used to argue that false positives were "real risk without a traffic drop". The honest reading is that the FPs are not explained by contemporaneous conflict events in this corpus.
+
 ### 7.5 Annotation set (for the author)
 
 - **Files:** `eval/explainability/rag_annotation.csv` (blind) and `rag_annotation_key.csv` (labels, similarities, query).
@@ -310,12 +333,15 @@ What the backfill *does* establish is coverage: `no_coverage` falls from 123/123
 
 ### 7.6 Scorecard rows added (`scorecard.csv`, replacing the "pending" rows)
 
+**E8 is precision@3 from the author's relevance annotation, and is pending** (`compute_precision_at_3.py`; lenient = relevance ≥ 1, strict = 2).
+
+The similarity-based version is **dropped as a metric**. The 0.55 similarity floor is **non-selective**: every configuration, including the production retriever with its wrong-region, duplicated and future-dated hits, has a hit above it in 100% of episodes (§7.3). Passing it says nothing about relevance. The old rows remain in `scorecard.csv` only as `E8-diag` (similarity-floor grounding: 0.99–1.00 in every region), marked diagnostic.
+
 | Metric | Hormuz | Bab el-Mandeb | Panama | Malacca |
 |---|---|---|---|---|
-| E8 grounding: ≥ 1 region-matched, pre-alert precedent ≥ 0.55 (episode) | 1.00 | 0.99 [0.96, 1.00] | 1.00 | 1.00 |
+| E8 precision@3 | pending | pending | pending | pending |
 | E5 top exact agent ∈ precedents' `primary_agents` (episode) | 0.62 [0.46, 0.77] | 0.41 [0.28, 0.54] | **0.00** | 0.02 [0.00, 0.07] |
 
-- **E8 is near-trivially high** because the floor is not selective (§7.3). Its informative counterpart is precision@3, pending annotation.
 - **E5 is a weak measure here.** By schema, backfilled news carries `primary_agents = news_sentiment`, so it can only match news-led alerts. Panama's 0.00 is this artefact, not a disagreement.
 - The without-duration variant changes these by ≤ 0.04.
 

@@ -233,8 +233,10 @@ def fill_aers_and_e8(asets_by_variant: dict, retriever: PrecedentRetriever) -> l
             episode_of = {i: k for k, g in enumerate(aset.episodes) for i in g}
             labels = aset.episode_labels()
             for metric, key, note in (
-                ("E8", "grounded", "share with >= 1 region-matched, pre-alert precedent "
-                                   ">= 0.55 (wrapper, production + backfill)"),
+                ("E8-diag", "grounded", "DIAGNOSTIC, not E8: share with >= 1 region-matched, "
+                                        "pre-alert precedent >= 0.55. The 0.55 floor is "
+                                        "non-selective (every configuration scores 1.00); E8 is "
+                                        "precision@3 from the author's annotation"),
                 ("E5", "coherent", "top exact agent among the precedents' primary_agents "
                                    "(days with >= 1 precedent)"),
             ):
@@ -249,7 +251,7 @@ def fill_aers_and_e8(asets_by_variant: dict, retriever: PrecedentRetriever) -> l
                         "n_episodes": len(aset.episodes),
                         "n_tp_episodes": sum(1 for lab in labels if lab == "TP"),
                         "n_alert_days": len(per_day), "metric_id": metric,
-                        "metric": ("precedent grounding" if metric == "E8"
+                        "metric": ("similarity-floor grounding" if metric == "E8-diag"
                                    else "top agent agrees with precedents' primary_agents"),
                         "method": "exact"}
                 rows.append({**base, "level": "episode", "value": mean, "ci_lo": lo, "ci_hi": hi,
@@ -404,8 +406,13 @@ def main() -> int:
 
     e8_rows = fill_aers_and_e8(asets_by_variant, retrievers["wrapper_backfill"])
     scorecard = pd.read_csv(_OUT / "scorecard.csv")
-    pending = (scorecard.metric_id == "E8") | (
+    pending = scorecard.metric_id.isin(["E8", "E8-diag"]) | (
         (scorecard.metric_id == "E5") & scorecard.metric.str.contains("precedents"))
+    e8_rows += [{"data_origin": path_d.DATA_ORIGIN, "path": "D", "tier": 5, "variant": v,
+                 "region": r, "metric_id": "E8", "metric": "precision@3 (lenient / strict)",
+                 "method": "exact", "level": "episode", "value": np.nan,
+                 "note": "pending the author's annotation (compute_precision_at_3.py)"}
+                for v in VARIANTS for r in path_d.REGIONS]
     pd.concat([scorecard[~pending], pd.DataFrame(e8_rows)], ignore_index=True).to_csv(
         _OUT / "scorecard.csv", index=False)
 
