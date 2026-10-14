@@ -89,6 +89,99 @@ Each indicator is scored per alert episode as an AUC for FP (positive) vs TP. Th
 
 **Disclosure for C1:** this indicator was proposed *after* seeing Phase 2 descriptives, where geopolitical led 29/49 Malacca FP episodes and 13/34 Hormuz FP episodes, but also 4/5 Hormuz TP episodes. It is registered now, before any triage AUC is computed. The remaining Phase 4 indicators and their cut-offs (margin, agreement count, k80_agent, agent dispersion, exact-vs-surrogate coherence, max precedent similarity, episode length) will be registered in this section before Phase 4 runs.
 
+### C.0 Inputs (Option A, approved 2026-10-15)
+
+`run_triage_inputs.py` writes `triage_inputs/` once. It is the only agent run in Phase 4.
+
+- **Path D re-score:** before writing, it asserts that the Tier 5 metrics recomputed from the cached scores equal `eval/method_comparison_results.csv` within 1e-9.
+- **Per region and day:** train- and test-window agent scores for both variants (shipping = shock score in `without_duration`), composites, thresholds, `y_true`.
+- **Calm baselines** for both variants.
+- **The production surrogate's agent attribution** on every test alert day of both variants.
+
+Nothing else calls an agent, an API or a retriever. Max precedent similarity is read from the AERs' `precedents`; where an episode's first day has no AER (some `without_duration` episodes), C7 is missing for that episode and the count is reported.
+
+### C.1 Unit, label, timing
+
+- **Unit:** the Tier 5 alert episode (alert days merged across gaps ≤ 3 calendar days).
+- **Label:** FP = 1 if no `y_true` day falls in the episode's span, else TP = 0.
+- **Prospective indicators** are read on the episode's **first day**.
+- **Retrospective indicators** (need the whole episode) are reported in a separate table and never enter a model.
+
+"Train alert days" means train-window days whose composite exceeds the variant's train p90 threshold. "Train calm days" means train-window days with `y_true = 0`.
+
+### C.2 Indicators
+
+**Primary**, the only ones interpreted:
+
+| # | Indicator (first day) | Direction → FP | Low-trust cut-off | Cut-off source |
+|---|---|---|---|---|
+| P1 = C1b | Top exact driver = `geopolitical` (largest first-day exact φ) | 1 → FP | = 1 | binary |
+| P2 | Agreement: agents whose score exceeds that agent's own train-calm-day **q0.90** | low → FP | ≤ 1 | per-agent train calm-day q0.90 |
+| P3 | Dispersion: population std of the composite's agent scores | high → FP | > train-alert-day **q0.75** of dispersion | train alert days |
+
+**Baseline:** S0 = first-day composite score (low → FP). Margin is **dropped** as an indicator: within a region it is S0 minus a constant, so its AUC is identical to S0's.
+
+**Secondary, EXPLORATORY** (reported, never interpreted; no multiplicity correction):
+
+| # | Indicator (first day) | Direction → FP | Low-trust cut-off | Cut-off source |
+|---|---|---|---|---|
+| X1 | k80_agent (fewest agents covering 80% of Σ\|φ\|) | low → FP | ≤ train-alert-day **q0.25** of k80 | train alert days |
+| X2 | Exact top agent ≠ production-surrogate top agent | 1 → FP | = 1 | binary |
+| X3 | Max precedent similarity (AER `precedents`, wrapper prod + backfill; 0 if none) | low → FP | none (AUC only) | — |
+| X4 | Noise robustness: share of 200 score-noise draws above threshold (σ per agent from train calm-day changes / √2; seed = day index + 1) | low → FP | < **0.95** | calm-day noise model, 5% tail |
+
+**Retrospective** (separate table):
+
+| # | Indicator (whole episode) | Direction → FP | Low-trust cut-off | Cut-off source |
+|---|---|---|---|---|
+| C1 | Top exact driver = `geopolitical` (largest episode-summed exact φ; registered `ae8c7b7`) | 1 → FP | = 1 | binary |
+| R2 | Episode length in alert days | short → FP | < median (**q0.50**) train-window episode length | train-window episodes |
+
+Directions are fixed hypotheses. Every AUC is "AUC for FP" in the registered direction, so a value below 0.5 means the hypothesis was wrong; no indicator is flipped after the fact.
+
+### C.3 Single-indicator AUCs
+
+- **What is computed:** per region × variant, the AUC for FP vs TP of S0, the primaries, the secondaries and (in its own table) the retrospective indicators.
+- **CI:** stratified episode bootstrap, 1,000 resamples, vectorised, seed 20261014.
+- **Primaries only:**
+  - one-sided Mann–Whitney U p-value in the registered direction;
+  - **Holm-adjusted** within each region × variant family (m = 3);
+  - interpreted as evidence only if the adjusted p < 0.05 **and** the minimum-n rule holds.
+- **Minimum-n rule:** an AUC is computed when a region has ≥ 1 TP and ≥ 1 FP episode. It is interpreted only with **≥ 5 TP and ≥ 5 FP episodes**; otherwise it is reported as "not interpreted (n)". Every Hormuz result carries "small-n (5 TP episodes with duration, 7 without)".
+
+### C.4 Leave-one-region-out logistic model
+
+- **Features:** the **three primaries only** (P1, P2, P3), z-scored with the training fold's mean and sd.
+- **Model:** `LogisticRegression(penalty="l2", C=1.0, class_weight="balanced", solver="lbfgs", max_iter=1000)`. No tuning, no feature selection.
+- **Folds:** for each region R, fit on the other three regions' episodes and predict R.
+  - AUC on R where R has both classes, with a bootstrap CI and the minimum-n rule.
+  - Malacca is evaluated only by C.5.
+- **Score-only comparator:** the same model with S0 alone.
+- **Result:** ΔAUC (primaries − score-only) on the same resamples (paired bootstrap, 1,000).
+
+### C.5 Malacca: share of FP episodes flagged low-trust
+
+- **Flags measured:**
+  - for P1, P2 and P3 (cut-offs above), the share of Malacca FP episodes flagged;
+  - for the LORO models held out on Malacca (primaries; score-only), the share with predicted P(FP) ≥ **0.5**.
+- **The flagging cost:** each rule's flag rate on the TP episodes of the other three regions. For the LORO models this uses each region's own held-out predictions.
+- **CI:** episode bootstrap, 1,000 resamples.
+- X1, X2 and X4 flag rates are reported as exploratory.
+
+### C.6 Circularity-control variant
+
+Everything in C.3–C.5 is repeated on the `without_duration` alert set. Shipping is reduced to its shock score, and the threshold, calm baselines, noise scales, episodes and labels are all recomputed from the C0 export.
+
+Results are reported side by side, and a conclusion is drawn only if it holds in both variants.
+
+### C.7 Outputs
+
+All under `eval/explainability/`, every row tagged `data_origin = real_eval`:
+- `triage_results.csv` (single indicators, S0, primaries with Holm);
+- `triage_retrospective.csv`;
+- `triage_loro.csv`;
+- `triage_malacca.csv`.
+
 ---
 
 ## Amendments
