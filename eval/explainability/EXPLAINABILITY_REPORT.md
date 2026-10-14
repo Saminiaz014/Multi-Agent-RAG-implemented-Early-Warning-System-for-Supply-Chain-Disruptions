@@ -541,7 +541,7 @@ There are two styles: `decimal` (AERs, Analysis View) and `points` (×100 whole 
 
 That record drives the map's top-driver label, the recommended action, the peak explanation and the new card.
 
-**New card, "Why this status"** (right column, above "Recommended action"; whole numbers only, no scrolling). Rendered for the Hormuz Westbound corridor on its peak day (source date 2025-06-04):
+**New card, "Why this status"** (right column, above "Recommended action"; whole numbers only, no scrolling). Rendered for the Hormuz Westbound TSS corridor on day 155 (source date 2025-06-04), inside Scenario B; the page's default peak day is 153:
 
 > ⚠ **Critical**
 > Risk 100 of 100 · alert line 51
