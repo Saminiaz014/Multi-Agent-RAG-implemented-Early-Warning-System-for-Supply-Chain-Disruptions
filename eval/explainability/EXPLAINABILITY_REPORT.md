@@ -439,3 +439,57 @@ The only material change is the Malacca LORO flag rate (0.82 → 0.31), which al
 - The registered geopolitical hypothesis does not hold in any labelled region.
 
 With 5–8 TP episodes per region, the thesis may report the Panama result as a region-specific finding. It may not claim explanation-based triage.
+
+## 9. Phase 5: decision value (**SYNTHETIC**, seed 44)
+
+Pre-registered in `PREREGISTERED_RULES.md` §D (commit `f0f2253`). Source: `metric8_refresh.json`; runtime 24 s.
+
+**These are synthetic results.** The "correct" actions are rule-derived from the injected scenario windows, not observed decisions.
+
+### 9.1 METRIC 8 refreshed (current code, 5 agents) vs the stale 2026-07-30 values
+
+| | Hand-tuned: refresh | Hand-tuned: stale | Optimized: refresh | Optimized: stale |
+|---|---|---|---|---|
+| Overall accuracy (365 days) | **0.948** | 0.866 | **0.578** | 0.490 |
+| Macro-F1 (4 actions) | 0.855 | — | 0.726 | — |
+| Recall: no_action / monitor / reroute / escalate | 0.96 / 0.77 / 0.83 / 1.00 | — | 0.52 / 1.00 / 1.00 / 1.00 | — |
+| Scenario A / B / C accuracy | 0.73 / 0.95 / 0.82 | 0.07 / 1.00 / 0.09 | 1.00 / 1.00 / 1.00 | 0.13 / 1.00 / 0.18 |
+| Per-case (10 historical cases) | 0.70 | 0.70 | 0.70 | 0.70 |
+| Naive 2-σ baseline accuracy | 0.797 | 0.797 | 0.797 | 0.797 |
+
+- **Hand-tuned:** accuracy is dominated by `no_action` (318 of 365 correct actions). Macro-F1 (0.855) is the fairer summary.
+- **Optimized:** monitor recall 1.00 comes at the cost of `no_action` recall 0.52. It over-monitors 153 calm days, and its accuracy is below the naive baseline.
+- **Why the stale numbers differ:** they predate the routing removal and the shipping level-shift change, and must not be cited.
+
+### 9.2 Registered comparison: P0-surrogate vs P0-exact
+
+Same day records; only `top_agent` differs.
+
+| | Hand-tuned: P0-surrogate | Hand-tuned: P0-exact | Optimized: P0-surrogate | Optimized: P0-exact |
+|---|---|---|---|---|
+| Accuracy | 0.940 | 0.937 | 0.564 | 0.578 |
+| Macro-F1 | 0.660 | 0.708 | 0.474 | **0.726** |
+| Recall: reroute | **0.00** (0/6) | 0.17 (1/6) | **0.00** (0/5) | **1.00** (5/5) |
+| Recall: monitor | 0.85 | 0.77 | 1.00 | 1.00 |
+| Days on which the top agent differs | 295 / 365 | | 294 / 365 | |
+| Days on which the action differs | 3 | | 5 | |
+| McNemar exact (discordant: exact right / surrogate right) | 2 / 1, **p = 1.00** | | 5 / 0, **p = 0.063** | |
+
+**The two attributions disagree on the top agent on ~80% of days.**
+- The surrogate names `news_sentiment` on 214 days and `shipping` on 90. Exact Shapley names `shipping` on 170–201 days.
+- This is the seed-42 / seed-44 mismatch plus the surrogate's own error.
+
+**But the decision rule consults `top_agent` only on HIGH, non-sustained days** (7 and 5 days), so the effect on actions is confined to 3–5 days, and neither McNemar test is significant.
+- **The visible consequence:** the surrogate never recommends `reroute` (reroute recall 0.00 in both modes), because it never names shipping on those days.
+- With exact attribution, reroute recall is 1.00 (optimized) or 0.17 (hand-tuned).
+
+The stock METRIC 8 rule (argmax of weight × score, no baseline) gets 0.83 hand-tuned reroute recall. Exact Shapley measures each agent *against its calm level*, and on those days shipping's departure from calm is not the largest, so P0-exact names another agent.
+- The registered comparison is surrogate vs exact. The stock rule is reported for context, not tested.
+
+### 9.3 Not run
+
+**P1** (downgrade on high uncertainty), **P2** (escalate needs a temporally valid precedent ≥ 0.6; reroute needs shipping as top exact driver) and the **simulated-reliance analysis** were **not run**. Their inputs tested null or non-selective in Phases 2–4:
+- **Uncertainty:** the E7 AUCs span 0.5 (§4.1); noise robustness is exploratory and inconsistent (§8.4).
+- **Precedent similarity:** the 0.55 floor is non-selective (§7.3), and precedent evidence does not separate FP alerts from calm days (§7.4, §7.4b).
+
+Simulated reliance (RAIR/RSR under assumed operator accuracies) is listed under **Outlook**: it needs a human-subject estimate of operator accuracy that this thesis does not have.

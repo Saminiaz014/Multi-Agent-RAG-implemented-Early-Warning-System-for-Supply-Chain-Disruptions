@@ -48,3 +48,58 @@ Meanwhile the score is explicit arithmetic over five agent scores, so it can be 
 ### Downstream effects
 - `3_0_Methodology.tex:1090-1115` says exact analytic attribution is "future work". It is now implemented, so the subsection should be rewritten as the primary method, with the surrogate as comparator.
 - The Ch. 4 "Explainability Score" TODO (`4_0_Evaluation.tex:76-85`) is resolved by METRIC 9 (E1–E9). The full text follows in Phase 8.
+
+---
+
+## Results → Decision Support: triage framing (Phase 4)
+
+**Framing:** *score alone ≥ explanation features; a region-specific agreement effect in Panama; its direction reverses in Hormuz.*
+
+**Suggested text:**
+
+> Whether the explanation helps a user decide when to trust an alert was tested with three pre-registered first-day indicators, each scored as the AUC for separating false-positive from true-positive alert episodes: whether the leading exact driver is geopolitical, how many agents are individually elevated, and how much the agents disagree.
+>
+> One result survived Holm correction. In Panama, false-positive episodes had fewer individually elevated agents (AUC 0.89 [0.74, 0.98], adjusted p = 0.0002), identically with and without the shipping duration branch. The same indicator pointed the other way in Hormuz (0.34 [0.18, 0.47]) and was uninformative in Bab el-Mandeb (0.42). The geopolitical-driver hypothesis held in no labelled region; in Hormuz, geopolitical-led openings were more common among true alerts.
+>
+> A leave-one-region-out logistic model on the three indicators did worse than the alert score alone in every held-out region (ΔAUC −0.10 to −0.50; Hormuz and Panama CIs exclude zero), because it transfers an indicator's direction from regions where that direction is reversed.
+>
+> The explanation therefore does not yield a transferable trust rule. Its relationship to alert correctness is region-specific, and with 5–8 true-positive episodes per region the Panama effect is a finding to report, not a rule to deploy.
+
+**Literature links** (bib entries verified in Phase 8):
+- **Bansal et al. 2021** ("Does the whole exceed its parts?"): explanations need not improve complementary human-AI performance beyond showing the AI's confidence. This is the human-side analogue of "score alone ≥ explanation features".
+- **Schemmer et al. 2022** (meta-analysis of XAI effects on human-AI decision making) and **Haag et al. 2026** (meta-analysis): the effects of explanations on appropriate reliance are small and heterogeneous across tasks and contexts. This is consistent with an effect that appears in one region and reverses in another.
+
+The framing claims nothing about humans. It is a functionally grounded result: no user study was run.
+
+**Allowed:** "explanation features did not improve on the score as a triage signal (LORO); one region-specific effect (Panama agreement) survived correction."
+**Not allowed:** "explanations help users calibrate trust"; "geopolitical-led alerts are false alarms".
+
+## Limitations: agreement cut-off quirks (Phase 4, §C P2)
+
+The agreement indicator counts agents whose first-day score exceeds that agent's own train calm-day 90th percentile. Two mechanical properties follow and were left unaltered, because the rule was pre-registered:
+1. **Market never counts.** Its calm-day q0.90 is exactly 1.0, the agent's ceiling (the market agent is clipped at 1.0 on ~25% of days, calm ones included; §4.3), so its score cannot exceed it.
+2. **Any non-zero natural-disaster score counts.** That agent's calm-day q0.90 is 0.
+
+Agreement is therefore effectively a count over shipping, geopolitical and news, plus any disaster activity. A rule using a strict quantile below the ceiling would behave differently; it was not tried, to avoid post-hoc tuning.
+
+## Outlook
+
+- **Simulated and real reliance.** Measuring appropriate reliance (RAIR/RSR) needs operator-accuracy estimates from a human-subject study. Simulating them with assumed accuracies was dropped, because it would only illustrate the mechanism.
+- **Retrieval relevance at scale.** Precision@3 rests on one annotator (the author). A second annotator would give inter-rater agreement.
+
+## Results → Decision Support: METRIC 8 (Phase 5, SYNTHETIC)
+
+**Refreshed METRIC 8 (current code, seed 44):**
+
+| | Accuracy | Macro-F1 | Reroute recall |
+|---|---|---|---|
+| Hand-tuned | 0.948 | 0.855 | 0.83 |
+| Optimized | 0.578, below the naive baseline 0.797 | 0.726 | 1.00 |
+
+The July values (0.866 / 0.490) are stale and must not be cited.
+
+**P0-surrogate vs P0-exact (pre-registered):**
+- The two disagree on the top agent on ~80% of days, but the decision rule consults it on only 5–7 days. McNemar p = 1.00 (hand-tuned) / 0.063 (optimized).
+- The visible effect: the surrogate-driven dashboard never recommends rerouting (reroute recall 0.00).
+
+Report this as a defect found and fixed, not as a significant improvement.

@@ -46,16 +46,23 @@ def _hand_tuned_params(config: dict) -> dict:
     }
 
 
-def synthetic_baselines(config: dict) -> dict[str, float]:
-    """Median seed-42 train score per agent on non-disruption days."""
+def synthetic_baselines(config: dict, params: dict | None = None,
+                        manager=None) -> dict[str, float]:
+    """Median seed-42 train score per agent on non-disruption days.
+
+    Args:
+        config: Application config (split seeds).
+        params: Evaluator parameter layout; defaults to the hand-tuned one.
+        manager: An existing ``DataSplitManager`` to reuse its splits.
+    """
     from src.optimization.data_split import DataSplitManager
     from src.optimization.pipeline_evaluator import PipelineEvaluator
 
-    manager = DataSplitManager(config)
+    manager = manager or DataSplitManager(config)
     splits = manager.get_splits()
     truth = manager.get_ground_truth("train")
     calm_dates = set(truth.index[~truth.to_numpy()])
-    agents = PipelineEvaluator.build_agents(_hand_tuned_params(config))
+    agents = PipelineEvaluator.build_agents(params or _hand_tuned_params(config))
 
     out: dict[str, float] = {}
     for name, agent in agents.items():
