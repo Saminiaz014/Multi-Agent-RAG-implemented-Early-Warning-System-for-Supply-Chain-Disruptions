@@ -105,3 +105,18 @@ Queries, cap, selection and months are unchanged, and no fetched result had been
 - A region-month whose SerpApi request fails on both attempts gets no news documents. ACLED fills its slots under the normal allocation.
 - The month is recorded as `serpapi_status = fetch_failed` in `backfill_coverage.csv` and is not cached, so the next run retries it.
 - Error messages no longer include the request URL, which had exposed the API key in a local log.
+
+**2026-10-15, post-hoc, EXPLORATORY: stricter FP-characterisation rule (B, one run, no tuning).**
+
+The pre-registered tag (§B) is the primary outcome and stays as it is: a null result, with calm-day windows tagged at the same rate as FP windows. This amendment was written *after* seeing that result. It defines one stricter rule, run exactly once on the already-backfilled documents (collection `backfill_2023_25` only; no new fetching), and nothing in it may be adjusted after the run.
+
+- **ACLED:** a document counts only if `acled_event_type` ∈ {`Battles`, `Explosions/Remote violence`, `Strategic developments`}.
+  - "In the region's maritime area" is the backfill's own maritime-notes filter (§A.2), which every ACLED backfill document already passed.
+  - The documents carry no coordinates, so no geographic box is applied.
+- **News:** a document counts only if its title + text matches `INCLUDE` and does not match `EXCLUDE` (case-insensitive).
+  - `INCLUDE`, either:
+    - (a) a strong term: `houthi*`, `missile*`, `hijack*`, `pirate*`, `piracy`, `warship*`, `blockade*`, `airstrike*`, `air strike*`, `seized`, `seizure`, `seizes`, `seizing`, `drone strike*`, `drone attack*`; or
+    - (b) both an attack verb (`attack*`, `strike*`, `struck`, `fired on`, `explosion*`, `blast*`) **and** a maritime object (`ship`, `ships`, `vessel*`, `tanker*`, `merchant`, `cargo`, `navy`, `naval`).
+  - `EXCLUDE`: `shark*`, `heart attack*`, `panic attack*`, `cyber*`, `ransomware`, `hacker*`, `hunger strike*`, `strike action`, `dock* strike*`, `worker* … strike*` (within 20 characters), `union`, `price war`, `trade war`, `tariff war`, `football`, `soccer`, `cricket`.
+- **Window:** 8 days ending on the given day, the same footing as the calm-day control. The windows are FP-episode first days, TP-episode first days (reported, not used in the lift), and calm days (test-window days that are neither alerts nor `y_true = 1`).
+- **Metric:** lift = (share of FP windows with ≥ 1 counting document) / (share of calm windows with ≥ 1). It is reported per region and pooled. The 95% CI comes from a percentile bootstrap: 1,000 resamples, FP windows and calm windows resampled independently (stratified by region when pooled), seed 20261014. A region whose calm rate is 0 reports an undefined lift.
