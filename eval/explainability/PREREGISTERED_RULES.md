@@ -182,6 +182,36 @@ All under `eval/explainability/`, every row tagged `data_origin = real_eval`:
 - `triage_loro.csv`;
 - `triage_malacca.csv`.
 
+
+## D. Phase 5: decision value (SYNTHETIC, seed 44)
+
+**Scope (trimmed 2026-10-15):** METRIC 8 is refreshed, and exactly **one** comparison is run. P1, P2 and simulated reliance are not run.
+
+### D.1 METRIC 8 refresh
+
+`notebooks/evaluation.py::metric_8_decision` is run unchanged on the current code (5 agents):
+- splits: seeds 42 / 43 / 44;
+- agents fitted on train and scored on test (seed 44);
+- both weight modes.
+
+It is written to `eval/explainability/metric8_refresh.json` next to the stale 2026-07-30 values (`data/processed/evaluation_results.json`, not overwritten). Accuracy, **macro-F1** over the four actions, and per-class recall are reported. In the stock rule, `top_agent` is the argmax of inter-weight × score (`_day_top_agent`).
+
+### D.2 The registered comparison: P0-surrogate vs P0-exact
+
+The day records are the stock METRIC 8 records (hand-tuned primary; optimized reported too), identical in risk level, `sustained`, `historical_context = None` and correct action. They differ **only** in `top_drivers[0].agent`:
+
+- **P0-surrogate:** what the dashboard does today. The production SHAP surrogate (`build_shap_training_data` on the default config, seed-42 synthetic year) is explained on **row i of its seed-42 training frame** for test day i (`min(i, n−1)`), and its top driver's agent is used. This reproduces the seed-42 / seed-44 mismatch deliberately.
+- **P0-exact:** the agent with the largest exact Shapley value of that seed-44 day's composite.
+  - The value function is the evaluator's aggregation: Path C, i.e. a renormalised mean over agents with weight > 0, the agreement bonus at 0.5 with the mode's bonus3/bonus5, and a clip at 1.
+  - Baselines are each agent's median score on the **seed-42 train** realisation's non-disruption days, scored by agents fitted on seed-42 train with the same mode's parameters.
+
+**Measures:**
+- accuracy, macro-F1 and per-class recall of `predict_action` against `scenario_correct_action`, over the 365 test days;
+- **McNemar's exact test** (two-sided binomial on the discordant days) of per-day correctness, P0-exact vs P0-surrogate;
+- the number of days on which the two top agents differ, and on which the action differs. `top_agent` affects the action only on HIGH, non-sustained days, so most days are identical by construction.
+
+Everything is labelled SYNTHETIC. The correct actions are rule-derived from the injected scenario windows, not observed decisions.
+
 ---
 
 ## Amendments
