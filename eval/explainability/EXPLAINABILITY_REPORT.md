@@ -348,4 +348,94 @@ The similarity-based version is **dropped as a metric**. The 0.55 similarity flo
 ### 7.7 Incidents
 
 - **SerpApi failures:** a read timeout and a double HTTP 503 interrupted the backfill. Both were handled by pre-registered amendments (`d8cdc62`, `ea1e5bb`), and the cache meant no request was paid for twice.
-- **Exposed API key:** the 503's `HTTPError` text contained the request URL, **including the SerpApi API key**, which was written to a local task log. That log has been redacted, and errors are now raised without the URL. **The key should be rotated.**
+- **Exposed API key:** the 503's `HTTPError` text contained the request URL, **including the SerpApi API key**, which was written to a local task log. That log has been redacted, and errors are now raised without the URL.
+  - **Status (2026-10-15):** the key was rotated by the author.
+  - The old (revoked) key remains only in the author's `.env` (to be replaced by the author) and in this session's Claude Code transcript.
+  - No other project file, cache, eval DB or log holds it.
+
+## 8. Phase 4: explanation-informed triage
+
+Pre-registered in `PREREGISTERED_RULES.md` §C (commit `f89f445`). The data is real_eval; the unit is the Tier 5 alert episode (FP = 1).
+
+- **TP episodes:** 5 / 7 / 8 (Hormuz / Bab el-Mandeb / Panama) with duration; 7 / 8 / 8 without. Malacca has none.
+- **Hormuz small-n:** every Hormuz result carries the caveat "small-n (5 TP episodes with duration, 7 without; 22 TP days)".
+- **Runtime:** the one-time C0 export took 43 s (bit-identity with the CSV: OK); the analysis took 10 s.
+
+### 8.1 Primary indicators (first day of the episode), AUC for FP [95% CI], Holm-adjusted one-sided p
+
+| Indicator (direction → FP) | Hormuz (5 TP / 34 FP) | Bab el-Mandeb (7 / 10) | Panama (8 / 30) |
+|---|---|---|---|
+| P1 top exact driver = geopolitical (1) | 0.41 [0.18, 0.66], p = 1.00 | 0.70 [0.55, 0.85], p = 0.11 | 0.50 (degenerate: no geopolitical-led episode) |
+| P2 agreement (low) | 0.34 [0.18, 0.47], p = 1.00 | 0.42 [0.25, 0.61], p = 0.79 | **0.89 [0.74, 0.98], p = 0.0002** |
+| P3 dispersion (high) | 0.59 [0.26, 0.87], p = 0.79 | 0.57 [0.29, 0.86], p = 0.67 | 0.49 [0.22, 0.78], p = 1.00 |
+| *S0 score-only (low)* | *0.25 [0.05, 0.54]* | *0.37 [0.10, 0.66]* | *0.56 [0.29, 0.82]* |
+
+Without duration the rows are near-identical; for example P2 is 0.43 / 0.41 / **0.89 (p = 0.0002)** and P1 is 0.32 / 0.64 / 0.50.
+
+**Reading:**
+- **One pre-registered result passes:** Panama P2 (agreement), in both variants.
+- **It does not generalise.** The same indicator points the *wrong* way in Hormuz (0.34) and is null in Bab el-Mandeb.
+- **The registered P1 hypothesis is null or reversed.** Geopolitical-led first days are *more* common among TP episodes in Hormuz (0.41; 0.32 without duration). Bab el-Mandeb's 0.70 does not survive Holm.
+
+The agreement cut-off has two mechanical properties, reported and not altered:
+- **Market never counts toward agreement.** Its train calm-day q0.90 is exactly 1.0, the agent's ceiling (§4.3), so its score can never exceed it.
+- **Any non-zero natural-disaster score counts**, because that agent's calm q0.90 is 0.
+
+### 8.2 Leave-one-region-out logistic model (primaries) vs score-only
+
+| Held out | AUC primaries | AUC score-only | ΔAUC [paired 95% CI] |
+|---|---|---|---|
+| Hormuz | 0.35 [0.18, 0.53] | 0.75 [0.50, 0.95] | **−0.40 [−0.64, −0.16]** |
+| Bab el-Mandeb | 0.53 [0.23, 0.81] | 0.63 [0.36, 0.91] | −0.10 [−0.59, 0.34] |
+| Panama | **0.05 [0.00, 0.14]** | 0.56 [0.29, 0.83] | **−0.50 [−0.80, −0.21]** |
+| *Without duration:* Hormuz / Bab el-Mandeb / Panama | 0.29 / 0.29 / 0.17 | 0.69 / 0.62 / 0.56 | −0.41 / −0.34 / −0.39 (Hormuz and Panama CIs exclude 0) |
+
+**The explanation features transfer worse than the score alone, and in Panama they transfer inverted.**
+- The model learns agreement's direction from regions where it is reversed and applies it to Panama, where it holds.
+- The relationship between explanation features and alert correctness is **region-specific**; no cross-region trust rule is supported.
+
+### 8.3 Malacca: share of 49 FP episodes flagged low-trust, vs the cost (share of the other regions' TP episodes also flagged)
+
+| Rule | Malacca FP flagged (with / without dur.) | TP flagged elsewhere (cost) |
+|---|---|---|
+| P1 geopolitical-led | 0.59 [0.45, 0.73] / 0.59 | 0.15 [0.00, 0.30] / 0.26 |
+| P2 agreement ≤ 1 | 0.84 [0.73, 0.94] / 0.84 | 0.60 [0.40, 0.80] / 0.61 |
+| P3 dispersion > q0.75 | 0.10 [0.02, 0.20] / 0.10 | 0.20 [0.05, 0.40] / 0.22 |
+| LORO primaries, P(FP) ≥ 0.5 | 0.82 [0.71, 0.92] / **0.31** | 0.90 [0.75, 1.00] / 0.91 |
+| LORO score-only, P(FP) ≥ 0.5 | 0.71 [0.59, 0.84] / 0.41 | **1.00** / **1.00** |
+| *X1 k80 (EXPLORATORY)* | *0.94 / 0.94* | *0.40 / 0.52* |
+| *X2 surrogate disagrees (EXPLORATORY)* | *0.63 / 0.63* | *0.80 / 0.70* |
+| *X4 noise robustness (EXPLORATORY)* | *0.88 / 0.88* | *0.85 / 0.83* |
+
+- **P1 is the only rule that flags most Malacca FPs while sparing most TPs elsewhere** (59% vs 15%). It is a registered primary but did not reach significance in any labelled region, so the Malacca rate is descriptive, not evidence.
+- **The two LORO models flag nearly every TP episode.** At the balanced-weight 0.5 cut-off they are not selective, and their Malacca rate collapses when the duration branch is removed (0.82 → 0.31).
+
+### 8.4 Exploratory and retrospective (not interpreted)
+
+**Secondary (`triage_results.csv`, tier "secondary"):**
+- k80 0.70 / 0.58 / 0.67;
+- surrogate disagreement 0.59 / 0.37 / 0.48;
+- max precedent similarity 0.64 / 0.77 / 0.34;
+- noise robustness 0.28 / 0.36 / 0.58 (Hormuz / Bab el-Mandeb / Panama, with duration).
+
+**Retrospective (`triage_retrospective.csv`):**
+- C1 (registered, episode-summed): 0.29 / 0.60 / 0.50. Hormuz is reversed: geopolitical leads its TP episodes.
+- Episode length: 0.55 / 0.68 / 0.83.
+
+### 8.5 Circularity control
+
+Removing the shipping duration branch changes no primary conclusion:
+- Panama P2 is identical (0.89, p = 0.0002);
+- every other primary stays null;
+- LORO stays worse than score-only.
+
+The only material change is the Malacca LORO flag rate (0.82 → 0.31), which already failed on cost.
+
+### 8.6 Answer to "does the explanation tell you when to trust the alert?"
+
+**Not in a way that generalises.**
+- One region-specific signal (Panama: FP alerts have fewer agents individually elevated) survives correction in both variants.
+- Combining the primary indicators across regions is worse than the score alone.
+- The registered geopolitical hypothesis does not hold in any labelled region.
+
+With 5–8 TP episodes per region, the thesis may report the Panama result as a region-specific finding. It may not claim explanation-based triage.

@@ -156,6 +156,8 @@ def main() -> int:
         _run("run_scorecard")
         _run("run_backfill")      # served from backfill_raw/ cache: no API quota spent
         _run("run_precedents")
+        _run("run_triage_inputs")   # Phase 4 C0: bit-identity-checked export
+        _run("run_triage")
     composition = pd.read_csv(_HERE / "fp_driver_composition.csv")
     written = figure_f14(composition)
     for path in written:
