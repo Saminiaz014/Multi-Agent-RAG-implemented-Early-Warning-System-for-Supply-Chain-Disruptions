@@ -54,7 +54,7 @@ class RegionConfig:
         display_name: Human-readable label for dashboards and logs.
         latitude: Centre-point latitude, decimal degrees.
         longitude: Centre-point longitude, decimal degrees (negative = West).
-        agents: ``{agent_config_key: is_active}`` for all six agents. An agent
+        agents: ``{agent_config_key: is_active}`` for all five agents. An agent
             mapped to ``False`` is passive — it is not built, not run, and not
             weighted for this region.
         passive_reasons: ``{agent_config_key: why_it_is_passive}``, for the

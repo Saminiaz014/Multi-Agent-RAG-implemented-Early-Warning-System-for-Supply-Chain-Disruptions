@@ -2,7 +2,7 @@
 
 Given one candidate weight set (Layer-1 intra-agent weights, Layer-2
 inter-agent weights, Layer-3 thresholds), this module runs the full
-six-agent pipeline on a pair of data splits and scores it:
+five-agent pipeline on a pair of data splits and scores it:
 
     fit  on the *fit* split   (Isolation-Forest baselines learn here)
     score on the *eval* split (metrics are computed here)
@@ -74,7 +74,7 @@ class EvalMetrics:
 
 
 class PipelineEvaluator:
-    """Run + score the six-agent pipeline for a candidate weight set.
+    """Run + score the five-agent pipeline for a candidate weight set.
 
     Args:
         data_manager: A :class:`~src.optimization.data_split.DataSplitManager`
@@ -98,14 +98,14 @@ class PipelineEvaluator:
     # ------------------------------------------------------------------
     @staticmethod
     def build_agents(params: dict) -> dict:
-        """Instantiate the six agents with a trial's weights + thresholds.
+        """Instantiate the five agents with a trial's weights + thresholds.
 
         Args:
             params: Structured parameter dict with ``intra`` (per-agent
                 weights) and ``thresholds`` sub-dicts.
 
         Returns:
-            ``{connector_name: agent}`` for all six agents.
+            ``{connector_name: agent}`` for all five agents.
         """
         intra = params["intra"]
         thr = params["thresholds"]

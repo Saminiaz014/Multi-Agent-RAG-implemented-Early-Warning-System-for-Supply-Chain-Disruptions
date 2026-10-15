@@ -6,7 +6,7 @@ reports, side-by-side for the hand-tuned and Optuna-optimized weight modes:
 
     METRIC 1  Detection performance      (per-agent + system, test split)
     METRIC 2  Explainability faithfulness (SHAP top-3 vs planted anomalies)
-    METRIC 3  Agent-diversity value       (6-agent vs 2-agent vs 1-agent)   ← key
+    METRIC 3  Agent-diversity value       (all agents vs 2 vs 1; key "6-agent" is legacy)
     METRIC 4  Baseline comparison         (naive 2-sigma vs hand vs optimized)
     METRIC 5  Weight-optimization impact  (from optimization_results.json)   ← key
     METRIC 6  RAG retrieval relevance     (evaluate_retrieval_quality)
@@ -400,7 +400,12 @@ def metric_2_faithfulness(modes_inter: dict[str, dict]) -> dict:
 
 
 def metric_3_diversity(evaluator: PipelineEvaluator, modes: dict[str, dict]) -> dict:
-    """F1 / lead-time / FPR for 6-agent vs 2-agent vs 1-agent, both modes."""
+    """F1 / lead-time / FPR for all agents vs 2 vs 1, both modes.
+
+    The "6-agent" result key predates the routing agent's removal and is kept
+    so stored evaluation_results.json files stay readable; it now holds the
+    five-agent configuration.
+    """
     _rule("METRIC 3 — Agent-diversity value (6 vs 2 vs 1 agent, TEST split)")
     configs = {
         "6-agent": {

@@ -1426,7 +1426,7 @@ def analysis_bundle(start: int, end: int) -> dict:
                     for i in range(start, end + 1)]
 
         diversity: dict[str, float] = {}
-        for cfg_name, active in (("6-agent", set(ALL_AGENTS)),
+        for cfg_name, active in (("5-agent", set(ALL_AGENTS)),
                                  ("2-agent", {"shipping", "market"}),
                                  ("1-agent", {"shipping"})):
             r_m = composite_series(ts, params, active).to_numpy()[start:end + 1] >= high_thr

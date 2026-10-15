@@ -213,7 +213,7 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     def run_full_pipeline(self) -> dict:
-        """End-to-end ingest → detect → aggregate across all six agents.
+        """End-to-end ingest → detect → aggregate across all five agents.
 
         When no agents have been registered explicitly, every agent enabled
         in ``config["agents"]`` is auto-built and registered (honouring the
@@ -227,7 +227,7 @@ class Orchestrator:
         :meth:`RiskEngine.aggregate` (legacy ``composite_score`` /
         ``agent_scores`` keys) and :meth:`RiskEngine.compute_risk` (the richer
         agreement-amplified ``risk_score`` / ``contributing_agents`` breakdown),
-        so downstream consumers get the full six-agent composite either way.
+        so downstream consumers get the full five-agent composite either way.
 
         Returns:
             Dictionary with the legacy keys (``composite_score``,
@@ -718,7 +718,7 @@ class Orchestrator:
         )
 
     def _build_shap_features_row(self, combined: pd.DataFrame) -> pd.DataFrame:
-        """Build a single-row 20-feature DataFrame from current pipeline state.
+        """Build a single-row 17-feature DataFrame from current pipeline state.
 
         Shipping and market features are read from the last row of ``combined``.
         Domain agent features (geopolitical, natural_disaster,

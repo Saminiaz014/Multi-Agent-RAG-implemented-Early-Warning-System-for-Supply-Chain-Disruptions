@@ -1,10 +1,10 @@
 """FastAPI endpoints for the Supply Chain DSS.
 
-Exposes the full 6-agent pipeline over HTTP:
+Exposes the full 5-agent pipeline over HTTP:
   - GET  /health              — liveness + system status
-  - POST /predict             — run 6-agent detection, return risk assessment
+  - POST /predict             — run 5-agent detection, return risk assessment
   - POST /explain             — SHAP feature contributions + RAG historical context
-  - GET  /agents              — list all 6 agents with metadata
+  - GET  /agents              — list all 5 agents with metadata
   - POST /agents/toggle       — enable / disable an agent at runtime
   - GET  /weights             — current weight mode and inter-agent weights
   - POST /weights/switch      — switch weight mode at runtime (no file write)
@@ -301,7 +301,7 @@ async def health() -> dict:
 
 @app.post("/predict", response_model=PredictResponse, summary="Run risk prediction")
 async def predict(request: PredictRequest) -> PredictResponse:
-    """Run the full 6-agent pipeline and return a composite risk assessment."""
+    """Run the full 5-agent pipeline and return a composite risk assessment."""
     try:
         global _last_run_timestamp
         orch = _get_orchestrator()
@@ -378,7 +378,7 @@ async def explain(request: ExplainRequest) -> ExplainResponse:
 
 @app.get("/agents", response_model=list[AgentInfo], summary="List all agents")
 async def list_agents() -> list[AgentInfo]:
-    """List all 6 agents with their current enabled state, data mode, and weight."""
+    """List all 5 agents with their current enabled state, data mode, and weight."""
     try:
         cfg = _load_config()
         agents_cfg = cfg.get("agents", {}) or {}

@@ -133,7 +133,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_pipeline(mode: str | None = None, region: str | None = None) -> dict:
-    """Run the full six-agent pipeline and print a JSON risk assessment.
+    """Run the full five-agent pipeline and print a JSON risk assessment.
 
     Delegates ingestion → detection → aggregation to
     :meth:`~src.orchestrator.Orchestrator.run_full_pipeline`, which wires every
@@ -190,7 +190,7 @@ def run_pipeline(mode: str | None = None, region: str | None = None) -> dict:
             "agent_scores": {},
         }
 
-    # -- JSON risk assessment (machine-readable, all six agents) ---------
+    # -- JSON risk assessment (machine-readable, all five agents) ---------
     print(json.dumps(_jsonable(_assessment_view(result)), indent=2))
 
     # -- Human-readable summary box -------------------------------------
@@ -323,7 +323,7 @@ def main() -> None:
 def _assessment_view(result: dict) -> dict:
     """Project the pipeline output into a compact JSON risk assessment.
 
-    Pulls out the six-agent composite, the per-agent contribution breakdown,
+    Pulls out the five-agent composite, the per-agent contribution breakdown,
     and the run metadata (``agents_active`` / ``data_modes`` / ``weight_mode``)
     so the printed JSON is the canonical machine-readable assessment.
     """

@@ -83,3 +83,17 @@ These are dated phase entries that were true when written:
 Recommendation: add one line at the top of the log saying entries before 2026-10-11 describe the 6-agent, 20-feature system. Entries #2–#4 above are already registered.
 
 **METRIC 8 values to use instead of the July ones:** P0-exact hand-tuned 0.937 (macro-F1 0.708); weight × score 0.948 (0.855) in a footnote; optimized 0.578, below the naive baseline 0.797.
+
+## Status update (2026-10-15)
+
+**Fixed in code:**
+- **#20:** METRIC 8 export caption. It now names the stored July run as superseded and gives the canonical values (0.937 / 0.708, SYNTHETIC).
+- **#21 (live charts):** the analysis-bundle key and chart label are now "5-agent"; the raw-signal expander is relabelled.
+- **#22–#28:** docstrings now say 5 agents / 17 features.
+
+**Deliberately unchanged:**
+- **#21 (stored METRIC 3 section, `analysis_view.py:259`).** It still reads the `"6-agent"` key of the July `evaluation_results.json`, whose numbers really are from the six-agent run. Relabelling them would misstate the data.
+- **`notebooks/evaluation.py`.** It keeps writing the legacy `"6-agent"` key, now documented, so stored files stay readable.
+- **`.tex` files (#5, #6, #9–#11) and `DEVELOPMENT_LOG.md`:** untouched, as instructed.
+- **README / docs (#1, #7, #12–#19):** list only.
+

@@ -430,8 +430,10 @@ def _section_8_decision(results: dict) -> None:
         st.plotly_chart(fig, use_container_width=True)
         export_button(fig, "m8_confusion", "Decision-effectiveness confusion matrix",
                       "Predicted vs ground-truth actions over the 365-day synthetic year, "
-                      "hand-tuned mode. Overall accuracy 0.866 vs naive baseline 0.797. "
-                      "KEY THESIS FINDING — METRIC 8 / SRQ5.")
+                      "hand-tuned mode, from the stored 2026-07-30 run (superseded). "
+                      "Current canonical METRIC 8 (exact driver, seed 44): accuracy 0.937, "
+                      "macro-F1 0.708; naive baseline 0.797. SYNTHETIC. "
+                      "See eval/explainability/metric8_refresh.json.")
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +538,7 @@ def _section_9_explorer() -> None:
     col_c, col_d = st.columns(2)
     with col_c:
         st.markdown("##### Agent diversity within range")
-        cfgs = ["6-agent", "2-agent", "1-agent"]
+        cfgs = ["5-agent", "2-agent", "1-agent"]
         fig = go.Figure()
         for mode, res in modes.items():
             fig.add_trace(go.Bar(x=cfgs, y=[res["diversity"][c] for c in cfgs],
@@ -567,7 +569,7 @@ def _section_9_explorer() -> None:
                       f"Sampled every {rag['stride']} day(s) against the static case base.")
 
     # Raw agent signal timeline (research view of the Page 1 trend).
-    with st.expander("Raw 6-agent signal timeline (full year)"):
+    with st.expander("Raw agent signal timeline (full year)"):
         ts = compute_timeseries("hand_tuned")
         params = resolve_mode_params("hand_tuned")
         risk = composite_series(ts, params, set(ALL_AGENTS))

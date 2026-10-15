@@ -276,7 +276,7 @@ class ContextRetriever:
         current_signals: dict[str, float],
         top_k: int | None = None,
     ) -> list[dict]:
-        """Retrieve cases matching a 6-agent signal profile.
+        """Retrieve cases matching a 5-agent signal profile.
 
         Builds a natural-language query string from the active signal
         domains (those whose anomaly score exceeds the baseline threshold)
@@ -410,7 +410,7 @@ class ContextRetriever:
             scenarios: List of dicts, each containing:
 
                 - ``"name"`` (str): Scenario identifier.
-                - ``"signals"`` (dict[str, float]): 6-agent signal profile
+                - ``"signals"`` (dict[str, float]): 5-agent signal profile
                   (keys are agent names, values are anomaly scores in
                   ``[0, 1]``).
                 - ``"expected_agents"`` (list[str]): Agent domains that a

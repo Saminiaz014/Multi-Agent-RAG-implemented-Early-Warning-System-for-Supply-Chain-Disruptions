@@ -89,7 +89,7 @@ class DataSplitManager:
     # Generation
     # ------------------------------------------------------------------
     def generate_splits(self) -> dict[str, dict[str, pd.DataFrame]]:
-        """Generate all three splits across all six connectors.
+        """Generate all three splits across all five connectors.
 
         Returns:
             ``{split_name: {connector_name: DataFrame}}`` — each DataFrame is
