@@ -34,7 +34,7 @@ That command regenerates the AERs, scorecard, backfill (from cache), precedents,
 
 **5. Narrative.** It is faithful by construction (E9 = 1.00). The claim checker catches 96.9% of single-number corruptions (§10).
 
-**6. Pending:** E8 precision@3 needs the author's annotation of `rag_annotation.csv` (0 of 60 pairs annotated on 2026-10-15).
+**6. Retrieval integrity.** The production retriever returned wrong-region (region match 0.00 in Hormuz, Panama, Malacca), duplicated (0.33–0.36) and future-dated precedents; the evaluation wrapper removes all three defects (§7.3, F7). Retrieval is evaluated for integrity only; the relevance of retrieved precedents is outside the functionally grounded evaluation level (scope decision 2026-10-15).
 
 ---
 
@@ -134,7 +134,7 @@ Source: `scorecard.csv`. Values are episode means with episode-bootstrap 95% CIs
 | E7 AUC FP-vs-TP: band width | exact | 0.38 [0.12, 0.70] | 0.87 [0.66, 1.00] | 0.57 [0.38, 0.73] | n/a |
 | E7 AUC FP-vs-TP: dispersion | exact | 0.55 [0.20, 0.84] | 0.26 [0.04, 0.53] | 0.61 [0.39, 0.81] | n/a |
 | E7 calibration | — | not estimable (0 train positives in 3 of 4 regions; circular label) | | | |
-| E8 / E9 | — | pending Phase 3 / Phase 6 | | | |
+| E9 | — | see Phase 6 | | | |
 
 **Reading the table:**
 
@@ -202,7 +202,7 @@ An episode is tagged `risk_without_traffic_drop` if at least one document counts
 - Bab el-Mandeb's 134 in-window articles sit 43+ days from any FP episode.
 - ACLED holds only **annual** summaries dated YYYY-01-01. These are reported as `acled_annual_military_events` and excluded from the ±7-day rule.
 
-Phase 3 inherits this: precedent grounding for 2023-25 alerts cannot be scored outside Bab el-Mandeb without backfilling the KB.
+Phase 3 inherits this: retrieval integrity for 2023-25 alerts cannot be assessed outside Bab el-Mandeb without backfilling the KB.
 
 ## 5. Implementation notes
 
@@ -219,7 +219,7 @@ Phase 3 inherits this: precedent grounding for 2023-25 alerts cannot be scored o
 - **Untracked (regenerated):** `aer/`, `*.csv`, `*.json`, the PNG/PDF figures, `backfill_raw/`, `data/knowledge_base/.chromadb_xai/`.
 - `.gitignore` ignores the contents of `thesis/` rather than the directory, which lets the caption exception work. The local `.git/info/exclude` entry was narrowed the same way (`thesis/*`).
 
-## 7. Phase 3: precedent grounding
+## 7. Phase 3: retrieval integrity and KB backfill
 
 Rules are pre-registered in `PREREGISTERED_RULES.md` §A–B (commit `ae8c7b7`; amendments `d8cdc62`, `ea1e5bb`). The data is real_eval; the unit is the Tier 5 alert episode. **TP episodes: 5 / 7 / 8 (Hormuz / Bab el-Mandeb / Panama).**
 
@@ -291,7 +291,7 @@ What the production retriever actually returns:
 
 The wrapper removes all three defects (region, date, duplicates) by construction, and the backfill raises similarity in every region except Bab el-Mandeb, which was already covered.
 
-"Any hit ≥ 0.55" is 1.00 for every configuration, including the defective one, so the 0.55 floor is not selective. Relevance therefore has to come from annotation (§7.5), not from the similarity score.
+"Any hit ≥ 0.55" is 1.00 for every configuration, including the defective one, so the 0.55 floor is not selective, and similarity is not used as evidence. Retrieval is reported for integrity (region, date, duplicates) only.
 
 ### 7.4 FP characterisation (`fp_characterisation.csv`): tags per pre-registration §B
 
@@ -352,22 +352,22 @@ Lift is the FP-window rate ÷ calm-window rate (8-day windows), with a 1,000-res
 - Bab el-Mandeb's interval excludes 1 only because both rates sit at the ceiling (2023-25 is the Red Sea crisis throughout), so a lift of 1.03 has no practical meaning.
 - The knowledge base therefore cannot be used to argue that false positives were "real risk without a traffic drop". The honest reading is that the FPs are not explained by contemporaneous conflict events in this corpus.
 
-### 7.5 Annotation set (for the author)
+### 7.5 Annotation set (kept for future work; not scored)
+
+Kept in the repository for a future human-grounded relevance evaluation (§12, Outlook). It is not part of this evaluation and has not been annotated.
+
 
 - **Files:** `eval/explainability/rag_annotation.csv` (blind) and `rag_annotation_key.csv` (labels, similarities, query).
 - **Content:** 60 (episode, document) pairs from 20 episodes (9 TP / 11 FP): Hormuz 6, Bab el-Mandeb 6, Panama 6, Malacca 2. Malacca has a single FP stratum; it was reduced from 3 to 2 episodes by the pre-registered rule.
 - **Sources of the pairs:** SerpApi 52, PortWatch 5, static cases 3. ACLED events never reach the top 3: they are short, factual notes that embed far from a driver-phrased query.
 - **To score:** fill `relevance` (0 / 1 / 2, scale in `PREREGISTERED_RULES.md` §B), then run `python eval/explainability/compute_precision_at_3.py`. It refuses to run while any `relevance` cell is blank.
 
-### 7.6 Scorecard rows added (`scorecard.csv`, replacing the "pending" rows)
+### 7.6 Scorecard rows added (`scorecard.csv`)
 
-**E8 is precision@3 from the author's relevance annotation, and is pending** (`compute_precision_at_3.py`; lenient = relevance ≥ 1, strict = 2).
-
-The similarity-based version is **dropped as a metric**. The 0.55 similarity floor is **non-selective**: every configuration, including the production retriever with its wrong-region, duplicated and future-dated hits, has a hit above it in 100% of episodes (§7.3). Passing it says nothing about relevance. The old rows remain in `scorecard.csv` only as `E8-diag` (similarity-floor grounding: 0.99–1.00 in every region), marked diagnostic.
+E8 (retrieval relevance) is **removed from METRIC 9** (scope decision 2026-10-15). The scorecard covers E1–E7 and E9; retrieval is evaluated separately for integrity (§7.3, F7). The similarity-based version was dropped earlier: the 0.55 floor is **non-selective** (every configuration, including the defective production retriever, has a hit above it in 100% of episodes).
 
 | Metric | Hormuz | Bab el-Mandeb | Panama | Malacca |
 |---|---|---|---|---|
-| E8 precision@3 | pending | pending | pending | pending |
 | E5 top exact agent ∈ precedents' `primary_agents` (episode) | 0.62 [0.46, 0.77] | 0.41 [0.28, 0.54] | **0.00** | 0.02 [0.00, 0.07] |
 
 - **E5 is a weak measure here.** By schema, backfilled news carries `primary_agents = news_sentiment`, so it can only match news-led alerts. Panama's 0.00 is this artefact, not a disagreement.
@@ -631,11 +631,11 @@ Full suite: **512 passed** (2026-10-15). That covers the Decision View AppTest's
 | F4 | Deletion and insertion curves (agent level): exact vs production surrogate vs random; episode AUCs in the titles | real_eval, D |
 | F5 | Surrogate honesty: R² on its own synthetic year, out-of-time R² on real data (production vs refit), local error | real_eval / synthetic_seed42 |
 | F6 | Compactness (k80 agents / features) and stability under noise | real_eval, D |
-| F7 | Retrieval diagnostics before/after (temporal validity, region match, duplicates); precision@3 panel **pending annotation** | real_eval |
+| F7 | Retrieval integrity: before vs after (temporal validity, region match, duplicates) | real_eval |
 | F8 | Triage forest plot: primary indicators + score-only baseline, with/without duration, Holm and minimum-n flags | real_eval |
 | F9 | Uncertainty (agent dispersion) TP vs FP, **null result** | real_eval |
 | F10 | P0-surrogate vs P0-exact: macro-F1 and reroute recall | **SYNTHETIC** (seed 44), C |
-| F12 | Scorecard heatmap, region × E1–E9 (E8 pending) | real_eval |
+| F12 | Scorecard heatmap, region × E1–E7, E9 | real_eval |
 | F13 | Hormuz case: shock vs duration branch, max() winner, exact shipping φ | real_eval, D |
 | F14 | Top exact driver of TP vs FP episodes | real_eval, D |
 | F15 | Market saturation: score distribution per region, calm baseline | real_eval |
@@ -662,7 +662,7 @@ Runtime: 45 s for all figures with `--reuse`.
 - **SYNTHETIC decision evaluation.** METRIC 8 correct actions are rule-derived from injected scenarios.
 
 **Retrieval:**
-- **Single annotator** (the author) for E8, blind to TP/FP. E8 is pending.
+- **Evaluation level.** Retrieval is evaluated for retrieval integrity (region match, temporal validity, de-duplication). Precedent relevance, like human understanding and trust, lies outside the functionally grounded level; this is the chosen evaluation level, not an omission.
 - **Knowledge-base coverage** before the backfill was zero for 2023-25 outside Bab el-Mandeb. The backfill is bounded (15 docs per region-month) and alert-blind, and its permissive pre-registered tag does not discriminate (§7.4).
 
 **Pre-registered rule properties:**
@@ -671,6 +671,10 @@ Runtime: 45 s for all figures with `--reuse`.
 **The registry/CSV discrepancy:**
 - The method-comparison tiers (and therefore Path D and every explanation of it) include agents that `src/core/regions.py` marks **passive** for a region: **geopolitical in Panama, market in Malacca, and natural disaster in Bab el-Mandeb**. `scripts/run_method_comparison.py` builds tiers from the data columns present, not from `active_agents()`.
 - Explanations deliberately use the CSV's agent sets so that their numbers match the reported detection results. A registry-faithful composite would drop those three terms from the respective regions' attributions.
+
+**Outlook (human-grounded evaluation):**
+- A human-subject study of understanding and appropriate reliance on the exact explanations.
+- Precedent relevance: `eval/explainability/rag_annotation.csv` (60 blind pairs) with `rag_annotation_key.csv`, scored by `compute_precision_at_3.py`, are kept for this; two annotators with inter-rater agreement would be needed.
 
 **Comparators:**
 - **Surrogate comparators.** The production surrogate is evaluated as deployed (synthetic-trained). The refit is one recipe (the same random forest); other surrogate families were not tried.
@@ -692,7 +696,6 @@ Runtime: 45 s for all figures with `--reuse`.
 | E5 | Top agent = exact top | surrogate (refit) | 0.84 [0.76, 0.92] | 0.53 [0.38, 0.66] | 0.94 [0.86, 1.00] | 0.91 [0.86, 0.96] |
 | E6 | Feasible single-agent counterfactual | exact | 0.97 [0.94, 0.99] | 0.97 [0.95, 0.99] | 1.00 [1.00, 1.00] | 0.97 [0.94, 0.99] |
 | E7 | AUC of noise band (FP vs TP) | exact | 0.38 [0.12, 0.70] | 0.87 [0.66, 1.00] | 0.57 [0.38, 0.73] | n/a (no TP) |
-| E8 | Precision@3 (annotation) | wrapper | pending | pending | pending | pending |
 | E9 | Narrative faithfulness | template | 1.00 | 1.00 | 1.00 | 1.00 |
 
 The without-duration variant changes no row by more than a few hundredths (`scorecard.csv`, `variant == without_duration`).
@@ -707,7 +710,7 @@ The without-duration variant changes no row by more than a few hundredths (`scor
 | `ae8c7b7` | Pre-registration (backfill, retrieval, C1) |
 | `d8cdc62` / `ea1e5bb` | Backfill amendments |
 | `2b14011` | Phase 3 |
-| `0c2cfff` / `41c9746` | Exploratory FP rule, E8 relabel |
+| `0c2cfff` / `41c9746` | Exploratory FP rule, E8 relabel (E8 later removed) |
 | `f89f445` | §C pre-registration |
 | `700d7c3` | Phase 4 |
 | `f0f2253` / `1811dc9` | Phase 5 |
@@ -715,4 +718,6 @@ The without-duration variant changes no row by more than a few hundredths (`scor
 | `147cc1d` / `12aa383` | Phase 6 |
 | `720ebba` | Post-review fixes |
 | `e42bb14` | Phase 7 |
-| (this commit) | Phase 8 |
+| `b31c45a` | Phase 8 |
+| `e94c6ec` | Stale agent counts in docstrings and the METRIC 8 caption |
+| (this commit) | Scope decision: E8 removed, retrieval integrity, Methodology/Evaluation wording |

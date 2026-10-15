@@ -4,11 +4,11 @@ These are places that state something the current code or measurements contradic
 
 | # | Where | Stale statement | Corrected value / replacement | Added |
 |---|---|---|---|---|
-| 1 | `README.md:64` (SRQ table, SRQ3 Verdict) | "Yes, with a stated surrogate caveat", resting on the SHAP surrogate | Replace with the exact-attribution verdict in `CH4_WRITING_NOTES.md` § SRQ3. The surrogate is a comparator with real-data R² −0.32 to −4.39. | Phase 3 |
+| 1 | `README.md:64` (SRQ table, SRQ3 Verdict) | "Yes, with a stated surrogate caveat", resting on the SHAP surrogate | Factual basis stale: the verdict rests on the surrogate, a comparator with real-data R² −0.32 to −4.39. No SRQ rewording proposed (scope decision 2026-10-15). | Phase 3 |
 | 2 | `DEVELOPMENT_LOG.md:1091` | `train_surrogate` "Returns R² (0.991 on the 364-day synthetic dataset)" | Training-set R² of the retired 20-feature model. Current 17-feature surrogate: train 0.983, chronological hold-out 0.528, 5-fold CV 0.868; on real test windows −0.32 to −4.39 (Phase 2 scorecard). | Phase 3 |
 | 3 | `DEVELOPMENT_LOG.md:1119` | `"surrogate_r2": 0.991` in the example output | As #2. It is the in-sample fit, not faithfulness. | Phase 3 |
 | 4 | `DEVELOPMENT_LOG.md:1070` | "the full 20-feature, 6-agent space" | 17 features, 5 agents (routing removed in `b2306ae`). | Phase 3 |
-| 5 | `thesis/1_0_Introduction.tex:367-373` (SRQ3 framing) | Interpretation via SHAP "quantifies the contribution of each input feature" | The primary attribution is the exact agent- and feature-level Shapley decomposition; SHAP-on-surrogate is a comparator. Replacement paragraph in `CH4_WRITING_NOTES.md` § SRQ3. | Phase 3 |
+| 5 | `thesis/1_0_Introduction.tex:367-373` (SRQ3 framing) | Interpretation via SHAP "quantifies the contribution of each input feature" | The primary attribution is the exact agent- and feature-level Shapley decomposition; SHAP-on-surrogate is a comparator. Framing paragraph only; the SRQ3 statement itself stays unchanged (scope decision 2026-10-15). | Phase 3 |
 | 6 | `thesis/3_0_Methodology.tex:1108-1113` | Exact analytic attributions "would be strictly better … listed as future work" | Implemented (`src/explainability/exact_shapley.py`, `feature_shapley.py`); the subsection should present it as the method. | Phase 3 |
 | 7 | `README.md:512` | Same "future work" statement as #6 | As #6. | Phase 3 |
 | 8 | SRQ numbering: `README.md:60-66` vs `thesis/1_0_Introduction.tex` / `5_0_Discussion.tex` | The README numbers decision effectiveness SRQ5; the thesis uses SRQ4 = dashboard and SRQ5 = performance against baselines | Not a value error, but the two numberings disagree. Pick one before Chapter 4 cross-references SRQs. | Phase 3 |
@@ -97,3 +97,43 @@ Recommendation: add one line at the top of the log saying entries before 2026-10
 - **`.tex` files (#5, #6, #9–#11) and `DEVELOPMENT_LOG.md`:** untouched, as instructed.
 - **README / docs (#1, #7, #12–#19):** list only.
 
+## Scope decision (2026-10-15): research questions unchanged
+
+The research questions and their wording stay as they are, and no SRQ rewording is proposed anywhere in these notes.
+
+- **Entry #1 (README SRQ3 verdict):** the factual basis is stale (a training-set R² of 0.991 from a retired model; the current surrogate's real-data R² is −0.32 to −4.39). The SRQ itself is not reworded.
+- **Entry #5 (`1_0_Introduction.tex`):** only the framing paragraph after the SRQ3 statement is affected; the SRQ3 statement (lines 364–365) is unchanged.
+- **The "replacement paragraph in CH4_WRITING_NOTES § SRQ3"** that #1 and #5 point to has been removed. Use the "Wording for Methodology and Evaluation" section of the notes instead.
+
+## Claims of retrieval relevance, grounding quality or user-facing benefit in `.tex` (list only)
+
+These sit outside the research-question statements. They claim, or imply, that retrieved precedents are relevant ("comparable"), that retrieval grounds the alert, or that the output helps a user understand, trust, verify or act.
+
+The evaluation here is functionally grounded. It measures retrieval *integrity* (region match, temporal validity, de-duplication), not relevance, and runs no human study. The measured facts each entry is set against are:
+- the production retriever's region match was 0.00 in Hormuz, Panama and Malacca;
+- its top 3 contained 0.33–0.36 duplicates;
+- it was triggered on 0–31% of alert episodes, and never in Panama;
+- every configuration, including the defective one, cleared the 0.55 similarity floor in 100% of episodes;
+- live knowledge-base documents carry no outcome field;
+- the surrogate's out-of-time R² is 0.53, and its R² on the real test windows is negative.
+
+| # | Where | Claim | Measured / evaluation level |
+|---|---|---|---|
+| 29 | `1_0_Introduction.tex:63-72` | Explanations report "which documented historical disruption the current signal profile most closely resembles — each a claim the manager can check independently"; attribution "paired with retrieved historical precedent … can be checked against the record" | Comparability (relevance) of retrieved precedents was not evaluated. The production retriever returned wrong-region documents in 3 of 4 regions. "Can check independently" is a user-facing claim outside the functionally grounded level. |
+| 30 | `1_0_Introduction.tex:317-320` (Contribution) | "every raised alert is attributable … to a retrieved historical precedent that exists independently of the model" | The production retriever was triggered on 0–31% of alert episodes (0% in Panama), so most alerts carried no precedent. Attribution holds for domain and features (exact decomposition). |
+| 31 | `1_0_Introduction.tex:367-370` (paragraph after the SRQ3 statement, not the statement) | "contextual explanation retrieved from comparable historical events … allows a user to see which factors moved a score and how closely the current signal profile resembles a documented precedent" | "Comparable" (relevance) and "allows a user to see" (a user-facing benefit) are outside the evaluation level. Overlaps #5. |
+| 32 | `2_0_Literature_Review.tex:600-602` | "What a manager gains from a retrieved disruption is … the knowledge of what followed — how long the corridor was affected …" | A general case-based-reasoning argument. In this system most retrieved documents are news articles without an outcome field, so the "what followed" benefit is not available from them, and user benefit was not measured. |
+| 33 | `3_0_Methodology.tex:1231-1240` (threshold gating) | Gating "makes the absence of precedent itself informative"; the 0.55 floor means "a triggered alert with weak precedent returns fewer matches" | Every configuration, including the defective one, has a hit ≥ 0.55 in 100% of episodes, so the floor does not filter. The gate runs on the legacy composite (no bonus) and never opens for Panama. |
+| 34 | `3_0_Methodology.tex:1104-1105` | Reporting the surrogate's R² lets "a reader … judge whether a given day's attribution is trustworthy" | The reported R² is the training-set fit (0.983). Out of time it is 0.528; on the real test windows −0.32 to −4.39. The reported number does not indicate attribution reliability. |
+| 35 | `3_0_Methodology.tex:1288-1293` (Analysis view description) | Lists "retrieval relevance" and "retrieval similarity" as evaluated quantities | The dashboard's METRIC 6 measures agent-overlap on synthetic scenarios, not relevance. The thesis evaluation assesses retrieval integrity only (F7). |
+| 36 | `3_0_Methodology.tex:1561-1568` | The breakdown lets "a manager … tell a geopolitically driven risk from a weather-driven one and route the question to the right colleague"; the retrieved precedent "states what happened last time … which converts a score into a judgement" | User-facing benefits, not evaluated (no human study). Precedent outcomes are not in the retrieved documents (see #32). The exact decomposition's attribution itself is verified (E1, E2). |
+| 37 | `3_0_Methodology.tex:1570-1574` | "a manager can see why the system proposes rerouting … can disagree with a rule, and can defend either choice in a review" | A user-facing claim (auditability for a human reviewer). The rule table is transparent by construction; the human benefit was not evaluated. The honest-limit sentence at 1575-1578 is accurate and can stay. |
+| 38 | `3_0_Methodology.tex:1596-1598` (Summary) | "Threshold-gated retrieval supplies precedent, or states that none is close enough to be worth showing" | As #33: the similarity floor is non-selective, so "none close enough" is not what the gate measures. In production it was rarely triggered and returned wrong-region documents. |
+| 39 | `3_0_Methodology.tex:1638-1639` (requirements table, row R5) | "Supplies a documented precedent that can be checked independently, or none at all" | As #38. Integrity defects (region, date, duplicates) are fixed in the evaluation wrapper only; the production retriever is unchanged. |
+| 40 | `3_0_Methodology.tex:220-222`, `287` (R5 rationale; layer table) | "Precedent is what converts a number into a judgement"; "Ground the alert in historical precedent" | Design intent stated as an effect. Grounding quality and relevance are outside the evaluation level; integrity is what was measured. |
+| 41 | `4_0_Evaluation.tex:80-81` | The explainability score "is what allows a user to understand why a disruption was predicted" | User understanding lies outside the functionally grounded level. METRIC 9 measures properties of the attribution (E1–E7, E9). Overlaps #10. |
+| 42 | `4_0_Evaluation.tex:90-91` | Decision effectiveness "captures whether the output enables the user to take clear action, and therefore whether the system is practically useful" | Measured instead as rule-based METRIC 8 on SYNTHETIC scenarios; "enables the user" and "practically useful" were not evaluated. Overlaps #11. |
+
+**Not listed:**
+- `2_0_Literature_Review.tex:542-548` (states an intention and its own qualification) and `1_0_Introduction.tex:515-518` (a caution): both are accurate as written.
+- `2_0_Literature_Review.tex:739` (SRQ mapping table): research-question framing, unchanged by the scope decision.

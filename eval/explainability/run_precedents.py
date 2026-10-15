@@ -1,4 +1,4 @@
-"""Phase 3 — precedent grounding: diagnostics, AER precedents, annotation set, FP evidence.
+"""Phase 3 — retrieval integrity: diagnostics, AER precedents, annotation set, FP evidence.
 
 Implements ``PREREGISTERED_RULES.md`` section B.
 
@@ -9,9 +9,11 @@ Implements ``PREREGISTERED_RULES.md`` section B.
   (``data/knowledge_base/.chromadb_xai``).
 * **AER precedents**: every with-duration AER gets the wrapper's top 3
   (production + backfill) in its ``precedents`` field.
-* **E8 / E5b** rows replace the "pending" rows in ``scorecard.csv``.
+* **E5 (precedent coherence)** rows in ``scorecard.csv``. Retrieval is evaluated for
+  integrity (``rag_diagnostics.csv``); E8 / precision@3 is out of scope.
 * **Annotation set** (``rag_annotation.csv``, blind) and its key
-  (``rag_annotation_key.csv``).
+  (``rag_annotation_key.csv``), kept for future human-grounded evaluation;
+  never overwritten once written.
 * **FP characterisation** (``fp_characterisation.csv``) against the
   production KB and the backfilled KB, with the ``no_coverage`` tag, and an
   exploratory calm-day base rate for the same tags
@@ -204,8 +206,8 @@ def run_diagnostics(asets: dict[str, AlertSet], retrievers: dict) -> tuple[list[
     return rows, wrapper_top
 
 
-def fill_aers_and_e8(asets_by_variant: dict, retriever: PrecedentRetriever) -> list[dict]:
-    """AER precedents (with-duration) and E8 / E5b rows for both variants."""
+def fill_aers_and_e5(asets_by_variant: dict, retriever: PrecedentRetriever) -> list[dict]:
+    """AER precedents (with-duration) and E5 precedent-coherence rows for both variants."""
     rows = []
     for variant, asets in asets_by_variant.items():
         for region, aset in asets.items():
@@ -233,10 +235,6 @@ def fill_aers_and_e8(asets_by_variant: dict, retriever: PrecedentRetriever) -> l
             episode_of = {i: k for k, g in enumerate(aset.episodes) for i in g}
             labels = aset.episode_labels()
             for metric, key, note in (
-                ("E8-diag", "grounded", "DIAGNOSTIC, not E8: share with >= 1 region-matched, "
-                                        "pre-alert precedent >= 0.55. The 0.55 floor is "
-                                        "non-selective (every configuration scores 1.00); E8 is "
-                                        "precision@3 from the author's annotation"),
                 ("E5", "coherent", "top exact agent among the precedents' primary_agents "
                                    "(days with >= 1 precedent)"),
             ):
@@ -251,8 +249,7 @@ def fill_aers_and_e8(asets_by_variant: dict, retriever: PrecedentRetriever) -> l
                         "n_episodes": len(aset.episodes),
                         "n_tp_episodes": sum(1 for lab in labels if lab == "TP"),
                         "n_alert_days": len(per_day), "metric_id": metric,
-                        "metric": ("similarity-floor grounding" if metric == "E8-diag"
-                                   else "top agent agrees with precedents' primary_agents"),
+                        "metric": "top agent agrees with precedents' primary_agents",
                         "method": "exact"}
                 rows.append({**base, "level": "episode", "value": mean, "ci_lo": lo, "ci_hi": hi,
                              "n_days_used": len(day_values), "note": note})
@@ -404,21 +401,21 @@ def main() -> int:
         production.close()
     pd.DataFrame(diag_rows).to_csv(_OUT / "rag_diagnostics.csv", index=False)
 
-    e8_rows = fill_aers_and_e8(asets_by_variant, retrievers["wrapper_backfill"])
+    precedent_rows = fill_aers_and_e5(asets_by_variant, retrievers["wrapper_backfill"])
     scorecard = pd.read_csv(_OUT / "scorecard.csv")
-    pending = scorecard.metric_id.isin(["E8", "E8-diag"]) | (
+    # E8 (precision@3) is out of scope: retrieval is evaluated for integrity
+    # (rag_diagnostics.csv), not relevance. Drop any E8 rows left by earlier runs.
+    stale = scorecard.metric_id.isin(["E8", "E8-diag"]) | (
         (scorecard.metric_id == "E5") & scorecard.metric.str.contains("precedents"))
-    e8_rows += [{"data_origin": path_d.DATA_ORIGIN, "path": "D", "tier": 5, "variant": v,
-                 "region": r, "metric_id": "E8", "metric": "precision@3 (lenient / strict)",
-                 "method": "exact", "level": "episode", "value": np.nan,
-                 "note": "pending the author's annotation (compute_precision_at_3.py)"}
-                for v in VARIANTS for r in path_d.REGIONS]
-    pd.concat([scorecard[~pending], pd.DataFrame(e8_rows)], ignore_index=True).to_csv(
+    pd.concat([scorecard[~stale], pd.DataFrame(precedent_rows)], ignore_index=True).to_csv(
         _OUT / "scorecard.csv", index=False)
 
+    # The blind annotation set is kept for future human-grounded evaluation
+    # (Outlook). Never overwrite an existing file: it may hold annotations.
     blind, key = annotation_set(wrapper_top)
-    blind.to_csv(_OUT / "rag_annotation.csv", index=False)
-    key.to_csv(_OUT / "rag_annotation_key.csv", index=False)
+    if not (_OUT / "rag_annotation.csv").exists():
+        blind.to_csv(_OUT / "rag_annotation.csv", index=False)
+        key.to_csv(_OUT / "rag_annotation_key.csv", index=False)
 
     pd.DataFrame(fp_characterisation(with_duration)).to_csv(_OUT / "fp_characterisation.csv",
                                                             index=False)
@@ -426,7 +423,7 @@ def main() -> int:
         _OUT / "fp_characterisation_base_rate.csv", index=False)
     print(f"wrote rag_diagnostics.csv, rag_annotation.csv ({len(blind)} pairs, "
           f"{key.episode_id.nunique()} episodes), rag_annotation_key.csv, "
-          "fp_characterisation.csv; updated scorecard.csv (E8, E5 precedents) and AER precedents")
+          "fp_characterisation.csv; updated scorecard.csv (E5 precedents) and AER precedents")
     return 0
 
 

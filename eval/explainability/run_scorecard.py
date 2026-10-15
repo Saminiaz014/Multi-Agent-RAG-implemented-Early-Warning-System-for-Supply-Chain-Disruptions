@@ -352,8 +352,8 @@ def scorecard_rows(aset: AlertSet, days: list[dict], surrogates: dict) -> list[d
                 note="not estimable: 0 train-window positives in 3 of 4 regions; label is "
                      "the shipping level-shift statistic")
 
-    # E8, E9 come later.
-    r.add_point("E8", "precedent grounding", "exact", np.nan, note="pending Phase 3")
+    # E9 comes later. (E8, retrieval relevance, is out of scope: retrieval is
+    # evaluated for integrity in rag_diagnostics.csv.)
     r.add_point("E9", "narrative faithfulness", "exact", np.nan, note="pending Phase 6")
     return r.rows
 

@@ -426,50 +426,34 @@ def f7_rag() -> list[Path]:
                "wrapper_backfill": ("Wrapper + 2023-25 backfill", "#0072B2")}
     metrics = {"temporal_valid": "Dated before the alert", "region_match": "Same region",
                "duplicate_rate": "Duplicates in top 3"}
-    fig, axes = plt.subplots(1, 4, figsize=(7.6, 2.8), gridspec_kw={"width_ratios": [1, 1, 1, 1.15]})
+    fig, axes = plt.subplots(1, 3, figsize=(7.4, 2.9))
     xs = np.arange(len(REGIONS))
     lines = []
-    for ax, (metric, title) in zip(axes[:3], metrics.items()):
+    for ax, (metric, title) in zip(axes, metrics.items()):
         for j, (cfg, (label, color)) in enumerate(configs.items()):
             vals = [diag[(diag.config == cfg) & (diag.region == r) & (diag.metric == metric)]
                     .value.iloc[0] for r in REGIONS]
             ax.bar(xs + (j - 1) * 0.26, vals, 0.26, color=color, label=label)
             lines.append(f"{title}, {label}: " + ", ".join(
                 f"{style.REGION_LABELS[r]} {v:.2f}" for r, v in zip(REGIONS, vals)))
-        ax.set_xticks(xs, ["Hormuz", "B-el-M", "Panama", "Malacca"], fontsize=6.3, rotation=30)
+        ax.set_xticks(xs, ["Hormuz", "B-el-M", "Panama", "Malacca"], fontsize=6.5, rotation=30)
         ax.set_ylim(0, 1.05)
         ax.set_title(title, loc="left", fontsize=8)
         ax.grid(axis="x", visible=False)
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=3, bbox_to_anchor=(0.4, 1.07), fontsize=6.5)
-    ax = axes[3]
-    p3 = _OUT / "rag_precision_at_3.csv"
-    if p3.exists():
-        tab = pd.read_csv(p3)
-        tab = tab[(tab.episode_label == "all")]
-        for j, measure in enumerate(("precision@3 (lenient)", "precision@3 (strict)")):
-            rows = tab[tab.measure == measure].set_index("region")
-            order = [r for r in ("all", *REGIONS) if r in rows.index]
-            ax.errorbar(rows.loc[order, "value"], np.arange(len(order)) + j * 0.2,
-                        xerr=[rows.loc[order, "value"] - rows.loc[order, "ci_lo"],
-                              rows.loc[order, "ci_hi"] - rows.loc[order, "value"]],
-                        fmt="o", capsize=2, label=measure)
-        ax.set_yticks(np.arange(len(order)), order, fontsize=6.5)
-        ax.legend(fontsize=5.8)
-        p3_text = "Precision@3 from the author's annotation is shown in the right panel."
-    else:
-        ax.set_axis_off()
-        ax.text(0.5, 0.5, "Precision@3 (E8)\npending the author's\nrelevance annotation\n"
-                "(60 pairs, 20 episodes)", ha="center", va="center", fontsize=8,
-                color=style.INK_MUTED, transform=ax.transAxes)
-        p3_text = ("Precision@3 (E8) is pending the author's annotation of 60 blind (episode, "
-                   "document) pairs; the panel will fill when compute_precision_at_3.py has run.")
-    fig.tight_layout()
+    fig.suptitle("Retrieval integrity: before vs after", x=0.01, y=0.99, ha="left",
+                 fontsize=10, fontweight="bold")
+    fig.legend(handles, labels, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 0.92), fontsize=6.5)
+    fig.tight_layout(rect=(0, 0, 1, 0.84))
     style.add_provenance(fig, "real_eval", "D", "one query per episode (first day)")
-    caption = ("F7 — Precedent retrieval diagnostics, before (production) and after (eval "
-               "wrapper; wrapper + backfill). Every configuration has a hit above the 0.55 "
-               "similarity floor in 100% of episodes, so the floor is not selective. "
-               + p3_text + "\n" + "\n".join(lines) + f"\n{TP_NOTE}.")
+    caption = ("F7 — Retrieval integrity: before vs after. Share of the top-3 retrieved documents "
+               "dated before the alert, from the alert's own region, and duplicated, for the "
+               "production retriever (before) and the evaluation wrapper on the production "
+               "knowledge base and with the 2023-25 backfill (after). Integrity is a property of "
+               "the retrieval mechanism (region, date, de-duplication); the relevance of the "
+               "retrieved documents is not assessed. Every configuration has a hit above the 0.55 "
+               "similarity floor in 100% of episodes, so similarity is not used as evidence.\n"
+               + "\n".join(lines) + f"\n{TP_NOTE}.")
     return style.save(fig, "F7_rag_diagnostics", caption)
 
 
@@ -619,8 +603,6 @@ _HEAT = [  # (column, metric, method, level, mapping to "goodness" in [0, 1], fo
      "episode", lambda v: np.clip(v, 0, 1), "{:.2f}"),
     ("E7 AUC (band width)", "AUC of band_width for FP vs TP episodes", "exact", "episode",
      lambda v: np.clip(2 * (v - 0.5), 0, 1), "{:.2f}"),
-    ("E8 precision@3", "precision@3 (lenient / strict)", "exact", "episode",
-     lambda v: np.clip(v, 0, 1), "{:.2f}"),
     ("E9 faithfulness", "narrative faithfulness (supported claims / claims)", "exact", "episode",
      lambda v: np.clip(v, 0, 1), "{:.2f}"),
 ]
@@ -642,8 +624,7 @@ def f12_scorecard_heatmap() -> list[Path]:
     ax.imshow(np.ma.masked_invalid(good), cmap=cmap, vmin=0, vmax=1, aspect="auto")
     for i in range(len(REGIONS)):
         for j, (*_, fmt) in enumerate(_HEAT):
-            text = "pending" if np.isnan(raw[i, j]) and j == 7 else (
-                "n/a" if np.isnan(raw[i, j]) else fmt.format(raw[i, j]))
+            text = "n/a" if np.isnan(raw[i, j]) else fmt.format(raw[i, j])
             ax.text(j, i, text, ha="center", va="center", fontsize=6.8,
                     color="white" if (not np.isnan(good[i, j]) and good[i, j] > 0.6) else style.INK)
     ax.set_xticks(range(len(_HEAT)), [h[0] for h in _HEAT], rotation=30, ha="right", fontsize=6.8)
@@ -654,11 +635,11 @@ def f12_scorecard_heatmap() -> list[Path]:
     caption = ("F12 — METRIC 9 explainability scorecard, exact attribution, per region "
                "(episode-level values; raw value printed, colour = goodness on a fixed scale: "
                "E1 1 if residual < 1e-9; E2 1 − 2·AUC; E3 (5 − k80)/4; E4 ρ; E5 share; E6 share; "
-               "E7 2·(AUC − 0.5); E8 precision@3; E9 faithfulness). E5 measures how often the "
+               "E7 2·(AUC − 0.5); E9 faithfulness). E5 measures how often the "
                "production surrogate names the exact top agent. E7 is undefined for Malacca "
-               "(no TP episodes). E8 is pending the author's annotation.\n"
+               "(no TP episodes). Retrieval is evaluated separately, for integrity (F7).\n"
                + "\n".join(f"{style.REGION_LABELS[r]}: " + ", ".join(
-                   f"{h[0]} {('pending' if np.isnan(raw[i, j]) else h[5].format(raw[i, j]))}"
+                   f"{h[0]} {('n/a' if np.isnan(raw[i, j]) else h[5].format(raw[i, j]))}"
                    for j, h in enumerate(_HEAT)) for i, r in enumerate(REGIONS))
                + f"\n{TP_NOTE}.")
     return style.save(fig, "F12_scorecard_heatmap", caption)

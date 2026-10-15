@@ -63,7 +63,7 @@ Bullets for the threats paragraph:
 - **No human-subject study.** All explainability measures are functionally grounded. No claim about user understanding, trust or decision quality is made.
 - **Calibration is not estimable.** 3 of 4 regions have zero train-window positives. A score-noise band is reported instead, and it is not a probability.
 - **Synthetic decision labels.** METRIC 8's correct actions are rule-derived from injected scenario windows, not observed decisions.
-- **Single annotator.** Retrieval relevance (E8) is annotated by the author alone, blind to TP/FP.
+- **Evaluation level.** Retrieval is evaluated for integrity (region match, temporal validity, de-duplication), not for the relevance of the retrieved precedents; relevance and human understanding/trust are outside the functionally grounded level (§11.3).
 - **Small n.** 5–8 TP episodes per region; Hormuz has 5. Every triage AUC carries a CI, and interpretation requires ≥ 5 TP and ≥ 5 FP episodes.
 - **Registry vs evaluation agent sets.** The method-comparison tiers include agents the region registry marks passive (geopolitical in Panama, market in Malacca, natural disaster in Bab el-Mandeb). Explanations use the evaluation's agent sets, so their numbers match the CSV.
 - **Knowledge-base coverage.** Before the bounded 2023-25 backfill, 123/123 FP episodes had no knowledge-base documents at all in their windows.
@@ -74,7 +74,7 @@ Bullets for the threats paragraph:
 
 **This replaces the TODO at `4_0_Evaluation.tex:76-85`.**
 
-> Explainability is measured by METRIC 9, a scorecard of nine properties after Nauta et al.'s Co-12 framework~\cite{Nauta.2023}. Each is computed on every alert day and averaged first within each alert episode, then across episodes, with an episode-level bootstrap 95% CI.
+> Explainability is measured by METRIC 9, a scorecard of eight properties (E1–E7, E9) after Nauta et al.'s Co-12 framework~\cite{Nauta.2023}. Each is computed on every alert day and averaged first within each alert episode, then across episodes, with an episode-level bootstrap 95% CI.
 >
 > - **Correctness:** E1 faithfulness (efficiency residual; for surrogates, R² and local error) and E2 deletion/insertion AUC~\cite{Petsiuk.2018}, in which agents are moved to their calm baseline in attribution order.
 > - **Compactness:** E3, the number of agents and features covering 80% of |attribution|.
@@ -82,10 +82,9 @@ Bullets for the threats paragraph:
 > - **Coherence:** E5, agreement of the leading agent across methods.
 > - **Contrastivity:** E6, the share of alerts with a feasible single-agent counterfactual.
 > - **Confidence:** E7, whether the score-noise band separates false from true positive episodes.
-> - **Context:** E8, precision@3 of retrieved precedents, from a blind relevance annotation.
 > - **Narrative faithfulness:** E9, supported claims over claims, checked by a rule-based checker independent of the template.
 >
-> E1–E7 and E9 are *functionally grounded* properties of the attribution. E8 measures *grounding* in external evidence. Decision value is measured separately (METRIC 8). Whether people understand or trust the explanations is out of scope (§Outlook).
+> E1–E7 and E9 are *functionally grounded* properties of the attribution. Retrieval is evaluated separately, for retrieval integrity: region match, temporal validity and de-duplication of the retrieved precedents (Figure F7). Decision value is measured separately (METRIC 8). Whether people understand or trust the explanations is out of scope (§Outlook).
 
 ## 6. §Performance Metrics → Decision Effectiveness [`Abschnitt_Metric_Decision`]
 
@@ -123,7 +122,6 @@ Bullets for the threats paragraph:
     E5 & Surrogate top agent = exact & 0.34 & 0.18 & 0.01 & 0.42 \\
     E6 & Feasible single-agent counterfactual & 0.97 & 0.97 & 1.00 & 0.97 \\
     E7 & AUC of noise band, FP vs TP & 0.38 [0.12, 0.70] & 0.87 [0.66, 1.00] & 0.57 [0.38, 0.73] & n/a \\
-    E8 & Precision@3 (annotation) & \multicolumn{4}{c}{pending} \\
     E9 & Narrative faithfulness & 1.00 & 1.00 & 1.00 & 1.00 \\
     \bottomrule
   \end{tabular}
@@ -146,7 +144,7 @@ Bullets for the threats paragraph:
 
 These belong in this subsection: they are what the explanation exposed.
 
-> **Retrieval.** The production retriever returned precedents from the wrong region in Hormuz, Panama and Malacca (region match 0.00), duplicated one article within the top 3 (duplicate rate 0.33), and was not triggered at all for Panama. A region- and date-filtered, de-duplicated wrapper removes all three defects (Figure F7). The 0.55 similarity floor is passed by every configuration, including the defective one, so similarity is not evidence of relevance; E8 is therefore the annotated precision@3.
+> **Retrieval.** The production retriever returned precedents from the wrong region in Hormuz, Panama and Malacca (region match 0.00), duplicated one article within the top 3 (duplicate rate 0.33), and was not triggered at all for Panama. A region- and date-filtered, de-duplicated wrapper removes all three defects (Figure F7). The 0.55 similarity floor is passed by every configuration, including the defective one, so similarity is not evidence of relevance. Retrieval is therefore reported for retrieval integrity only.
 >
 > **Market saturation.** The market agent's calm-day median is 0.77–0.78, and its score is ≥ 0.95 on 29% of test days (clipped at 1.0 on 25%), calm days included. Measured from its calm level it contributes 12–16% of the attribution on alerts and leads no episode (Figure F15).
 >
@@ -175,7 +173,7 @@ Use the same pattern for:
 | F4 deletion / insertion | `Bild_F4_Deletion` | 1.0 |
 | F5 surrogate honesty | `Bild_F5_Surrogate` | 1.0 |
 | F6 compactness / stability | `Bild_F6_Compactness` | 1.0 |
-| F7 retrieval diagnostics | `Bild_F7_Retrieval` | 1.0 |
+| F7 retrieval integrity: before vs after | `Bild_F7_Retrieval` | 1.0 |
 | F12 scorecard heatmap | `Bild_F12_Scorecard` | 1.0 |
 | F13 Hormuz case | `Bild_F13_Hormuz` | 1.0 |
 | F14 FP drivers | `Bild_F14_Drivers` | 0.9 |
@@ -263,19 +261,21 @@ Report this as a defect found and fixed, not as a significant improvement.
 
 ---
 
-## 11. SRQ3: replacement answer
+## 11. Wording for Methodology and Evaluation
 
-**Superseded:** "Yes, with a stated surrogate caveat" (README SRQ table), resting on a training-set R² of 0.991 from a retired 20-feature model.
+Ready-to-paste paragraphs. The research questions are unchanged (scope decision 2026-10-15); these paragraphs state the evaluation level, not a new answer to any SRQ.
 
-**README Verdict cell:**
-> **Yes, exactly, at the agent level.** The composite is decomposed by exact Shapley values over the agent scores (efficiency residual ≤ 1.1e-16; METRIC 9 E1); feature-level attributions inside each agent are exact as well. The SHAP surrogate is kept only as a comparator: on real data it does not reproduce the score (R² −0.32 to −4.39) and agrees with the exact top driver on 1–42% of alert days.
+### 11.1 Methodology: explainability evaluation design
 
-**Thesis paragraph** (`1_0_Introduction.tex` §SRQ3 framing; `5_0_Discussion.tex` §SRQ3):
-> Signals are translated into interpretable insight by decomposing each alert's risk score exactly. The composite is an explicit function of five agent scores, so its Shapley values~\cite{Shapley.1953} are computed over all coalitions rather than estimated, with each agent measured from its own calm-day level. They sum to the score up to floating-point error. Inside each agent the same decomposition attributes the score to its inputs, keeping the agent's non-linearity inside the game.
->
-> A SHAP explanation of a random-forest surrogate~\cite{Lundberg.2017}, the approach the system originally used, was retained as a comparator. It fitted its own synthetic training year (R² 0.983) but not a held-out part of it (0.528), and on the real test windows it was worse than a constant. Its agent ranking removed score no faster than a random ordering, and it named the same leading agent on 1–42% of alert days.
->
-> The finding is not that SHAP is uninformative. Where the scoring function is known, a post-hoc surrogate adds an approximation error that an exact decomposition does not have, large enough to change which driver a user is shown. The attributions remain associational: they state how the score was computed, not what caused a disruption~\cite{Miller.2019}.
+> The explanations are evaluated at the functionally grounded level of Doshi-Velez and Kim~\cite{DoshiVelez.2017}: their quality is measured through formal properties of the explanation itself, computed against the scoring function and the data, without human participants. The properties follow the Co-12 framework of Nauta et al.~\cite{Nauta.2023}: correctness (faithfulness and deletion/insertion), compactness, consistency and continuity, coherence, contrastivity, confidence, and the faithfulness of the generated narrative to its record. Each is computed on every alert day, averaged within alert episodes and reported with an episode-level bootstrap confidence interval. The retrieval of historical precedents is evaluated at the same level, for its integrity: whether each retrieved document comes from the alert's own region (region match), predates the alert (temporal validity), and is distinct from the other retrieved documents (de-duplication). Integrity is a property of the retrieval mechanism and can be verified against the knowledge base's metadata; it is assessed for the production retriever and for a region- and date-filtered, de-duplicated retrieval wrapper.
+
+### 11.2 Evaluation: opening sentence of the explainability results (§4.x)
+
+> Consistent with the functionally grounded design (Section~\ref{…}), this section reports properties of the explanations themselves — the Co-12 scorecard of the exact attribution against the deployed surrogate, and the retrieval integrity of the precedent layer — rather than their effect on a human user.
+
+### 11.3 Threats to validity: evaluation level
+
+> The evaluation was deliberately conducted at the functionally grounded level~\cite{DoshiVelez.2017}. Two questions therefore lie outside its scope by design. First, whether the retrieved precedents are relevant to the current alert — a judgement about content rather than mechanism — is not assessed; the retrieval layer is evaluated for integrity (region match, temporal validity, de-duplication). Second, whether the explanations improve users' understanding of, or appropriate trust in, the system's alerts can only be established with human participants. Both belong to a human-grounded evaluation, which is described as further work in Section~\ref{…} (Outlook). The results reported here are claims about the faithfulness and structure of the explanations and the integrity of retrieval, and are not to be read as claims about their usefulness to a decision-maker.
 
 ---
 
@@ -298,7 +298,8 @@ Report this as a defect found and fixed, not as a significant improvement.
 - "The surrogate is wrong." It is an approximation of a known function; its error is what was measured.
 - Any METRIC 8 claim without the SYNTHETIC qualifier, or citing the July values (0.866 / 0.490).
 - "Uncertainty / the noise band indicates alert reliability" (E7 CIs span 0.5; F9 null).
-- Any precision@3 or retrieval-relevance claim before the annotation is complete.
+- "Retrieved precedents are relevant" (relevance was not assessed; only retrieval integrity was).
+- "Explanations improve user understanding or trust" (outside the functionally grounded level; no human study).
 
 ## 13. Limitations: agreement cut-off quirks (Phase 4, P2)
 
@@ -312,7 +313,7 @@ The indicator is therefore effectively a count over shipping, geopolitical and n
 
 - **A human-subject study** of understanding and appropriate reliance on the exact explanations: the RAIR/RSR framework~\cite{Schemmer.2023}, cognitive forcing~\cite{Bucinca.2021}, and the Hoffman et al. measures~\cite{Hoffman.2023,Hoffman.2023b}. Trust in automation~\cite{LeeSee.2004} cannot be inferred from functionally grounded metrics~\cite{DoshiVelez.2017}.
 - **Simulated reliance** under assumed operator accuracies was dropped; it would only illustrate a mechanism.
-- **A second annotator for E8**, to report inter-rater agreement; RAG-specific metrics~\cite{Es.2024} could complement precision@3.
+- **Human-grounded relevance evaluation of retrieval.** A blind annotation set is kept in the repository for this: `eval/explainability/rag_annotation.csv` (60 query–document pairs, relevance 0/1/2, TP/FP hidden) with its key `rag_annotation_key.csv`, scored by `eval/explainability/compute_precision_at_3.py` (precision@3, lenient and strict). It was not annotated for this thesis. Two annotators and inter-rater agreement would be needed; RAG-specific metrics~\cite{Es.2024} could complement it.
 - **Region-specific triage rules.** The Panama agreement effect needs more TP episodes before it could be used.
 
 **Supply-chain AI context for the introduction to the chapter:** Baryannis et al.~\cite{Baryannis.2019}.

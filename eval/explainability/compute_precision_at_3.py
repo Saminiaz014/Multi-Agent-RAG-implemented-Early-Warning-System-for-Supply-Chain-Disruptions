@@ -1,4 +1,7 @@
-"""Precision@3 of the precedent wrapper, from the author's relevance annotations.
+"""Precision@3 of the precedent wrapper, from relevance annotations (future work).
+
+Not part of the thesis evaluation: retrieval is evaluated for integrity only.
+Kept, with ``rag_annotation.csv``, for a future human-grounded relevance study.
 
 Reads ``rag_annotation.csv`` (the blind file, with ``relevance`` filled in as
 0 / 1 / 2) and joins ``rag_annotation_key.csv`` for each episode's TP/FP label.
