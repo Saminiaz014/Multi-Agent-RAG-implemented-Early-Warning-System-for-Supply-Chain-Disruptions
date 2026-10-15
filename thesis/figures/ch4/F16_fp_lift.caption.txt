@@ -1,0 +1,11 @@
+F16 — Do false-positive alerts coincide with conflict evidence more than ordinary days do? No. Lift of the share of 8-day windows containing a geopolitical / conflict document, FP-episode windows vs calm-day windows, with 1,000-resample bootstrap 95% CIs; 1.0 = no difference. The pre-registered rule is the primary outcome; the stricter rule was defined after seeing it and run once.
+Pre-registered rule (primary), hormuz: FP 0.82 vs calm 0.85, lift 0.96 [0.80, 1.11]
+Pre-registered rule (primary), bab_el_mandeb: FP 1.00 vs calm 1.00, lift 1.00 [1.00, 1.00]
+Pre-registered rule (primary), panama: FP 0.63 vs calm 0.51, lift 1.23 [0.91, 1.59]
+Pre-registered rule (primary), malacca: FP 0.90 vs calm 0.87, lift 1.03 [0.92, 1.13]
+Pre-registered rule (primary), pooled: FP 0.82 vs calm 0.77, lift 1.06 [0.97, 1.15]
+Stricter rule (EXPLORATORY, post hoc), hormuz: FP 0.53 vs calm 0.54, lift 0.99 [0.69, 1.32]
+Stricter rule (EXPLORATORY, post hoc), bab_el_mandeb: FP 1.00 vs calm 0.97, lift 1.03 [1.01, 1.05]
+Stricter rule (EXPLORATORY, post hoc), panama: FP 0.07 vs calm 0.07, lift 0.93 [0.00, 2.63]
+Stricter rule (EXPLORATORY, post hoc), malacca: FP 0.45 vs calm 0.41, lift 1.09 [0.74, 1.47]
+Stricter rule (EXPLORATORY, post hoc), pooled: FP 0.42 vs calm 0.40, lift 1.07 [0.88, 1.27]

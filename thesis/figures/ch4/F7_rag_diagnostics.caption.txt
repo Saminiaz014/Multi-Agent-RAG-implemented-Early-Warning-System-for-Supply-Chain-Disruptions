@@ -1,0 +1,11 @@
+F7 — Precedent retrieval diagnostics, before (production) and after (eval wrapper; wrapper + backfill). Every configuration has a hit above the 0.55 similarity floor in 100% of episodes, so the floor is not selective. Precision@3 (E8) is pending the author's annotation of 60 blind (episode, document) pairs; the panel will fill when compute_precision_at_3.py has run.
+Dated before the alert, Production retriever: Strait of Hormuz 0.97, Bab el-Mandeb 0.92, Panama Canal 1.00, Strait of Malacca 0.99
+Dated before the alert, Wrapper, production KB: Strait of Hormuz 1.00, Bab el-Mandeb 1.00, Panama Canal 1.00, Strait of Malacca 1.00
+Dated before the alert, Wrapper + 2023-25 backfill: Strait of Hormuz 1.00, Bab el-Mandeb 1.00, Panama Canal 1.00, Strait of Malacca 1.00
+Same region, Production retriever: Strait of Hormuz 0.00, Bab el-Mandeb 0.75, Panama Canal 0.00, Strait of Malacca 0.00
+Same region, Wrapper, production KB: Strait of Hormuz 1.00, Bab el-Mandeb 1.00, Panama Canal 1.00, Strait of Malacca 1.00
+Same region, Wrapper + 2023-25 backfill: Strait of Hormuz 1.00, Bab el-Mandeb 1.00, Panama Canal 1.00, Strait of Malacca 1.00
+Duplicates in top 3, Production retriever: Strait of Hormuz 0.33, Bab el-Mandeb 0.33, Panama Canal 0.36, Strait of Malacca 0.33
+Duplicates in top 3, Wrapper, production KB: Strait of Hormuz 0.00, Bab el-Mandeb 0.00, Panama Canal 0.00, Strait of Malacca 0.00
+Duplicates in top 3, Wrapper + 2023-25 backfill: Strait of Hormuz 0.00, Bab el-Mandeb 0.00, Panama Canal 0.00, Strait of Malacca 0.00
+TP episodes: 5 / 7 / 8 (Hormuz / Bab el-Mandeb / Panama); Malacca none.

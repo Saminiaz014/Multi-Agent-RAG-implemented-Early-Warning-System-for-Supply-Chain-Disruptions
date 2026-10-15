@@ -10,7 +10,9 @@ Reads only existing artefacts — no agent, detection or API call:
 ``backfill_2023_25`` collection of ``data/knowledge_base/.chromadb_xai`` (read
 through a temporary copy).
 
-Writes ``fp_strict_lift.csv``.
+Writes ``fp_strict_lift.csv`` (the stricter rule, unchanged since its single
+run) and ``fp_lift_primary.csv``: the same lift for the PRE-REGISTERED rule
+(production + backfill documents, ``kb_evidence`` definitions), added for F16.
 
 Usage::
 
@@ -116,7 +118,51 @@ def bootstrap_lift(fp: list[np.ndarray], calm: list[np.ndarray],
             float(np.percentile(lifts, 97.5)))
 
 
+def primary_dates(docs: pd.DataFrame, region: str) -> pd.DatetimeIndex:
+    """Dates of documents counting under the PRE-REGISTERED rule (§B; ``kb_evidence``)."""
+    sub = docs[(docs["region"] == region) & docs["is_geo"]]
+    return pd.DatetimeIndex(sub["event_date"].dropna())
+
+
+def lift_table(rule: str, docs: pd.DataFrame, dates_fn, rng) -> list[dict]:
+    rows, pooled = [], {"FP": [], "calm": []}
+    label = ("pre-registered rule (primary)" if rule == "primary"
+             else "EXPLORATORY (post-hoc stricter rule)")
+    kb = "production+backfill" if rule == "primary" else "backfill_2023_25 only"
+    for region in REGIONS:
+        windows = region_windows(region)
+        dates = dates_fn(docs, region)
+        hits = {k: window_hits(v, dates) for k, v in windows.items()}
+        lift, lo, hi = bootstrap_lift([hits["FP"]], [hits["calm"]], rng)
+        rows.append({"data_origin": "real_eval", "rule": rule, "analysis": label, "kb": kb,
+                     "region": region, "n_counting_docs": len(dates),
+                     "n_fp_windows": len(hits["FP"]), "fp_rate": hits["FP"].mean(),
+                     "n_tp_windows": len(hits["TP"]),
+                     "tp_rate": hits["TP"].mean() if len(hits["TP"]) else np.nan,
+                     "n_calm_windows": len(hits["calm"]), "calm_rate": hits["calm"].mean(),
+                     "lift_fp_vs_calm": lift, "ci_lo": lo, "ci_hi": hi})
+        pooled["FP"].append(hits["FP"])
+        pooled["calm"].append(hits["calm"])
+    lift, lo, hi = bootstrap_lift(pooled["FP"], pooled["calm"], rng)
+    rows.append({"data_origin": "real_eval", "rule": rule, "analysis": label, "kb": kb,
+                 "region": "pooled", "n_counting_docs": sum(r["n_counting_docs"] for r in rows),
+                 "n_fp_windows": sum(len(g) for g in pooled["FP"]),
+                 "fp_rate": np.concatenate(pooled["FP"]).mean(),
+                 "n_calm_windows": sum(len(g) for g in pooled["calm"]),
+                 "calm_rate": np.concatenate(pooled["calm"]).mean(),
+                 "lift_fp_vs_calm": lift, "ci_lo": lo, "ci_hi": hi})
+    return rows
+
+
 def main() -> int:
+    from src.explainability.kb_evidence import load_documents as load_all
+
+    LIVE = "live_extracted_context"
+    all_docs = load_all(XAI_DB, [LIVE, BACKFILL], copy=True)
+    pd.DataFrame(lift_table("primary", all_docs, primary_dates,
+                            np.random.default_rng(BOOT_SEED))).to_csv(
+        _OUT / "fp_lift_primary.csv", index=False)
+
     docs = load_documents(XAI_DB, [BACKFILL], copy=True)
     docs["acled_event_type"] = docs.get("acled_event_type", pd.Series(dtype=str)).fillna("")
     rng = np.random.default_rng(BOOT_SEED)

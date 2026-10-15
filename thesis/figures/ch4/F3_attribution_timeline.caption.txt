@@ -1,0 +1,6 @@
+F3 — Attribution timeline over the 2023-08-31 → 2025-08-30 test window. Stacked exact Shapley values per agent (above zero: pushes risk up; below: down, lighter), the alert line relative to the calm composite (red dashed), labelled disruption days (grey) and alert episodes (bars on top: green TP, red FP).
+Strait of Hormuz: alert line at +0.176 above the calm composite 0.380; 39 episodes (5 TP).
+Bab el-Mandeb: alert line at +0.190 above the calm composite 0.379; 17 episodes (7 TP).
+Panama Canal: alert line at +0.142 above the calm composite 0.244; 38 episodes (8 TP).
+Strait of Malacca: alert line at +0.199 above the calm composite 0.314; 49 episodes (0 TP).
+TP episodes: 5 / 7 / 8 (Hormuz / Bab el-Mandeb / Panama); Malacca none.

@@ -1,0 +1,5 @@
+F2 — Alert anatomy. Exact agent Shapley values move the composite from its calm-day value to the alert score (Path D, residual ≤ 1.1e-16); one TP alert per region, Malacca an FP (no TP exists).
+Strait of Hormuz 2025-02-07 (TP): calm composite 0.380, geopolitical +0.201, shipping +0.157, market +0.006, natural_disaster +0.000 → score 0.744 vs threshold 0.555
+Bab el-Mandeb 2024-03-02 (TP): calm composite 0.379, shipping +0.211, geopolitical +0.195, market +0.036, natural_disaster +0.000 → score 0.822 vs threshold 0.568
+Panama Canal 2024-04-11 (TP): calm composite 0.244, shipping +0.209, market +0.040, geopolitical +0.031, news_sentiment +0.008, natural_disaster +0.000 → score 0.531 vs threshold 0.387
+Strait of Malacca 2025-01-13 (FP): calm composite 0.314, geopolitical +0.287, shipping +0.204, market +0.045, natural_disaster +0.000 → score 0.851 vs threshold 0.514

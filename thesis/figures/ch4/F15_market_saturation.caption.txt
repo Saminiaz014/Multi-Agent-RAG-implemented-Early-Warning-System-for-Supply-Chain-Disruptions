@@ -1,0 +1,5 @@
+F15 — Market saturation. Distribution of the market agent's daily score on the test window; dashed line = its calm-day median on the train window. The agent sits at or near its ceiling on about a quarter to a third of days, calm ones included, so measured against its calm level it can add little to an alert; it was never the top driver of an episode. Report only; the agent is unchanged.
+Strait of Hormuz: calm baseline 0.773; test days ≥ 0.95 29.0%; clipped at 1.0 25.4%; mean |φ_market| on alerts 0.043
+Bab el-Mandeb: calm baseline 0.776; test days ≥ 0.95 29.0%; clipped at 1.0 25.4%; mean |φ_market| on alerts 0.044
+Panama Canal: calm baseline 0.776; test days ≥ 0.95 29.0%; clipped at 1.0 25.5%; mean |φ_market| on alerts 0.035
+Strait of Malacca: calm baseline 0.776; test days ≥ 0.95 29.0%; clipped at 1.0 25.4%; mean |φ_market| on alerts 0.038

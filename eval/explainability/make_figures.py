@@ -150,6 +150,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reuse", action="store_true",
                         help="draw from existing CSVs instead of regenerating them")
+    parser.add_argument("--only", default="",
+                        help="comma-separated figure ids to draw, e.g. F2,F13")
     args = parser.parse_args()
     if not args.reuse:
         _run("run_aer")
@@ -160,10 +162,15 @@ def main() -> int:
         _run("run_triage")
         _run("run_metric8")         # Phase 5, synthetic seed 44
         _run("run_narratives")      # Phase 6: AER narratives + E9
-    composition = pd.read_csv(_HERE / "fp_driver_composition.csv")
-    written = figure_f14(composition)
-    for path in written:
-        print(f"wrote {path.relative_to(_ROOT)}")
+    spec = importlib.util.spec_from_file_location("ch4_figures", _HERE / "ch4_figures.py")
+    figures = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(figures)
+    builders = {**figures.ALL,
+                "F14": lambda: figure_f14(pd.read_csv(_HERE / "fp_driver_composition.csv"))}
+    wanted = args.only.split(",") if args.only else sorted(builders, key=lambda k: int(k[1:]))
+    for name in wanted:
+        for path in builders[name]():
+            print(f"wrote {path.relative_to(_ROOT)}")
     return 0
 
 

@@ -1,0 +1,12 @@
+F6 — Compactness and stability. Left/middle: episode-mean number of agents / features needed to cover 80% of the absolute attribution (95% CIs). Right: rank stability of the exact agent attribution when agent scores are perturbed.
+Agents for 80% of |φ|, Exact Shapley: Strait of Hormuz 2.00, Bab el-Mandeb 2.05, Panama Canal 1.65, Strait of Malacca 1.94
+Agents for 80% of |φ|, Surrogate (production): Strait of Hormuz 2.35, Bab el-Mandeb 2.26, Panama Canal 2.59, Strait of Malacca 2.42
+Agents for 80% of |φ|, Surrogate (refit on real): Strait of Hormuz 1.81, Bab el-Mandeb 1.83, Panama Canal 1.07, Strait of Malacca 1.85
+Features for 80% of |φ|, Exact Shapley: Strait of Hormuz 4.62, Bab el-Mandeb 4.49, Panama Canal 3.89, Strait of Malacca 4.27
+Features for 80% of |φ|, Surrogate (production): Strait of Hormuz 6.53, Bab el-Mandeb 6.29, Panama Canal 6.94, Strait of Malacca 6.78
+Features for 80% of |φ|, Surrogate (refit on real): Strait of Hormuz 3.43, Bab el-Mandeb 3.67, Panama Canal 2.50, Strait of Malacca 3.80
+Stability ρ (Strait of Hormuz): σ=0.01: 0.995, σ=0.05: 0.968, σ=0.1: 0.916
+Stability ρ (Bab el-Mandeb): σ=0.01: 0.993, σ=0.05: 0.969, σ=0.1: 0.934
+Stability ρ (Panama Canal): σ=0.01: 0.969, σ=0.05: 0.862, σ=0.1: 0.793
+Stability ρ (Strait of Malacca): σ=0.01: 0.994, σ=0.05: 0.954, σ=0.1: 0.907
+TP episodes: 5 / 7 / 8 (Hormuz / Bab el-Mandeb / Panama); Malacca none.

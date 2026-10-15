@@ -1,0 +1,5 @@
+F10 — Decision value (SYNTHETIC, seed 44). The day-level action rule fed the top agent from the production surrogate on the mismatched seed-42 row (P0-surrogate, what the dashboard did) or from exact Shapley values of the plotted day (P0-exact). The top agents differ on 295/365 and 294/365 days, but the rule consults them on only 7 / 5 days; McNemar p = 1.00 / 0.062. The surrogate never yields 'reroute'. Correct actions are rule-derived from injected scenarios, not observed decisions.
+Macro-F1 (4 actions), P0-surrogate: hand-tuned 0.660, optimized 0.474
+Macro-F1 (4 actions), P0-exact: hand-tuned 0.708, optimized 0.726
+Reroute recall, P0-surrogate: hand-tuned 0.000, optimized 0.000
+Reroute recall, P0-exact: hand-tuned 0.167, optimized 1.000

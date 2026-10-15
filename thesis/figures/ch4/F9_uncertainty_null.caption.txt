@@ -1,0 +1,5 @@
+F9 — Uncertainty vs correctness: a null result. First-day agent dispersion (registered primary P3, hypothesis: higher → false positive) for TP and FP episodes; lines are medians. No region separates the two classes; every CI spans 0.5 and no Holm-adjusted p is below 0.05.
+Strait of Hormuz: AUC 0.59 [0.26, 0.87], Holm p = 0.79
+Bab el-Mandeb: AUC 0.57 [0.29, 0.86], Holm p = 0.67
+Panama Canal: AUC 0.49 [0.22, 0.78], Holm p = 1.00
+TP episodes: 5 / 7 / 8 (Hormuz / Bab el-Mandeb / Panama); Malacca none.

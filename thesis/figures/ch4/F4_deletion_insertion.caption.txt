@@ -1,0 +1,10 @@
+F4 — Deletion (top) and insertion (bottom) curves at agent level: agents are moved to (or restored from) their calm baseline in attribution order. Curves are means over alert days whose score sits ≥ 0.01 above the calm composite; legend AUCs are episode-level means (episode bootstrap 95% CIs below). The refitted surrogate is reported in the numbers only.
+Strait of Hormuz deletion AUC: Exact Shapley 0.152 [0.121, 0.181], Surrogate (production) 0.528 [0.490, 0.576], Surrogate (refit on real) 0.199 [0.168, 0.231], Random order 0.500 [0.500, 0.500]
+Strait of Hormuz insertion AUC: Exact Shapley 0.848 [0.819, 0.879], Surrogate (production) 0.472 [0.424, 0.510], Surrogate (refit on real) 0.801 [0.769, 0.832], Random order 0.500 [0.500, 0.500]
+Bab el-Mandeb deletion AUC: Exact Shapley 0.124 [0.087, 0.157], Surrogate (production) 0.530 [0.475, 0.592], Surrogate (refit on real) 0.335 [0.254, 0.411], Random order 0.500 [0.500, 0.500]
+Bab el-Mandeb insertion AUC: Exact Shapley 0.876 [0.843, 0.913], Surrogate (production) 0.470 [0.408, 0.525], Surrogate (refit on real) 0.665 [0.589, 0.746], Random order 0.500 [0.500, 0.500]
+Panama Canal deletion AUC: Exact Shapley 0.055 [0.014, 0.091], Surrogate (production) 0.590 [0.555, 0.627], Surrogate (refit on real) 0.135 [0.073, 0.199], Random order 0.500 [0.500, 0.500]
+Panama Canal insertion AUC: Exact Shapley 0.945 [0.909, 0.986], Surrogate (production) 0.410 [0.373, 0.445], Surrogate (refit on real) 0.865 [0.801, 0.927], Random order 0.500 [0.500, 0.500]
+Strait of Malacca deletion AUC: Exact Shapley 0.167 [0.140, 0.189], Surrogate (production) 0.488 [0.441, 0.530], Surrogate (refit on real) 0.227 [0.209, 0.243], Random order 0.500 [0.500, 0.500]
+Strait of Malacca insertion AUC: Exact Shapley 0.833 [0.811, 0.860], Surrogate (production) 0.512 [0.470, 0.559], Surrogate (refit on real) 0.773 [0.757, 0.791], Random order 0.500 [0.500, 0.500]
+TP episodes: 5 / 7 / 8 (Hormuz / Bab el-Mandeb / Panama); Malacca none.

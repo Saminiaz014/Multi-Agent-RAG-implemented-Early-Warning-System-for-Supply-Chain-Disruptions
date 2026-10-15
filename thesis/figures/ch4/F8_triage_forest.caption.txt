@@ -1,0 +1,14 @@
+F8 — Explanation-informed triage. Forest plot of the three pre-registered primary indicators (first day of each episode) and the score-only baseline, AUC for separating FP from TP episodes with stratified episode-bootstrap 95% CIs; filled = with the shipping duration branch, hollow = without (circularity control). * = Holm-adjusted p < 0.05 and ≥ 5 TP and ≥ 5 FP episodes. Malacca has no TP episodes and is evaluated separately. Hormuz: small-n (5 TP episodes with duration, 7 without).
+Strait of Hormuz P1 top driver = geopolitical: 0.41 [0.18, 0.66] (Holm p=1.0000)
+Strait of Hormuz P2 agreement (low): 0.34 [0.18, 0.47] (Holm p=1.0000)
+Strait of Hormuz P3 dispersion (high): 0.59 [0.26, 0.87] (Holm p=0.7895)
+Strait of Hormuz S0 score only (baseline): 0.25 [0.05, 0.54] (baseline)
+Bab el-Mandeb P1 top driver = geopolitical: 0.70 [0.55, 0.85] (Holm p=0.1102)
+Bab el-Mandeb P2 agreement (low): 0.42 [0.25, 0.61] (Holm p=0.7869)
+Bab el-Mandeb P3 dispersion (high): 0.57 [0.29, 0.86] (Holm p=0.6691)
+Bab el-Mandeb S0 score only (baseline): 0.37 [0.10, 0.66] (baseline)
+Panama Canal P1 top driver = geopolitical: 0.50 [0.50, 0.50] (Holm p=1.0000)
+Panama Canal P2 agreement (low): 0.89 [0.74, 0.98] (Holm p=0.0002) *
+Panama Canal P3 dispersion (high): 0.49 [0.22, 0.78] (Holm p=1.0000)
+Panama Canal S0 score only (baseline): 0.56 [0.29, 0.82] (baseline)
+TP episodes: 5 / 7 / 8 (Hormuz / Bab el-Mandeb / Panama); Malacca none.
