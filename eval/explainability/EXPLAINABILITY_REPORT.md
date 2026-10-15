@@ -1,12 +1,40 @@
-# Explainability report (XAI-02)
+# Explainability report (XAI-02, final)
 
-Living document. It is updated at the end of every phase, and every number in it is reproducible with:
+Every number in this report is reproducible with:
 
 ```
 python eval/explainability/make_figures.py
 ```
 
-That command regenerates the AERs, the scorecard CSVs and the figures. Branch `xai-02`; baseline `main` @ `b2306ae`.
+That command regenerates the AERs, scorecard, backfill (from cache), precedents, triage, METRIC 8, narratives and all figures. Add `--reuse` to redraw figures only. Branch `xai-02`; baseline `main` @ `b2306ae`.
+
+## Summary (headline findings)
+
+**1. Exact attribution is faithful; the deployed surrogate is not.**
+- Exact agent Shapley values reproduce the composite to ≤ 1.1e-16 and remove the score departure fastest: deletion AUC 0.06–0.17 vs 0.50 random.
+- The production SHAP surrogate has R² −0.32 to −4.39 on the real test windows and ranks agents at chance (0.49–0.59). It names the exact top agent on 1–42% of alert days.
+- A surrogate refitted on real data narrows but does not close the gap (§4).
+
+**2. Explanation was valuable as a diagnostic.** It exposed:
+- the dashboard explaining a different (seed-42) row than it plotted (§9–10);
+- a retriever returning wrong-region, duplicated and post-alert documents behind a non-selective 0.55 similarity floor (§7.3);
+- a market agent saturated at its ceiling on ~30% of days (§4.3);
+- a label that the composite does not track in Hormuz (F13).
+
+**3. Explanation did not yield a trust signal.**
+- Explanation features lose to the score alone in leave-one-region-out triage.
+- The only Holm-surviving effect (Panama agreement, AUC 0.89) reverses in Hormuz (§8).
+- The noise band does not separate TP from FP (E7).
+- FP alerts show no more conflict evidence than calm days (lift 1.07 [0.97, 1.15]; §7.4, §11).
+
+**4. Decision value (SYNTHETIC).**
+- Canonical METRIC 8 (exact driver): hand-tuned 0.937 accuracy / 0.708 macro-F1.
+- The optimized weights fall below the naive baseline (0.578 vs 0.797).
+- The surrogate-driven badge never recommended rerouting (§9).
+
+**5. Narrative.** It is faithful by construction (E9 = 1.00). The claim checker catches 96.9% of single-number corruptions (§10).
+
+**6. Pending:** E8 precision@3 needs the author's annotation of `rag_annotation.csv` (0 of 60 pairs annotated on 2026-10-15).
 
 ---
 
@@ -581,3 +609,110 @@ On an ordinary day (day 70) the counterfactual line reads "Clears if shipping dr
 ### 10.5 Tests
 
 Full suite: **512 passed** (2026-10-15). That covers the Decision View AppTest's no-raw-decimals and forbidden-terms checks with the new card, the narrative and checker tests, and the frozen-score test.
+
+### 10.6 Post-review fixes (2026-10-15)
+
+**Card wording:**
+- "Similar past event (historical analogue)" replaces "Earlier precedent".
+- An infeasible counterfactual now reads "Would need {agent} to fall below its normal level, so not realistic on its own".
+
+**Precedent date filter.** The dashboard's lookup uses the wrapper (region filter, date filter, de-duplication) with the cut-off on the series' **source timestamp** (2025-01-01 + day − 1), **not the display axis**.
+- The display axis is a rolling window ending today.
+- Filtering on it would admit 2026 articles (e.g. the real 2026 Hormuz closure coverage) as "analogues" for synthetic 2025 signals, which the page's own rules forbid.
+- The card's caption states this.
+
+## 11. Phase 7: figures (`thesis/figures/ch4/`, PNG 300 dpi + PDF + `.caption.txt`)
+
+| Figure | Content | Data |
+|---|---|---|
+| F1 | Explanation pipeline schematic; surrogate as comparator | — |
+| F2 | Alert anatomy waterfall: calm composite → exact agent φ → score vs threshold; highest-margin TP per region (Malacca FP) | real_eval, D |
+| F3 | Attribution timeline: stacked exact φ over the test window, alert line, labelled days, TP/FP episodes | real_eval, D |
+| F4 | Deletion and insertion curves (agent level): exact vs production surrogate vs random; episode AUCs in the titles | real_eval, D |
+| F5 | Surrogate honesty: R² on its own synthetic year, out-of-time R² on real data (production vs refit), local error | real_eval / synthetic_seed42 |
+| F6 | Compactness (k80 agents / features) and stability under noise | real_eval, D |
+| F7 | Retrieval diagnostics before/after (temporal validity, region match, duplicates); precision@3 panel **pending annotation** | real_eval |
+| F8 | Triage forest plot: primary indicators + score-only baseline, with/without duration, Holm and minimum-n flags | real_eval |
+| F9 | Uncertainty (agent dispersion) TP vs FP, **null result** | real_eval |
+| F10 | P0-surrogate vs P0-exact: macro-F1 and reroute recall | **SYNTHETIC** (seed 44), C |
+| F12 | Scorecard heatmap, region × E1–E9 (E8 pending) | real_eval |
+| F13 | Hormuz case: shock vs duration branch, max() winner, exact shipping φ | real_eval, D |
+| F14 | Top exact driver of TP vs FP episodes | real_eval, D |
+| F15 | Market saturation: score distribution per region, calm baseline | real_eval |
+| F16 | FP characterisation: lift vs calm days, pre-registered rule (primary) and stricter rule (EXPLORATORY), line at 1.0 | real_eval |
+
+F11 (simulated reliance) was dropped.
+
+**Notes:**
+- **F4 deviation:** curves are shown for exact, the production surrogate and random. The refitted surrogate's per-day order was not persisted, so its AUCs appear in the caption only.
+- **F16 addition:** the pre-registered rule's lift with a bootstrap CI was computed for this figure (`fp_lift_primary.csv`): pooled 1.07 [0.97, 1.15]. It is consistent with the §7.4 shares.
+- **F13 caption** is generated from the data. The duration branch wins on 82/133 labelled days, but shipping's exact φ is no larger on labelled days (0.044) than unlabelled (0.052), and labelled days are alerted less often (16.5% vs 26.6%).
+
+Runtime: 45 s for all figures with `--reuse`.
+
+## 12. Limitations
+
+**Data and labels:**
+- **Label circularity.** The label is the shipping level-shift statistic. Every result was repeated without the duration branch; nothing changed.
+- **Small n.** 5 / 7 / 8 TP episodes (Hormuz has 5). Malacca has none, so it is an FP harness only.
+- **Calibration** is not estimable (0 train positives in 3 regions). The score-noise band is not a probability.
+
+**Scope:**
+- **No human-subject study.** Every explainability metric is functionally grounded.
+- **SYNTHETIC decision evaluation.** METRIC 8 correct actions are rule-derived from injected scenarios.
+
+**Retrieval:**
+- **Single annotator** (the author) for E8, blind to TP/FP. E8 is pending.
+- **Knowledge-base coverage** before the backfill was zero for 2023-25 outside Bab el-Mandeb. The backfill is bounded (15 docs per region-month) and alert-blind, and its permissive pre-registered tag does not discriminate (§7.4).
+
+**Pre-registered rule properties:**
+- **Agreement cut-off quirks** (§8.1): market can never count (its calm q0.90 = 1.0); any non-zero disaster score counts.
+
+**The registry/CSV discrepancy:**
+- The method-comparison tiers (and therefore Path D and every explanation of it) include agents that `src/core/regions.py` marks **passive** for a region: **geopolitical in Panama, market in Malacca, and natural disaster in Bab el-Mandeb**. `scripts/run_method_comparison.py` builds tiers from the data columns present, not from `active_agents()`.
+- Explanations deliberately use the CSV's agent sets so that their numbers match the reported detection results. A registry-faithful composite would drop those three terms from the respective regions' attributions.
+
+**Comparators:**
+- **Surrogate comparators.** The production surrogate is evaluated as deployed (synthetic-trained). The refit is one recipe (the same random forest); other surrogate families were not tried.
+
+## 13. Final METRIC 9 scorecard (with duration; episode means, 95% CIs; TP episodes 5 / 7 / 8)
+
+| ID | Metric | Method | Hormuz | Bab el-Mandeb | Panama | Malacca |
+|---|---|---|---|---|---|---|
+| E1 | Efficiency residual (max) | exact | 5.6e-17 | 5.6e-17 | 1.1e-16 | 8.3e-17 |
+| E1 | Local error \|f−g\| | surrogate (prod) | 0.23 [0.22, 0.24] | 0.23 [0.22, 0.25] | 0.04 [0.04, 0.05] | 0.19 [0.18, 0.20] |
+| E1 | R² on real test window | surrogate (prod) | −0.37 | −4.39 | −1.10 | −0.32 |
+| E2 | Agent deletion AUC ↓ | exact | **0.15** [0.12, 0.18] | **0.12** [0.09, 0.16] | **0.06** [0.01, 0.09] | **0.17** [0.14, 0.19] |
+| E2 | Agent deletion AUC ↓ | surrogate (prod) | 0.53 [0.49, 0.58] | 0.53 [0.48, 0.59] | 0.59 [0.56, 0.63] | 0.49 [0.44, 0.53] |
+| E2 | Agent deletion AUC ↓ | surrogate (refit) | 0.20 [0.17, 0.23] | 0.34 [0.25, 0.41] | 0.13 [0.07, 0.20] | 0.23 [0.21, 0.24] |
+| E3 | k80 agents | exact | 2.00 [1.90, 2.10] | 2.05 [1.93, 2.21] | 1.65 [1.50, 1.79] | 1.94 [1.86, 2.02] |
+| E3 | k80 agents | surrogate (prod) | 2.35 [2.22, 2.50] | 2.26 [2.17, 2.36] | 2.59 [2.46, 2.72] | 2.42 [2.31, 2.53] |
+| E4 | ρ under score noise σ = 0.05 | exact | 0.97 [0.96, 0.98] | 0.97 [0.96, 0.98] | 0.86 [0.84, 0.89] | 0.95 [0.93, 0.97] |
+| E5 | Top agent = exact top | surrogate (prod) | 0.34 [0.23, 0.44] | 0.18 [0.07, 0.32] | 0.01 [0.00, 0.03] | 0.42 [0.31, 0.54] |
+| E5 | Top agent = exact top | surrogate (refit) | 0.84 [0.76, 0.92] | 0.53 [0.38, 0.66] | 0.94 [0.86, 1.00] | 0.91 [0.86, 0.96] |
+| E6 | Feasible single-agent counterfactual | exact | 0.97 [0.94, 0.99] | 0.97 [0.95, 0.99] | 1.00 [1.00, 1.00] | 0.97 [0.94, 0.99] |
+| E7 | AUC of noise band (FP vs TP) | exact | 0.38 [0.12, 0.70] | 0.87 [0.66, 1.00] | 0.57 [0.38, 0.73] | n/a (no TP) |
+| E8 | Precision@3 (annotation) | wrapper | pending | pending | pending | pending |
+| E9 | Narrative faithfulness | template | 1.00 | 1.00 | 1.00 | 1.00 |
+
+The without-duration variant changes no row by more than a few hundredths (`scorecard.csv`, `variant == without_duration`).
+
+## 14. Commits (branch `xai-02`)
+
+| Commit | Content |
+|---|---|
+| `f0191ac` | Context report |
+| `4492b88` | Phase 1 |
+| `fb7159b` / `9de7b4e` | Phase 2 |
+| `ae8c7b7` | Pre-registration (backfill, retrieval, C1) |
+| `d8cdc62` / `ea1e5bb` | Backfill amendments |
+| `2b14011` | Phase 3 |
+| `0c2cfff` / `41c9746` | Exploratory FP rule, E8 relabel |
+| `f89f445` | §C pre-registration |
+| `700d7c3` | Phase 4 |
+| `f0f2253` / `1811dc9` | Phase 5 |
+| `ee16c70` | "Six agents" text fix |
+| `147cc1d` / `12aa383` | Phase 6 |
+| `720ebba` | Post-review fixes |
+| `e42bb14` | Phase 7 |
+| (this commit) | Phase 8 |
