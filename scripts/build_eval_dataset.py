@@ -157,8 +157,16 @@ def _fetch_domain(domain: str, config: dict) -> pd.DataFrame | None:
         return None
 
 
-def build_region(region: str) -> tuple[pd.DataFrame, dict]:
-    """Build one region's merged evaluation frame and its manifest."""
+def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFrame, dict]:
+    """Build one region's merged evaluation frame and its manifest.
+
+    Args:
+        drop_incomplete: Drop days on which any domain is missing, so every
+            method sees the same complete rows (the evaluation's setting).
+            ``False`` keeps every shipping day and leaves a domain NaN outside
+            its source's coverage, for a live series that runs up to the
+            latest shipping day (``scripts/build_live_risk_series.py``).
+    """
     config = load_config_for_region(region)
     frames: dict[str, pd.DataFrame] = {}
     timings: dict[str, float] = {}
@@ -208,7 +216,8 @@ def build_region(region: str) -> tuple[pd.DataFrame, dict]:
         limit_area="inside"
     )
     before = len(merged)
-    merged = merged.dropna(subset=feature_columns, how="any")
+    if drop_incomplete:
+        merged = merged.dropna(subset=feature_columns, how="any")
 
     manifest = {
         "region": region,

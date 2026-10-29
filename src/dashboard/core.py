@@ -92,6 +92,7 @@ _KB_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "disruption_cases.json"
 _LABELS_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "decision_labels.json"
 _EVAL_RESULTS_PATH = _PROJECT_ROOT / "data" / "processed" / "evaluation_results.json"
 _NEWS_BACKUP_PATH = _PROJECT_ROOT / "data" / "knowledge_base" / "live_extracted_backup.json"
+_LIVE_DIR = _PROJECT_ROOT / "data" / "live"
 
 ALL_AGENTS: list[str] = [
     "shipping", "market", "geopolitical",
@@ -435,11 +436,18 @@ def resolve_mode_params(weight_mode: str) -> dict:
     from src.optimization.weight_config import load_optimized_weights, resolve_active_weights
 
     config = load_app_config()
+    params = None
     if weight_mode == "optimized":
         opt = load_optimized_weights(config)
         if opt and opt.get("inter_agent_weights"):
-            return _layout_to_params(opt)
-    return _layout_to_params(resolve_active_weights({**config, "weight_mode": "hand_tuned"}))
+            params = _layout_to_params(opt)
+    if params is None:
+        params = _layout_to_params(resolve_active_weights({**config, "weight_mode": "hand_tuned"}))
+    # The weight layout carries no risk_critical; without this the Critical
+    # band fell back to 0.8 instead of the engine's configured cut-off.
+    for key, value in (config.get("thresholds") or {}).items():
+        params["thresholds"].setdefault(key, float(value))
+    return params
 
 
 @st.cache_resource(show_spinner="Generating train/test splits …")
@@ -508,6 +516,83 @@ TIMELINE_SYNTHETIC_CAPTION = (
     "⚠️ Synthetic evaluation data on a relative timeline — positions are "
     "relative to today, not calendar dates."
 )
+
+
+#: Caption under the real-data charts.
+LIVE_SOURCE_CAPTION = (
+    "Real data: IMF PortWatch transits, FRED market series, GDACS/USGS hazards, "
+    "ACLED conflict events and GDELT news, scored daily by the five agents."
+)
+
+
+def live_series_path(region: str) -> Path:
+    """Where ``scripts/build_live_risk_series.py`` writes ``region``'s series."""
+    return _LIVE_DIR / f"{region}_risk.csv"
+
+
+@st.cache_data(show_spinner="Loading the real risk series …")
+def _read_live(region: str, mtime: float) -> tuple[pd.DataFrame, pd.DataFrame]:
+    risk = pd.read_csv(live_series_path(region), parse_dates=["timestamp"])
+    risk = risk.dropna(subset=["risk_score"]).reset_index(drop=True)
+    for agent in ALL_AGENTS:
+        if agent not in risk.columns:
+            risk[agent] = np.nan          # not run here: absent, never zero
+    risk["is_disruption"] = risk["y_true"].astype(bool)
+    risk["day"] = np.arange(1, len(risk) + 1)
+
+    features_path = _LIVE_DIR / f"{region}.csv"
+    features = pd.DataFrame(index=risk.index)
+    if features_path.exists():
+        raw = pd.read_csv(features_path, parse_dates=["timestamp"])
+        cols = [c for c in raw.columns if "__" in c]
+        features = (raw.set_index("timestamp")[cols]
+                    .reindex(risk["timestamp"]).reset_index(drop=True))
+    return risk, features
+
+
+def load_live_timeseries(region: str) -> tuple[pd.DataFrame, pd.DataFrame] | None:
+    """Real per-day agent scores for ``region`` and the features behind them.
+
+    Returns:
+        ``(ts, features)`` aligned row for row — ``ts`` has one column per
+        agent (NaN where the agent has no data that day), ``timestamp``,
+        ``is_disruption`` and a 1-based ``day``; ``features`` holds the
+        ``domain__feature`` inputs. ``None`` when the series has not been built.
+    """
+    path = live_series_path(region)
+    if not path.exists():
+        return None
+    return _read_live(region, path.stat().st_mtime)
+
+
+def live_top_drivers(ts: pd.DataFrame, features: pd.DataFrame, params: dict,
+                     agents: set[str], day: int, n: int = 3) -> list[dict]:
+    """Drivers of the risk on ``day`` from the real data.
+
+    The agents are ranked by their weighted score that day; for each, the
+    feature named is the one furthest from its own trailing 30-day level
+    (the per-alert explanation's z-score), and ``direction`` says whether it
+    rose or fell.
+    """
+    from src.explainability.alert_explainer import trailing_z
+
+    i = int(day) - 1
+    inter = params["inter_weights"]
+    contrib = {a: float(inter.get(a, 0.0)) * float(ts[a].iloc[i])
+               for a in agents if a in ts.columns and not np.isnan(ts[a].iloc[i])}
+    drivers: list[dict] = []
+    for agent in sorted(contrib, key=contrib.get, reverse=True)[:n]:
+        best: tuple[str, float] | None = None
+        for col in (c for c in features.columns if c.startswith(f"{agent}__")):
+            z = trailing_z(pd.to_numeric(features[col], errors="coerce").to_numpy(dtype=float), i)
+            if np.isfinite(z) and (best is None or abs(z) > abs(best[1])):
+                best = (col.split("__", 1)[1], z)
+        drivers.append({
+            "agent": agent,
+            "feature": best[0] if best else agent,
+            "direction": ("elevated" if best[1] >= 0 else "suppressed") if best else "elevated",
+        })
+    return drivers
 
 
 def relative_day_label(date, today=None, compact: bool = False) -> str:
@@ -598,11 +683,17 @@ def composite_series(ts: pd.DataFrame, params: dict, enabled: set[str]) -> pd.Se
     cols = [a for a in ALL_AGENTS if a in enabled and inter.get(a, 0.0) > 0]
     if not cols:
         return pd.Series(np.zeros(len(ts)))
-    w_total = sum(float(inter[c]) for c in cols)
-    base = np.zeros(len(ts))
-    for c in cols:
-        base += (float(inter[c]) / w_total) * ts[c].to_numpy()
-    agreement = (ts[cols].to_numpy() > 0.5).sum(axis=1)
+    # Renormalise per day over the agents that have a score that day: on the
+    # real series a source can end before the others (NaN after its last day),
+    # which the engine treats as an unavailable agent.
+    vals = ts[cols].to_numpy(dtype=float)
+    weights = np.array([float(inter[c]) for c in cols])
+    present = ~np.isnan(vals)
+    w_total = (present * weights).sum(axis=1)
+    base = np.where(w_total > 0,
+                    np.nansum(vals * weights, axis=1) / np.where(w_total > 0, w_total, 1.0),
+                    0.0)
+    agreement = (np.nan_to_num(vals) > 0.5).sum(axis=1)
     amp = np.where(
         agreement >= 5, float(thr.get("agreement_bonus_5", 1.25)),
         np.where(agreement >= 3, float(thr.get("agreement_bonus_3", 1.15)), 1.0),
@@ -902,7 +993,8 @@ def _compose_narrative(drivers: list[dict], agreement: int, word: str, region_la
     for d in drivers[:3]:
         feat = str(d.get("feature", "")).replace("_", " ")
         agent = str(d.get("agent", "")).replace("_", " ")
-        direction = "elevated" if float(d.get("shap_value", 0.0)) >= 0 else "suppressed"
+        direction = d.get("direction") or (
+            "elevated" if float(d.get("shap_value", 0.0)) >= 0 else "suppressed")
         phrases.append(f"{direction} {feat} ({agent} signals)")
     if not phrases:
         return f"Risk in the {region_label} is currently {word.lower()}."
@@ -1395,8 +1487,11 @@ DASH_CSS = """
   h1 { font-size: 1.35rem !important; }
   h2 { font-size: 1.15rem !important; }
   section[data-testid="stSidebar"] { background: #12161f; border-right: 1px solid #222b38; }
-  div[data-testid="stMainBlockContainer"] { padding: 0.8rem 1.4rem 0.4rem; }
-  header[data-testid="stHeader"] { background: transparent; height: 2rem; }
+  /* Top padding clears Streamlit's header (60px in this version, whatever
+     height is set on it): with less, its full-width toolbar sits over the
+     region buttons and swallows their clicks. */
+  div[data-testid="stMainBlockContainer"] { padding: 3.9rem 1.4rem 0.4rem; }
+  header[data-testid="stHeader"] { background: transparent; }
   .status-pill {
     display:inline-block; padding:4px 14px; border-radius:14px; font-weight:700;
     font-size:.86rem; letter-spacing:.8px; color:#0b0e14;

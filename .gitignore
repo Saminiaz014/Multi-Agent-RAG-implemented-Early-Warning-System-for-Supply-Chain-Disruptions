@@ -52,6 +52,7 @@ thesis/
 
 # Generated evaluation matrices (rebuilt by scripts from the knowledge base)
 data/eval/
+data/live/
 
 # Pre-migration knowledge-base snapshots
 data/knowledge_base/live_extracted_backup.pre_*.json

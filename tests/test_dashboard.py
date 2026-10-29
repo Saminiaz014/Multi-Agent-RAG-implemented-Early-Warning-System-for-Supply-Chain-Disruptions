@@ -177,8 +177,8 @@ def test_decision_view_no_raw_scores():
 
 
 def test_route_selection_sync():
-    """Route selection via the control strip and the status-list buttons both
-    drive the shared session state consumed by the map and status panels."""
+    """Route selection via the map (``?route=``) and the status-list buttons
+    both drive the shared session state consumed by the map and status panels."""
     from streamlit.testing.v1 import AppTest
 
     at = AppTest.from_file(_DECISION_PAGE, default_timeout=900)
@@ -188,8 +188,8 @@ def test_route_selection_sync():
     # Default: first route selected.
     assert at.session_state["selected_route"] == "westbound_tss"
 
-    # Control strip (radio) → session state.
-    at.radio(key="route_radio").set_value("eastbound_tss")
+    # Map click (?route= query param) → session state.
+    at.query_params["route"] = "eastbound_tss"
     at.run()
     assert at.session_state["selected_route"] == "eastbound_tss"
 
