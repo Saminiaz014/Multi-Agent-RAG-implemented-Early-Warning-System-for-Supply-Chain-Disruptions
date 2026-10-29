@@ -718,7 +718,7 @@ class Orchestrator:
         )
 
     def _build_shap_features_row(self, combined: pd.DataFrame) -> pd.DataFrame:
-        """Build a single-row 20-feature DataFrame from current pipeline state.
+        """Build a single-row 17-feature DataFrame from current pipeline state.
 
         Shipping and market features are read from the last row of ``combined``.
         Domain agent features (geopolitical, natural_disaster,

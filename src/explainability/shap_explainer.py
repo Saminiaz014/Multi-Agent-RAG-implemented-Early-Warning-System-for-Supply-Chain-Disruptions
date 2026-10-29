@@ -5,14 +5,14 @@ Two public classes:
 * :class:`ShapExplainer` — low-level wrapper for any fitted sklearn model.
   Kept for backward compatibility with the existing API / RAG layer.
 
-* :class:`SurrogateShapExplainer` — surrogate-based 20-feature explainer for
+* :class:`SurrogateShapExplainer` — surrogate-based 17-feature explainer for
   the full 6-agent pipeline.  A RandomForestRegressor is trained to reproduce
   the pipeline's per-day composite risk scores; a SHAP TreeExplainer then
   produces fast, exact Shapley values with per-feature agent attribution.
 
 Module-level helpers:
 
-* :data:`ALL_FEATURE_NAMES` — ordered list of the 20 canonical features.
+* :data:`ALL_FEATURE_NAMES` — ordered list of the 17 canonical features.
 * :data:`FEATURE_AGENT_MAP` — maps every feature name to its source agent.
 * :func:`build_shap_training_data` — generate (features_df, risk_scores)
   from synthetic 6-agent data for surrogate training.
@@ -33,9 +33,8 @@ logger = logging.getLogger(__name__)
 # Feature registry
 # ---------------------------------------------------------------------------
 
-#: Ordered 20-feature list spanning all 6 agents used by the surrogate.
-#: (The objective specification names "19 features"; the correct enumeration
-#: below yields 20 — 3+3+4+4+3+3.  All downstream code uses this constant.)
+#: Ordered 17-feature list spanning the five detection agents used by the
+#: surrogate (3+3+4+4+3).  All downstream code uses this constant.
 ALL_FEATURE_NAMES: list[str] = [
     # Shipping (3)
     "vessel_count",
@@ -209,7 +208,7 @@ class SurrogateShapExplainer:
     """Random-Forest surrogate + SHAP explainer for the 6-agent risk pipeline.
 
     A :class:`~sklearn.ensemble.RandomForestRegressor` is trained to reproduce
-    the pipeline's per-day composite risk scores from the 20 canonical input
+    the pipeline's per-day composite risk scores from the 17 canonical input
     features.  A SHAP ``TreeExplainer`` is then built on that surrogate,
     providing fast, exact Shapley values with per-feature agent attribution.
 
@@ -315,7 +314,7 @@ class SurrogateShapExplainer:
                 "SurrogateShapExplainer not trained — call train_surrogate() first."
             )
 
-        X = self._align_features(features_row)  # shape (1, 20)
+        X = self._align_features(features_row)  # shape (1, 17)
         raw = self._shap_explainer.shap_values(X)
 
         # RF regressor returns ndarray (n_samples, n_features);
@@ -323,7 +322,7 @@ class SurrogateShapExplainer:
         if isinstance(raw, list):
             shap_arr = np.mean(raw, axis=0)[0]
         else:
-            shap_arr = raw[0]  # shape (20,)
+            shap_arr = raw[0]  # shape (17,)
 
         shap_dict = {
             feat: round(float(shap_arr[i]), 6)
@@ -489,7 +488,7 @@ class SurrogateShapExplainer:
 
     @staticmethod
     def _align_features(df: pd.DataFrame) -> np.ndarray:
-        """Build a (n, 20) float array from a DataFrame.
+        """Build a (n, 17) float array from a DataFrame.
 
         Columns in :data:`ALL_FEATURE_NAMES` that are absent from ``df``
         are filled with 0.0 (used when an agent is disabled).
@@ -512,7 +511,7 @@ def build_shap_training_data(
     """Generate per-day synthetic data for SHAP surrogate training.
 
     Fetches 365-day synthetic frames from all enabled connectors, fits and
-    runs each agent, then returns the 20-column feature matrix and per-day
+    runs each agent, then returns the 17-column feature matrix and per-day
     composite risk scores.  Disabled agents have their columns zeroed.
 
     Args:
@@ -521,7 +520,7 @@ def build_shap_training_data(
 
     Returns:
         ``(features_df, risk_scores)`` where ``features_df`` has shape
-        ``(N, 20)`` and ``risk_scores`` has shape ``(N,)`` in ``[0, 1]``.
+        ``(N, 17)`` and ``risk_scores`` has shape ``(N,)`` in ``[0, 1]``.
     """
     from src.agents.disaster_agent import DisasterAgent
     from src.agents.geopolitical_agent import GeopoliticalAgent
@@ -592,7 +591,7 @@ def build_shap_training_data(
         raise ValueError("build_shap_training_data: no agent produced scored output.")
     n = min(active_lengths)
 
-    # --- Extract 20 feature columns from raw frames ---
+    # --- Extract 17 feature columns from raw frames ---
     # Market agent drops its first row (rolling window), so we take the last n
     # rows of the market raw frame to stay aligned with scored_frames["market"].
     _ship_cols = ["vessel_count", "avg_delay_hours", "congestion_index"]
@@ -689,7 +688,7 @@ def _proxy_risk_scores(
     the output stays in ``[0, 1]``.
 
     Args:
-        features_df: n × 20 feature DataFrame.
+        features_df: n × 17 feature DataFrame.
         weights: Mapping of agent name → inter-agent weight.
 
     Returns:
@@ -761,7 +760,7 @@ def compare_explanations(
     single row.
 
     Args:
-        features_df: n × 20 feature DataFrame (same format as
+        features_df: n × 17 feature DataFrame (same format as
             :func:`build_shap_training_data`).
         risk_engine_ht: :class:`~src.aggregation.risk_engine.RiskEngine`
             initialised with hand-tuned weights.
@@ -877,7 +876,7 @@ def generate_comparison_plot(
       |SHAP| across all features for both weight modes.
 
     Args:
-        features_df: n × 20 feature DataFrame.
+        features_df: n × 17 feature DataFrame.
         save_dir: Output directory (created if absent).
         risk_engine_ht: Optional pre-built hand-tuned
             :class:`~src.aggregation.risk_engine.RiskEngine`.  When ``None``
@@ -1023,7 +1022,7 @@ def compute_faithfulness(
     over all disruption days.
 
     Args:
-        features_df: n × 20 feature DataFrame.
+        features_df: n × 17 feature DataFrame.
         risk_scores: Per-row composite risk scores of shape ``(n,)``.
         ground_truth_disruptions: Boolean mask of shape ``(n,)`` — ``True``
             for confirmed disruption days.

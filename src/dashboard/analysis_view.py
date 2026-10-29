@@ -27,6 +27,7 @@ from src.dashboard.core import (  # noqa: E402
     DASH_CSS,
     RANGE_PRESETS,
     SCENARIOS,
+    TIMELINE_AXIS_NOTE,
     analysis_bundle,
     composite_series,
     compute_timeseries,
@@ -35,6 +36,7 @@ from src.dashboard.core import (  # noqa: E402
     load_eval_results,
     preset_to_range,
     resolve_mode_params,
+    timeline_dates,
 )
 
 _TOTAL_DAYS = 365
@@ -176,8 +178,29 @@ def _section_2_faithfulness(results: dict) -> None:
                          xaxis_title="SHAP value")
         st.plotly_chart(wf, use_container_width=True)
         export_button(wf, f"m2_shap_day_{day}", f"SHAP feature attribution — day {day}",
-                      "Top-10 SHAP values from the 20-feature RandomForest surrogate "
+                      "Top-10 SHAP values from the 17-feature RandomForest surrogate "
                       "(R² > 0.99 vs the live pipeline's composite risk).")
+        _render_alert_explanation(features_df, res["shap_values"], day)
+
+
+def _render_alert_explanation(features_df: pd.DataFrame, shap_values: dict, day: int) -> None:
+    """Per-alert sentences for ``day``: what each driver measures, whether it is
+    high or low, its z-value, and how long and since when it has been so."""
+    from src.explainability.alert_explainer import explain_alert
+
+    t = min(day - 1, len(features_df) - 1)
+    # Same date axis as the Decision view, so a date here matches the chart there.
+    dated = features_df.copy()
+    dated.insert(0, "timestamp", timeline_dates(_TOTAL_DAYS)[: len(dated)])
+    explanation = explain_alert(dated, shap_values, t, region="dashboard")
+
+    st.markdown("**Per-alert explanation — leading drivers**")
+    for sentence in explanation["sentences"]:
+        st.markdown(f"- {sentence}")
+    st.caption(
+        "z compares the day's value with its own 30 preceding days; beyond ±2 it reads "
+        "as high or low. Duration counts back at most 15 days. " + TIMELINE_AXIS_NOTE
+    )
 
 
 def _section_3_diversity(results: dict) -> None:
