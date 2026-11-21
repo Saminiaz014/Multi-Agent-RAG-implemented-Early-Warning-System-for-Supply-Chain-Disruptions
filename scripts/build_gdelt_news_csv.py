@@ -145,7 +145,7 @@ def empty_agg() -> dict:
 def process(blob: bytes) -> dict:
     """Return {region: aggregates} for one day."""
     agg = defaultdict(empty_agg)
-    bad_rows = 0
+    bad_rows = n_rows = 0
     with zipfile.ZipFile(io.BytesIO(blob)) as z:
         with z.open(z.namelist()[0]) as f:
             for line in io.TextIOWrapper(f, encoding="utf-8", errors="replace"):
@@ -153,6 +153,7 @@ def process(blob: bytes) -> dict:
                 if len(p) != N_COLS:
                     bad_rows += 1
                     continue
+                n_rows += 1
                 if p[C_AGEO_TYPE] not in KEEP_GEO_TYPES or not p[C_AGEO_LAT]:
                     continue
                 try:
@@ -178,7 +179,7 @@ def process(blob: bytes) -> dict:
                 a["tone_x_art"] += tone * n_art
                 a["goldstein_sum"] += gold
                 a["n_material_conflict"] += p[C_QUAD] == "4"
-    return {"agg": dict(agg), "bad_rows": bad_rows}
+    return {"agg": dict(agg), "bad_rows": bad_rows, "n_rows": n_rows}
 
 
 def row(day, a):
@@ -220,7 +221,14 @@ def _save_progress(prog: dict, prog_f: Path) -> None:
     """Atomic write: a crash mid-write must not destroy the resume state."""
     tmp = prog_f.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(prog))
-    os.replace(tmp, prog_f)
+    for attempt in range(10):                 # OneDrive can hold the file briefly
+        try:
+            os.replace(tmp, prog_f)
+            return
+        except PermissionError:
+            if attempt == 9:
+                raise
+            time.sleep(0.5 * (attempt + 1))
 
 
 def _fetch_process(day: dt.date):
@@ -235,7 +243,7 @@ def _fetch_process(day: dt.date):
     except Exception as exc:                  # one bad day must never stop the backfill
         return "failed", f"{type(exc).__name__}: {str(exc)[:120]}"
     time.sleep(1)                             # polite to the file server
-    return "ok", {"agg": res["agg"], "bad_rows": res["bad_rows"]}
+    return "ok", {"agg": res["agg"], "bad_rows": res["bad_rows"], "n_rows": res["n_rows"]}
 
 
 def _ingest(prog: dict, prog_f: Path, start: dt.date, end: dt.date,
@@ -272,11 +280,26 @@ def _zero_share(prog: dict, start: dt.date, end: dt.date) -> dict[str, tuple[int
             for reg in BBOXES}
 
 
+#: A day whose export has fewer rows than this fraction of the range's median
+#: is flagged (possible partial file). Flagged days are kept, not dropped.
+SHORT_DAY_FRACTION = 0.2
+
+
+def short_days(prog: dict, start: dt.date, end: dt.date) -> list[str]:
+    """Days whose export file is suspiciously short relative to the median."""
+    counts = {k: v.get("n_rows") for d in _days(start, end)
+              if (k := d.isoformat()) in prog["done"] and (v := prog["done"][k]).get("n_rows") is not None}
+    if not counts:
+        return []
+    median = sorted(counts.values())[len(counts) // 2]
+    return sorted(k for k, n in counts.items() if n < SHORT_DAY_FRACTION * median)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--start", default="2019-01-01")
     ap.add_argument("--end", default=(dt.date.today() - dt.timedelta(days=1)).isoformat())
-    ap.add_argument("--workers", type=int, default=4, help="concurrent downloads")
+    ap.add_argument("--workers", type=int, default=8, help="concurrent downloads")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--zero-check", action="store_true",
                     help="ingest 2019-01-01..2019-03-31 and report the zero-volume share per region")
@@ -314,7 +337,7 @@ def main():
         retry_start = dt.date.fromisoformat(min(failed))
         retry_end = dt.date.fromisoformat(max(failed))
         p2, failed = _ingest(prog, prog_f, retry_start, retry_end, 1)
-        pending = sorted(set(pending) | set(p2))
+        pending = sorted((set(pending) | set(p2)) - set(prog["done"]) - set(prog["missing"]))
 
     # One CSV per region. Every processed day gets a row (0 volume, empty tone if
     # no events). Missing, pending and failed days get NO row: they are listed in
@@ -322,6 +345,9 @@ def main():
     n_cal = (end - start).days + 1
     missing = missing_in_range(prog["missing"], start, end)
     zero = _zero_share(prog, start, end)
+    short = short_days(prog, start, end)
+    bad_total = sum(prog["done"][d.isoformat()].get("bad_rows", 0)
+                    for d in _days(start, end) if d.isoformat() in prog["done"])
     for reg in BBOXES:
         path = OUT / f"{reg}.csv"
         with path.open("w", newline="") as f:
@@ -331,7 +357,8 @@ def main():
                 k = d.isoformat()
                 if k in prog["done"]:
                     w.writerow(row(d, prog["done"][k]["agg"].get(reg, empty_agg())))
-        n_rows = sum(1 for _ in path.open()) - 1
+        with path.open() as f:
+            n_rows = sum(1 for _ in f) - 1
         zeros, n_done = zero[reg]
         manifest = {
             "source": "GDELT 1.0 daily event export (data.gdeltproject.org/events)",
@@ -346,6 +373,9 @@ def main():
             "missing_days": missing, "pending_days": pending, "failed_days": failed,
             # share of calendar days with no row (missing + pending + failed)
             "missing_pct": round(100 * (n_cal - n_rows) / n_cal, 3),
+            # export files < SHORT_DAY_FRACTION x median rows: possible partial files, kept
+            "suspect_short_days": short,
+            "malformed_rows_total": bad_total,
             # zero-volume days are real observations (no corridor events), not missing
             "zero_volume_days": zeros,
             "zero_volume_pct": round(100 * zeros / n_done, 3) if n_done else None,

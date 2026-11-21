@@ -224,3 +224,34 @@ def test_zero_share_counts_zero_volume_days() -> None:
 
 def test_filter_version_is_v2() -> None:
     assert g.FILTER_VERSION == "v2"
+
+
+# ------------------------------------------- review fixes (partial files)
+def test_process_counts_well_formed_rows() -> None:
+    lat, lon = _centre("hormuz")
+    res = g.process(_zip([_line(lat, lon), _line(0.0, 0.0), "too\tshort"]))
+    assert res["n_rows"] == 2 and res["bad_rows"] == 1
+
+
+def test_short_export_days_are_flagged_not_dropped() -> None:
+    done = {f"2019-01-0{i}": {"agg": {}, "n_rows": 1000} for i in range(1, 6)}
+    done["2019-01-03"]["n_rows"] = 50
+    prog = {"done": done, "missing": []}
+    assert g.short_days(prog, dt.date(2019, 1, 1), dt.date(2019, 1, 5)) == ["2019-01-03"]
+    assert "2019-01-03" in prog["done"]
+
+
+def test_save_progress_retries_on_permission_error(monkeypatch, tmp_path) -> None:
+    real = g.os.replace
+    calls = {"n": 0}
+
+    def flaky(a, b):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise PermissionError("locked by OneDrive")
+        return real(a, b)
+    monkeypatch.setattr(g.os, "replace", flaky)
+    monkeypatch.setattr(g.time, "sleep", lambda s: None)
+    prog_f = tmp_path / "_progress.json"
+    g._save_progress({"filter_version": "v2", "done": {}, "missing": []}, prog_f)
+    assert prog_f.exists() and calls["n"] == 3
