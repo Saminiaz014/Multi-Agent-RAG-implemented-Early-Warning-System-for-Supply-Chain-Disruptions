@@ -942,7 +942,7 @@ Decomposing Hormuz's own anomaly score on the test window (2023-08-31 → 2025-0
 
 The code comment defends `max()` over averaging on the grounds that a calm shock detector would dilute an active duration signal. It does prevent dilution — and causes **masking** instead. **This is the actual root cause of Hormuz ≈ 0.50**: not forest training, not the validation gate.
 
-**Secondary cause.** `detect()` receives only the test slice, so the 365-day trailing baseline restarts from scratch. The **first 120 test days have no baseline at all**, and 17 of 133 positives fall inside that blind window.
+**Secondary cause.** `detect()` receives only the test slice, so the 365-day trailing baseline restarts from scratch. The **first 120 test days have no baseline at all**, and 17 of 133 positives fall inside that blind window. *Fixed 2026-11-22 (issue 11):* the comparison now fits each agent on train only and scores it on train + test, keeping the test rows, the same history the baselines get. `eval/diagnostics/split_invariance.py` checks that a day's score no longer depends on where the test window starts.
 
 This decomposition is the finding that turns a negative result into a contribution: the architecture is not merely underperforming, it is underperforming for a located, fixable reason.
 

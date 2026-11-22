@@ -21,7 +21,10 @@ and run, and the composite is the weighted mean of their anomaly scores using
 the project's own weights. Approximating a tier by averaging "the first N
 feature columns" would not measure the agents at all — the first two columns
 of these frames are both shipping features, so a Tier 2 built that way
-contains no market signal despite being labelled as containing one.
+contains no market signal despite being labelled as containing one. Agents
+get the same history as the baselines: fitted on train only, scored on train
+plus test, test rows kept. Scoring the test window alone restarted their
+rolling windows at the split (eval/diagnostics/split_invariance.py).
 
 **Malacca is a false-positive harness, not a detection test.** It has zero
 labelled disruptions across 2019-2026, so AUC is undefined there. What it can
@@ -469,8 +472,42 @@ def _agent_frame(frame: pd.DataFrame, domain: str) -> pd.DataFrame | None:
     return out.rename(columns={c: c.split("__", 1)[1] for c in columns})
 
 
-def _agent_scores(domain: str, config: dict, train, test) -> np.ndarray | None:
-    """Fit one agent on train and return its per-day anomaly score on test."""
+def _history(train: pd.DataFrame, test: pd.DataFrame) -> pd.DataFrame:
+    """The days an agent may read when scoring ``test``: train then test.
+
+    The baselines' ``pd.concat([train, test])``, with any day present in both
+    kept once (scoring train against itself must not double it).
+    """
+    joined = pd.concat([train, test])
+    stamps = pd.to_datetime(joined["timestamp"])
+    return (joined.assign(_ts=stamps).drop_duplicates("_ts", keep="last")
+            .sort_values("_ts", kind="stable").drop(columns="_ts"))
+
+
+def _agent_scores(domain: str, config: dict, train, test,
+                  history: pd.DataFrame | None = None) -> np.ndarray | None:
+    """Fit one agent on train and return its per-day anomaly score on test.
+
+    The agent is fitted on ``train`` only, then scored on ``history`` (by
+    default train followed by test, the same days the baselines read), and
+    only the test-window rows are kept. Scoring the test window on its own
+    restarted every rolling window and trailing baseline at the split: the
+    shipping agent's duration score, a 30-day mean against a lagged 365-day
+    median, was blind for its first ~121 test days. Nothing is refitted on
+    test data.
+
+    MarketAgent still clips its input to the five years before the last
+    history day (``market_agent.py`` recent-baseline filter); with the current
+    split dates that leaves well over its 30-day window before every split.
+
+    Args:
+        history: Overrides the scoring history, e.g. the whole frame when the
+            fitting window and the test window are not adjacent (diagnostics).
+
+    Raises:
+        ValueError: If an overriding ``history`` lacks a test day or runs past
+            the last test day.
+    """
     from src.agents.disaster_agent import DisasterAgent
     from src.agents.geopolitical_agent import GeopoliticalAgent
     from src.agents.market_agent import MarketAgent
@@ -486,11 +523,25 @@ def _agent_scores(domain: str, config: dict, train, test) -> np.ndarray | None:
     test_frame = _agent_frame(test, domain)
     if train_frame is None or test_frame is None:
         return None
+    if history is not None:
+        # Checked before the try below, which would report a bad override as
+        # "agent unavailable"; a test day missing from history would score 0.
+        days = pd.to_datetime(history["timestamp"])
+        wanted = pd.to_datetime(test["timestamp"])
+        missing = wanted[~wanted.isin(days)]
+        if len(missing):
+            raise ValueError(f"history lacks {len(missing)} test days "
+                             f"({missing.min().date()} .. {missing.max().date()})")
+        if days.max() > wanted.max():
+            raise ValueError(f"history runs after the test window "
+                             f"({days.max().date()} > {wanted.max().date()})")
+    history_frame = _agent_frame(_history(train, test) if history is None else history,
+                                 domain)
 
     try:
         agent = classes[domain](config=dict(config.get("agents", {}).get(domain, {})))
         agent.fit(train_frame)
-        scored = agent.detect(agent.preprocess(test_frame))
+        scored = agent.detect(agent.preprocess(history_frame))
         # Align on timestamp: some agents drop rows during preprocessing, and
         # positional assembly would silently shift one agent's scores against
         # another's.
