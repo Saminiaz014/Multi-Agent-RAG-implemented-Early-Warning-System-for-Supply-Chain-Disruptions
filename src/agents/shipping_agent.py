@@ -104,6 +104,11 @@ class ShippingAgent(BaseAgent):
                            absent the location is auto-detected from the data
                            (Shuaiba Port for real CSV mode, Strait of Hormuz
                            for synthetic).
+    level_shift    true    Eq. 1: ``max(shock, duration)``. ``false`` drops
+                           the duration term (:meth:`level_shift_score`) and
+                           restores the pre-f7b87ff aggregation, ``shock``
+                           alone. For the ablation; the fit-time
+                           normalisation from the same commit stays.
     ============== ======= =====================================================
 
     Args:
@@ -125,6 +130,8 @@ class ShippingAgent(BaseAgent):
         self._contamination: float = float(self.config.get("contamination", 0.1))
         self._threshold: float = float(self.config.get("threshold", 0.65))
         self._z_threshold: float = float(self.config.get("z_threshold", 3.0))
+        #: Eq. 1's duration term on (default) or off (pre-f7b87ff aggregation).
+        self._level_shift: bool = bool(self.config.get("level_shift", True))
         # Isolation-Forest vs Z-score blend for the combined anomaly score.
         # Hand-tuned default is 0.70 / 0.30; the optimizer can retune it.
         weights_cfg = self.config.get("weights") or {}
@@ -311,11 +318,14 @@ class ShippingAgent(BaseAgent):
     def detect(self, data: pd.DataFrame) -> pd.DataFrame:  # type: ignore[override]
         """Score each row with Isolation Forest + Z-score fallback.
 
-        The Isolation Forest score is ``-decision_function`` min-max
-        normalised into ``[0, 1]`` (1 = most anomalous). The Z-score
-        fallback takes the maximum absolute scaled value across all active
-        features and clips it at ``z_threshold`` before normalising. The
-        combined score is ``0.7 * iforest + 0.3 * max_abs_z``.
+        The Isolation Forest score is ``-decision_function`` normalised into
+        ``[0, 1]`` against its fit-time p5-p95 range (1 = most anomalous). The
+        Z-score fallback takes the maximum absolute scaled value across all
+        active features and clips it at ``z_threshold`` before normalising.
+        ``shock = 0.7 * iforest + 0.3 * max_abs_z`` (the blend weights are
+        configurable). Eq. 1: the anomaly score is ``max(shock, duration)``,
+        ``duration`` being :meth:`level_shift_score`; with ``level_shift:
+        false`` it is ``shock`` alone, the pre-f7b87ff aggregation.
 
         Args:
             data: Output of :meth:`preprocess` — already standardised.
@@ -354,8 +364,8 @@ class ShippingAgent(BaseAgent):
         # are meant to be true at different times. Averaging lets a calm shock
         # detector drag down an active duration signal through the middle of a
         # disruption, the same dilution the tier ablation showed when
-        # averaging agents together.
-        if "_raw_vessel_count" in data.columns:
+        # averaging agents together. ``level_shift: false`` drops the term.
+        if self._level_shift and "_raw_vessel_count" in data.columns:
             duration = self.level_shift_score(
                 pd.Series(data["_raw_vessel_count"].to_numpy())
             ).to_numpy()

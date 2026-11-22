@@ -30,7 +30,10 @@ config/regions/ on evidence grounds, as the orchestrator honours it) is not
 run and not fused: a tier fuses its enabled agents, with the weights
 renormalised over them, so a tier whose added agent is disabled equals the
 previous tier. ``eval/method_comparison_all_agents.csv`` re-scores every
-tier with every agent enabled, as an appendix sensitivity only.
+tier with every agent enabled, as an appendix sensitivity only, and
+``eval/method_comparison_no_eq1.csv`` re-scores every tier with the shipping
+agent's Eq. 1 duration term off (``agents.shipping.level_shift``), paired
+against the same tier with it on.
 
 **Malacca is a false-positive harness, not a detection test.** It has zero
 labelled disruptions across 2019-2026, so AUC is undefined there. What it can
@@ -129,6 +132,10 @@ _CIRCULARITY: dict[str, str] = {
 #: Tiers 1+ include the shipping agent's level-shift feature, which is the
 #: label's statistic; tiers beyond 1 dilute it with non-shipping agents.
 _TIER_CIRCULARITY = "high"
+#: The same tiers without that feature (Eq. 1 off): the shipping agent then
+#: reads vessel_count and features derived from it against a 30-day rolling
+#: baseline, the "medium" definition above.
+_NO_EQ1_CIRCULARITY = "medium"
 
 
 # --------------------------------------------------------------- utilities
@@ -562,6 +569,19 @@ def _all_enabled(config: dict) -> dict:
     return out
 
 
+def _without_eq1(config: dict) -> dict:
+    """A copy of ``config`` with the shipping agent's Eq. 1 duration term off.
+
+    ``agents.shipping.level_shift: false`` restores the pre-f7b87ff
+    aggregation (the shock score alone); see :class:`ShippingAgent`.
+    """
+    out = copy.deepcopy(config)
+    agents = dict(out.get("agents") or {})
+    agents["shipping"] = {**(agents.get("shipping") or {}), "level_shift": False}
+    out["agents"] = agents
+    return out
+
+
 def _agent_frame(frame: pd.DataFrame, domain: str) -> pd.DataFrame | None:
     """Strip the ``domain__`` prefix so an agent sees the columns it expects."""
     columns = [c for c in frame.columns if c.startswith(f"{domain}__")]
@@ -762,12 +782,20 @@ def _window(test: pd.DataFrame, y: np.ndarray, keep: np.ndarray) -> dict:
 
 
 def _tier_rows(region: str, config: dict, train, test, keep, train_keep,
-               tiers: tuple[int, ...], window: dict, **bootstrap) -> list[dict]:
-    """Scored rows for the given tiers, each with its paired delta vs Tier 1."""
+               tiers: tuple[int, ...], window: dict, *,
+               agent_scores: tuple[dict, dict] | None = None, **bootstrap) -> list[dict]:
+    """Scored rows for the given tiers, each with its paired delta vs Tier 1.
+
+    ``agent_scores`` passes in ``(on_test, on_train)`` already computed, as
+    :func:`_all_agent_scores` returns them; by default they are computed here.
+    """
     y = test["y_true"].astype(int).to_numpy()
     domains = _TIER_ORDER[:max(tiers)]
-    on_test = _all_agent_scores(config, train, test, domains)
-    on_train = _all_agent_scores(config, train, train, domains)
+    if agent_scores is None:
+        on_test = _all_agent_scores(config, train, test, domains)
+        on_train = _all_agent_scores(config, train, train, domains)
+    else:
+        on_test, on_train = agent_scores
     tier1, _ = _compose(1, on_test, config)
     evaluable = len(np.unique(y[keep])) > 1
     rows = []
@@ -903,6 +931,60 @@ def all_agents_sensitivity(region: str, frame: pd.DataFrame, manifest: dict,
              "agents_forced_on": forced(row["method"])} for row in rows]
 
 
+#: ``eq1`` of the appendix rows with Eq. 1's duration term off.
+_NO_EQ1 = "Eq. 1 duration term off (ablation)"
+
+
+def no_eq1_ablation(region: str, frame: pd.DataFrame, manifest: dict, config: dict,
+                    **bootstrap) -> list[dict]:
+    """Every tier with Eq. 1's duration term off, paired against it on.
+
+    Only the shipping agent is refitted without the term (:func:`_without_eq1`);
+    the other agents are scored once with the main config and their scores
+    reused (they do not read the shipping config). Each row carries the tier's metrics with the term off
+    (its ``delta_auc`` is against Tier 1 of the same run, as in the main
+    table), ``auc_with_eq1`` (the main table's AUC for that tier) and
+    ``eq1_delta_auc``: the paired AUC(without) - AUC(with) on the same
+    resampled blocks. Appendix only; the main table keeps the term on.
+
+    Raises:
+        ValueError: If ``config`` already has the term off: the pairing would
+            compare off against off, and the main table would not be Eq. 1.
+    """
+    if not ((config.get("agents") or {}).get("shipping") or {}).get("level_shift", True):
+        raise ValueError(f"{region}: agents.shipping.level_shift is false in the region "
+                         "config; the main results and this ablation need it on.")
+    train, test, keep, train_keep, y, window = _main_split(frame, manifest)
+    tiers = tuple(range(1, len(_TIER_ORDER) + 1))
+    on_test = _all_agent_scores(config, train, test)
+    on_train = _all_agent_scores(config, train, train)
+    off = _without_eq1(config)
+    off_test = {**on_test, "shipping": _agent_scores("shipping", off, train, test)}
+    off_train = {**on_train, "shipping": _agent_scores("shipping", off, train, train)}
+    print(f"\n[{region}] {_NO_EQ1}")
+    rows = _tier_rows(region, off, train, test, keep, train_keep, tiers, window,
+                      agent_scores=(off_test, off_train), **bootstrap)
+    evaluable = len(np.unique(y[keep])) > 1
+    out = []
+    for row in rows:
+        tier = int(row["method"].split()[-1])
+        with_eq1, _ = _compose(tier, on_test, config)
+        without, _ = _compose(tier, off_test, off)
+        paired: dict = {}
+        if evaluable and with_eq1 is not None and without is not None:
+            d = _delta(y, without, with_eq1, keep=keep, **bootstrap)
+            paired = {"auc_with_eq1": float(roc_auc_score(y[keep], np.nan_to_num(with_eq1[keep]))),
+                      "eq1_delta_auc": d["delta_auc"],
+                      "eq1_delta_auc_ci_low": d["delta_auc_ci_low"],
+                      "eq1_delta_auc_ci_high": d["delta_auc_ci_high"],
+                      "eq1_delta_valid": d["delta_valid"]}
+            print(f"   Tier {tier} without - with Eq. 1: {d['delta_auc']:+.3f} "
+                  f"[{d['delta_auc_ci_low']:+.3f}, {d['delta_auc_ci_high']:+.3f}]")
+        out.append({**row, "circularity": _NO_EQ1_CIRCULARITY,
+                    "alert_rule": _THRESHOLD_RULE, "eq1": _NO_EQ1, **paired})
+    return out
+
+
 #: Tiers re-scored in the split-date sensitivity table.
 _SENSITIVITY_TIERS: tuple[int, ...] = (1, 4)
 
@@ -941,12 +1023,14 @@ def main() -> int:
     rows: list[dict] = []
     sensitivity: list[dict] = []
     all_agents: list[dict] = []
+    no_eq1: list[dict] = []
     for region in regions:
         frame, manifest = _load(region)
         config = load_config_for_region(region)
         rows += run_region(region, frame, manifest, config)
         sensitivity += split_sensitivity(region, frame, manifest, config)
         all_agents += all_agents_sensitivity(region, frame, manifest, config)
+        no_eq1 += no_eq1_ablation(region, frame, manifest, config)
 
     results = pd.DataFrame(rows)
     results.to_csv(_OUT / "method_comparison_results.csv", index=False)
@@ -958,6 +1042,10 @@ def main() -> int:
     every.to_csv(_OUT / "method_comparison_all_agents.csv", index=False)
     print(f"Wrote {_OUT / 'method_comparison_all_agents.csv'} ({len(every)} rows; "
           "appendix sensitivity, not the main result)")
+    ablation = pd.DataFrame(no_eq1)
+    ablation.to_csv(_OUT / "method_comparison_no_eq1.csv", index=False)
+    print(f"Wrote {_OUT / 'method_comparison_no_eq1.csv'} ({len(ablation)} rows; "
+          "Eq. 1 ablation, not the main result)")
     return 0
 
 
