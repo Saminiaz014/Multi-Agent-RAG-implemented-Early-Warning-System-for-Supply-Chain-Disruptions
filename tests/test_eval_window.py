@@ -59,6 +59,26 @@ def test_split_warns_when_the_frame_ends_before_end_date(caplog) -> None:
     assert "end_date" in caplog.text
 
 
+def test_bootstrap_settings_come_from_settings() -> None:
+    from src.evaluation.window import bootstrap_config
+    assert bootstrap_config() == {"block": 30, "n_resamples": 1000, "ci": 0.95, "seed": 42}
+
+
+def test_evaluate_adds_paired_block_bootstrap_cis() -> None:
+    import numpy as np
+    rng = np.random.default_rng(0)
+    y = ((np.arange(600) // 60) % 3 == 0).astype(int)
+    test_scores = y * 0.8 + rng.normal(0, 0.5, 600)
+    train_scores = rng.normal(0, 0.5, 400)
+    out = rmc._evaluate(y, test_scores, train_scores, n_resamples=200)
+    assert out["auc_ci_low"] <= out["auc"] <= out["auc_ci_high"]
+    assert out["f1_ci_low"] <= out["f1_ci_high"]
+    assert out["alert_rate_ci_low"] <= out["alert_rate"] <= out["alert_rate_ci_high"]
+    assert out["bootstrap_valid"] == 200
+    again = rmc._evaluate(y, test_scores + 1e-9, train_scores, n_resamples=200)
+    assert again["auc_ci_low"] == out["auc_ci_low"]        # same resamples: paired
+
+
 def test_real_surrogate_uses_the_same_split() -> None:
     from src.explainability.real_surrogate import temporal_split
     frame = _frame("2019-01-01", "2026-01-31")

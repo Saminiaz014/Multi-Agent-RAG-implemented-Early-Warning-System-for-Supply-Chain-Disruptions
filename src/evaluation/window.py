@@ -23,6 +23,13 @@ def eval_window() -> dict[str, pd.Timestamp]:
             "end_date": pd.Timestamp(block["end_date"])}
 
 
+def bootstrap_config() -> dict:
+    """Keyword arguments for :func:`~src.evaluation.block_bootstrap.block_bootstrap_ci`."""
+    block = load_base_config()["evaluation"]["bootstrap"]
+    return {"block": int(block["block_days"]), "n_resamples": int(block["n_resamples"]),
+            "ci": float(block["ci"]), "seed": int(block["seed"])}
+
+
 def split_by_date(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Train before ``split_date``; test from it through ``end_date``.
 

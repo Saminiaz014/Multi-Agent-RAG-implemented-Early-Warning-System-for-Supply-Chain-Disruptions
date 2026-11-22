@@ -21,6 +21,8 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 _ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 _EVAL = _ROOT / "eval"
 _G_METHOD = _EVAL / "graphs_method_comparison"
 _G_TIER = _EVAL / "graphs_ablation_tiers"
@@ -28,6 +30,66 @@ _G_TIER = _EVAL / "graphs_ablation_tiers"
 
 def _load() -> pd.DataFrame:
     return pd.read_csv(_EVAL / "method_comparison_results.csv")
+
+
+def _has_ci(results: pd.DataFrame) -> bool:
+    return {"auc_ci_low", "auc_ci_high"} <= set(results.columns)
+
+
+def _ci_err(rows: pd.DataFrame) -> np.ndarray | None:
+    """Asymmetric AUC error bars (2 x n) from the CI columns, or None."""
+    if not _has_ci(rows):
+        return None
+    low = (rows["auc"] - rows["auc_ci_low"]).clip(lower=0).fillna(0).to_numpy()
+    high = (rows["auc_ci_high"] - rows["auc"]).clip(lower=0).fillna(0).to_numpy()
+    return np.vstack([low, high])
+
+
+def _auc_cell(row: pd.Series) -> str:
+    if pd.notna(row.get("auc_ci_low")) and pd.notna(row.get("auc_ci_high")):
+        return f"{row['auc']:.3f} [{row['auc_ci_low']:.3f}, {row['auc_ci_high']:.3f}]"
+    return f"{row['auc']:.3f}"
+
+
+#: Reference rows rather than methods. The oracle reads yesterday's label and
+#: the controls are constants or noise, so none is a "best baseline" a tier
+#: can be judged against.
+_NOT_METHODS = ("oracle", "control")
+
+
+def _real_baselines(rows: pd.DataFrame) -> pd.DataFrame:
+    """Baseline rows that are detection methods: no oracle, no controls."""
+    return rows[(rows["family"] == "baseline") & ~rows["kind"].isin(_NOT_METHODS)]
+
+
+def _bootstrap_settings() -> dict | None:
+    """settings.yaml ``evaluation.bootstrap``, or None if it cannot be read."""
+    try:
+        from src.evaluation.window import bootstrap_config
+        return bootstrap_config()
+    except (ImportError, KeyError, FileNotFoundError):
+        return None
+
+
+def _ci_pct() -> str:
+    cfg = _bootstrap_settings()
+    return f"{cfg['ci']:.0%}" if cfg else "95%"
+
+
+def _separation(a: pd.Series, b: pd.Series) -> str:
+    """How two methods' AUC intervals relate.
+
+    Non-overlap shows a clear difference. Overlap does not show the two are
+    the same: with paired resamples the interval of the *difference* can be
+    much narrower than either marginal one.
+    """
+    keys = ("auc_ci_low", "auc_ci_high")
+    if not all(pd.notna(r.get(k)) for r in (a, b) for k in keys):
+        return ""
+    apart = a["auc_ci_low"] > b["auc_ci_high"] or b["auc_ci_low"] > a["auc_ci_high"]
+    return (" The intervals do not overlap: a clear difference." if apart else
+            " The intervals overlap, which on its own is inconclusive: it neither "
+            "shows nor rules out a difference.")
 
 
 def graph_method_auc(results: pd.DataFrame) -> None:
@@ -40,16 +102,20 @@ def graph_method_auc(results: pd.DataFrame) -> None:
     width = 0.8 / len(regions)
     x = np.arange(len(methods))
     for i, region in enumerate(regions):
-        values = [
-            scored[(scored.region == region) & (scored.method == m)]["auc"].mean()
-            for m in methods
-        ]
-        ax.bar(x + i * width, values, width, label=region, alpha=0.85)
+        picked = [scored[(scored.region == region) & (scored.method == m)].head(1)
+                  for m in methods]
+        values = [p["auc"].iloc[0] if len(p) else np.nan for p in picked]
+        err = None
+        if _has_ci(scored):
+            err = np.hstack([_ci_err(p) if len(p) else np.zeros((2, 1)) for p in picked])
+        ax.bar(x + i * width, values, width, label=region, alpha=0.85,
+               yerr=err, capsize=2, error_kw={"linewidth": 0.8})
 
     ax.axhline(0.5, color="black", linestyle="--", linewidth=1)
     ax.text(len(methods) - 0.5, 0.51, "chance", fontsize=9, ha="right")
     ax.set_ylabel("AUC", fontweight="bold")
-    ax.set_title("Method comparison: AUC on held-out window (dashed = chance)",
+    ax.set_title("Method comparison: AUC on held-out window (dashed = chance"
+                 + (f"; bars = {_ci_pct()} block-bootstrap CI)" if _has_ci(scored) else ")"),
                  fontweight="bold")
     ax.set_xticks(x + 0.4 - width / 2)
     ax.set_xticklabels(methods, rotation=40, ha="right", fontsize=9)
@@ -86,19 +152,23 @@ def graph_alert_rate(results: pd.DataFrame) -> None:
 
 
 def graph_tiers(results: pd.DataFrame) -> None:
-    """Tier progression per region, against the best baseline for that region."""
+    """Tier progression per region, against the best real baseline there."""
     tiers = results[results.family == "tier"].dropna(subset=["auc"])
-    baselines = results[results.family == "baseline"].dropna(subset=["auc"])
+    baselines = _real_baselines(results.dropna(subset=["auc"]))
 
     for region in sorted(tiers["region"].unique()):
         region_tiers = tiers[tiers.region == region].sort_values("method")
         best = baselines[baselines.region == region]["auc"].max()
 
         fig, ax = plt.subplots(figsize=(9, 6))
-        ax.plot(range(len(region_tiers)), region_tiers["auc"], marker="o",
-                linewidth=2.5, markersize=9, color="#e53935", label="multi-agent tier")
-        ax.axhline(best, color="#42a5f5", linestyle="-", linewidth=2,
-                   label=f"best baseline ({best:.3f})")
+        ax.errorbar(range(len(region_tiers)), region_tiers["auc"],
+                    yerr=_ci_err(region_tiers), marker="o", linewidth=2.5,
+                    markersize=9, capsize=5, color="#e53935",
+                    label="multi-agent tier"
+                    + (f" ({_ci_pct()} block-bootstrap CI)" if _has_ci(region_tiers) else ""))
+        if pd.notna(best):
+            ax.axhline(best, color="#42a5f5", linestyle="-", linewidth=2,
+                       label=f"best real baseline ({best:.3f}; no oracle or controls)")
         ax.axhline(0.5, color="black", linestyle="--", linewidth=1, label="chance")
 
         ax.set_xticks(range(len(region_tiers)))
@@ -130,7 +200,8 @@ def graph_region_rankings(results: pd.DataFrame) -> None:
         colours = [_CIRC_COLOUR.get(c, "#90a4ae") for c in rows["circularity"]]
 
         fig, ax = plt.subplots(figsize=(11, 7))
-        ax.barh(range(len(rows)), rows["auc"], color=colours, alpha=0.9)
+        ax.barh(range(len(rows)), rows["auc"], color=colours, alpha=0.9,
+                xerr=_ci_err(rows), capsize=2, error_kw={"linewidth": 0.8})
         ax.set_yticks(range(len(rows)))
         ax.set_yticklabels(rows["method"], fontsize=9)
         ax.axvline(0.5, color="black", linestyle="--", linewidth=1)
@@ -141,8 +212,9 @@ def graph_region_rankings(results: pd.DataFrame) -> None:
             "colour = circularity with the label, not quality",
             fontweight="bold",
         )
-        for i, value in enumerate(rows["auc"]):
-            ax.text(value + 0.01, i, f"{value:.3f}", va="center", fontsize=8)
+        right = rows["auc_ci_high"].fillna(rows["auc"]) if _has_ci(rows) else rows["auc"]
+        for i, (value, edge) in enumerate(zip(rows["auc"], right)):
+            ax.text(max(value, edge) + 0.01, i, f"{value:.3f}", va="center", fontsize=8)
         handles = [plt.Rectangle((0, 0), 1, 1, color=_CIRC_COLOUR[k])
                    for k in ("high", "medium", "low", "n/a")]
         ax.legend(handles, ["high circularity", "medium", "low", "control/oracle"],
@@ -214,11 +286,33 @@ def graph_f1_fpr(results: pd.DataFrame) -> None:
     plt.close(fig)
 
 
+def _ci_note(results: pd.DataFrame) -> str:
+    cfg = _bootstrap_settings()
+    how = (f"{cfg['block']}-day blocks, {cfg['n_resamples']:,} resamples" if cfg
+           else "settings.yaml `evaluation.bootstrap`")
+    valid = ""
+    scored = results.dropna(subset=["auc"])
+    if cfg and "bootstrap_valid" in scored.columns and not scored.empty:
+        valid = (" AUC and F1 intervals use only resamples that contain both "
+                 f"classes: at least {int(scored['bootstrap_valid'].min()):,} of "
+                 f"{cfg['n_resamples']:,} for every scored method.")
+    return (
+        f"- **Intervals are {_ci_pct()} moving-block bootstrap CIs** ({how}) on "
+        "the test window, with the training threshold held fixed. Every method "
+        "in a region gets the same resamples, so intervals are paired. "
+        "Non-overlapping intervals show a clear difference; overlapping ones "
+        "are inconclusive on their own." + valid + " They cover test-sample "
+        "uncertainty only, not the choice of split or label, and they are "
+        "conditional on the few disruption episodes in each test window, so "
+        "they do not measure skill on a new kind of disruption.\n"
+    )
+
+
 def write_report(results: pd.DataFrame) -> None:
     """Report the measured findings, including the unflattering ones."""
     scored = results.dropna(subset=["auc"])
     tiers = scored[scored.family == "tier"]
-    baselines = scored[scored.family == "baseline"]
+    baselines = _real_baselines(scored)
     lines: list[str] = []
 
     lines.append("# Method comparison and agent ablation\n")
@@ -240,20 +334,22 @@ def write_report(results: pd.DataFrame) -> None:
         best_baseline = baselines[baselines.region == region].nlargest(1, "auc")
         best_tier = tiers[tiers.region == region].nlargest(1, "auc")
         lines.append(f"\n### {region}\n")
-        lines.append("| method | kind | AUC | F1 | alert rate |")
+        auc_head = f"AUC [{_ci_pct()} CI]" if _has_ci(results) else "AUC"
+        lines.append(f"| method | kind | {auc_head} | F1 | alert rate |")
         lines.append("|---|---|---|---|---|")
         for _, row in region_rows.iterrows():
             lines.append(
-                f"| {row['method']} | {row['kind']} | {row['auc']:.3f} | "
+                f"| {row['method']} | {row['kind']} | {_auc_cell(row)} | "
                 f"{row['f1']:.3f} | {row['alert_rate']:.2f} |"
             )
         if not best_baseline.empty and not best_tier.empty:
-            delta = best_tier.iloc[0]["auc"] - best_baseline.iloc[0]["auc"]
+            bb, bt = best_baseline.iloc[0], best_tier.iloc[0]
+            delta = bt["auc"] - bb["auc"]
             lines.append(
-                f"\nBest baseline {best_baseline.iloc[0]['method']} "
-                f"({best_baseline.iloc[0]['auc']:.3f}) vs best tier "
-                f"{best_tier.iloc[0]['method']} ({best_tier.iloc[0]['auc']:.3f}): "
-                f"**{delta:+.3f}**\n"
+                f"\nBest baseline {bb['method']} ({_auc_cell(bb)}) vs best tier "
+                f"{bt['method']} ({_auc_cell(bt)}): **{delta:+.3f}**."
+                f"{_separation(bb, bt)} The oracle and the controls are reference "
+                "rows, not candidates for best baseline.\n"
             )
 
     lines.append("\n## What the numbers show\n")
@@ -262,6 +358,7 @@ def write_report(results: pd.DataFrame) -> None:
     lines.append("\n### Does adding agents improve AUC?\n")
     peaks: list[str] = []
     tier3_drops: list[bool] = []
+    steps = apart = 0
     for region in sorted(tiers["region"].unique()):
         series = tiers[tiers.region == region].sort_values("method")
         values = series["auc"].tolist()
@@ -270,31 +367,53 @@ def write_report(results: pd.DataFrame) -> None:
         peaks.append(peak)
         if len(values) >= 3:
             tier3_drops.append(values[2] < values[1])
+        if _has_ci(series):
+            for (_, a), (_, b) in zip(series.iloc[:-1].iterrows(), series.iloc[1:].iterrows()):
+                steps += 1
+                apart += "do not overlap" in _separation(a, b)
         lines.append(
             f"- **{region}**: " + " -> ".join(f"{v:.3f}" for v in values)
             + f"  (best: {peak})"
         )
+    hedge = (f" These are point estimates: consecutive tiers' intervals are "
+             f"clearly apart in {apart} of {steps} steps, and overlap alone is "
+             "inconclusive." if steps else "")
     if peaks and all(p in ("Tier 1", "Tier 2") for p in peaks):
         lines.append(
             "\nIn every region the peak is Tier 1 or Tier 2"
             + (", and adding the geopolitical agent at Tier 3 lowers AUC each "
                "time" if tier3_drops and all(tier3_drops) else "")
-            + ". This does not support the claim that each agent adds value.\n"
+            + "." + hedge + " This does not support the claim that each agent "
+            "adds value.\n"
         )
     else:
         lines.append(
             f"\nPeaks by region: {', '.join(peaks)}. The tier progression is "
-            "not uniform across regions.\n"
+            "not uniform across regions." + hedge + "\n"
         )
 
     # Sub-chance tiers.
     below = tiers[tiers.auc < 0.5]
+    if _has_ci(results):
+        # Only an interval wholly below 0.5 rules out chance.
+        chance = below[~(below["auc_ci_high"] < 0.5)]
+        below = below[below["auc_ci_high"] < 0.5]
+        if not chance.empty:
+            lines.append("\n### Tiers scoring below 0.5\n")
+            lines.append(
+                "Below 0.5 but indistinguishable from chance (the interval "
+                "includes 0.5): "
+                + ", ".join(f"{r['region']} {r['method']} ({_auc_cell(r)})"
+                            for _, r in chance.iterrows()) + ".\n"
+            )
     if not below.empty:
         lines.append("\n### Some multi-agent scores are anti-correlated with the label\n")
         for _, row in below.iterrows():
-            lines.append(f"- {row['region']} {row['method']}: AUC {row['auc']:.3f}")
+            lines.append(f"- {row['region']} {row['method']}: AUC {_auc_cell(row)}")
         lines.append(
-            "\nAn AUC below 0.5 is not noise — it means the score runs opposite "
+            "\nAn AUC below 0.5"
+            + (" with its whole interval below 0.5" if _has_ci(results) else "")
+            + " is not noise — it means the score runs opposite "
             "to the label. The likely cause is a mismatch of definitions: these "
             "agents are shock detectors (z-scores and isolation forests against "
             "rolling baselines), while the label marks *sustained* level shifts. "
@@ -304,7 +423,7 @@ def write_report(results: pd.DataFrame) -> None:
         )
 
     # Where baselines win outright.
-    lines.append("\n### Where simple baselines beat the ensemble\n")
+    lines.append("\n### Where simple baselines score above the ensemble\n")
     for region in sorted(scored["region"].unique()):
         bb = baselines[baselines.region == region].nlargest(1, "auc")
         bt = tiers[tiers.region == region].nlargest(1, "auc")
@@ -313,19 +432,21 @@ def write_report(results: pd.DataFrame) -> None:
         if bb.iloc[0]["auc"] > bt.iloc[0]["auc"]:
             lines.append(
                 f"- **{region}**: {bb.iloc[0]['method']} at {bb.iloc[0]['auc']:.3f} "
-                f"beats the best tier at {bt.iloc[0]['auc']:.3f}"
+                f"is above the best tier at {bt.iloc[0]['auc']:.3f}."
+                + _separation(bb.iloc[0], bt.iloc[0])
             )
 
     # False positive harness.
     malacca = results[results.region == "malacca"].dropna(subset=["alert_rate"])
     if not malacca.empty:
         tier_rate = malacca[malacca.family == "tier"]["alert_rate"].mean()
-        base_rate = malacca[malacca.family == "baseline"]["alert_rate"].mean()
+        base_rate = _real_baselines(malacca)["alert_rate"].mean()
         lines.append("\n### False-positive harness (Malacca)\n")
         lines.append(
             f"Malacca has zero labelled disruptions in the evaluated data, so every "
             f"alert is a false alarm. Mean alert rate: **tiers {tier_rate:.0%}**, "
-            f"**baselines {base_rate:.0%}**. "
+            f"**baselines {base_rate:.0%}** (detection methods only; the oracle "
+            "and controls are left out). "
             + ("The multi-agent tiers are the noisier of the two.\n"
                if tier_rate > base_rate else
                "The tiers are the quieter of the two.\n")
@@ -344,9 +465,10 @@ def write_report(results: pd.DataFrame) -> None:
         "positives in training there. Those rows are reported as "
         "not-applicable rather than as a 0.5 score, which would have read as "
         "'no better than chance'.\n"
-        "- **One split, no confidence intervals.** Treat differences under "
-        "roughly 0.05 AUC as noise.\n"
-        "- **Malacca cannot be evaluated for detection** — no positives at all.\n"
+        + (_ci_note(results) if _has_ci(results) else
+           "- **One split, no confidence intervals.** Treat differences under "
+           "roughly 0.05 AUC as noise.\n")
+        + "- **Malacca cannot be evaluated for detection** — no positives at all.\n"
         "- **News features come from GDELT 1.0 event exports** (corridor box "
         "filter v2) in every region; volume is articles per 100k GDELT "
         "events that day.\n"

@@ -232,6 +232,16 @@ thresholds:
 evaluation:
   split_date: "2023-07-01"
   end_date: "2025-11-21"
+  # 95% moving-block bootstrap CIs on the test window. 30-day blocks match
+  # the label's 30-day window and its 14+ day runs, so resamples keep the
+  # day-to-day dependence an ordinary bootstrap would break. The threshold
+  # stays fixed from training; one seed gives every method in a region the
+  # same resamples (paired intervals). Set before any CI was computed.
+  bootstrap:
+    block_days: 30
+    n_resamples: 1000
+    ci: 0.95
+    seed: 42
 
 rag:
   collection_name: "disruption_cases"

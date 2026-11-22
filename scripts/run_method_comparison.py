@@ -54,7 +54,9 @@ from sklearn.linear_model import LogisticRegression  # noqa: E402
 from sklearn.metrics import confusion_matrix, f1_score, roc_auc_score  # noqa: E402
 
 from src.core.config_manager import load_config_for_region  # noqa: E402
-from src.evaluation.window import eval_window, split_by_date  # noqa: E402,F401
+from src.evaluation.block_bootstrap import block_bootstrap_ci  # noqa: E402
+from src.evaluation.window import (bootstrap_config, eval_window,  # noqa: E402,F401
+                                   split_by_date)
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +119,31 @@ def _split(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return split_by_date(frame)
 
 
+def _threshold(scores: np.ndarray, train_scores: np.ndarray | None) -> float:
+    """The alert threshold: the 90th percentile of the training-window scores."""
+    reference = (np.nan_to_num(np.asarray(scores, dtype=float)) if train_scores is None
+                 else np.nan_to_num(np.asarray(train_scores, dtype=float)))
+    return float(np.quantile(reference, 0.90))
+
+
+def _evaluate(y_true: np.ndarray, scores: np.ndarray,
+              train_scores: np.ndarray | None = None, **bootstrap) -> dict:
+    """:func:`_score_metrics` plus moving-block bootstrap CIs on the test window.
+
+    The threshold stays the training one in every resample. Bootstrap
+    settings default to settings.yaml ``evaluation.bootstrap``, and keyword
+    overrides (e.g. ``n_resamples``) are for tests.
+    """
+    threshold = _threshold(scores, train_scores)
+    metrics = _score_metrics(y_true, scores, threshold=threshold)
+    cfg = {**bootstrap_config(), **bootstrap}
+    ci = block_bootstrap_ci(y_true, scores, threshold, **cfg)
+    return {**metrics, **ci}
+
+
 def _score_metrics(
-    y_true: np.ndarray, scores: np.ndarray, train_scores: np.ndarray | None = None
+    y_true: np.ndarray, scores: np.ndarray, train_scores: np.ndarray | None = None,
+    *, threshold: float | None = None,
 ) -> dict:
     """AUC plus threshold metrics at a train-calibrated operating point.
 
@@ -131,10 +156,12 @@ def _score_metrics(
     Thresholding at the test median instead would force the alert rate to 50%
     for every method by construction, which makes FPR uninformative and the
     false-positive harness meaningless.
+
+    ``threshold`` passes in one already computed by :func:`_threshold`.
     """
     scores = np.nan_to_num(np.asarray(scores, dtype=float))
-    reference = scores if train_scores is None else np.nan_to_num(train_scores)
-    threshold = float(np.quantile(reference, 0.90))
+    if threshold is None:
+        threshold = _threshold(scores, train_scores)
     if len(np.unique(y_true)) < 2:
         return {"auc": np.nan, "f1": np.nan, "fpr": np.nan,
                 "alert_rate": float((scores > threshold).mean())}
@@ -470,7 +497,7 @@ def main() -> int:
                 print(f"   {name:<24} FAILED: {str(exc)[:60]}")
                 continue
             scores = np.asarray(scores, dtype=float)
-            metrics = _score_metrics(
+            metrics = _evaluate(
                 y_test, scores[-len(test):], scores[: len(train)]
             )
             rows.append({"region": region, "method": name, "kind": kind,
@@ -486,7 +513,7 @@ def main() -> int:
                 print(f"   Tier {tier:<19} no agents available")
                 continue
             train_scores, _ = tier_scores(tier, config, train, train)
-            metrics = _score_metrics(
+            metrics = _evaluate(
                 y_test, scores, train_scores if train_scores is not None else scores
             )
             rows.append({"region": region, "method": f"Tier {tier}", "kind": "multi-agent",
