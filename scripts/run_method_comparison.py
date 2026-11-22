@@ -33,7 +33,9 @@ previous tier. ``eval/method_comparison_all_agents.csv`` re-scores every
 tier with every agent enabled, as an appendix sensitivity only, and
 ``eval/method_comparison_no_eq1.csv`` re-scores every tier with the shipping
 agent's Eq. 1 duration term off (``agents.shipping.level_shift``), paired
-against the same tier with it on.
+against the same tier with it on. ``eval/agent_ablation.csv`` (Eq. 1 on) and
+``eval/agent_ablation_no_eq1.csv`` (off) score each enabled agent alone and
+the full enabled set with one agent left out, paired against the full set.
 
 **Malacca is a false-positive harness, not a detection test.** It has zero
 labelled disruptions across 2019-2026, so AUC is undefined there. What it can
@@ -931,6 +933,31 @@ def all_agents_sensitivity(region: str, frame: pd.DataFrame, manifest: dict,
              "agents_forced_on": forced(row["method"])} for row in rows]
 
 
+def _require_eq1(region: str, config: dict) -> None:
+    """Refuse a region config with Eq. 1 already off.
+
+    The ablations pair Eq. 1 off against on; with it off in the config they
+    would compare off against off, and the main table would not be Eq. 1.
+    """
+    if not ((config.get("agents") or {}).get("shipping") or {}).get("level_shift", True):
+        raise ValueError(f"{region}: agents.shipping.level_shift is false in the region "
+                         "config; the main results and the ablations need it on.")
+
+
+def _eq1_scores(config: dict, train, test) -> tuple[dict, dict, dict, dict, dict]:
+    """Agent scores with Eq. 1 on, and with it off for the shipping agent only.
+
+    Returns ``(on_test, on_train, off_config, off_test, off_train)``. The
+    other agents do not read the shipping config, so their scores are reused.
+    """
+    on_test = _all_agent_scores(config, train, test)
+    on_train = _all_agent_scores(config, train, train)
+    off = _without_eq1(config)
+    off_test = {**on_test, "shipping": _agent_scores("shipping", off, train, test)}
+    off_train = {**on_train, "shipping": _agent_scores("shipping", off, train, train)}
+    return on_test, on_train, off, off_test, off_train
+
+
 #: ``eq1`` of the appendix rows with Eq. 1's duration term off.
 _NO_EQ1 = "Eq. 1 duration term off (ablation)"
 
@@ -951,16 +978,10 @@ def no_eq1_ablation(region: str, frame: pd.DataFrame, manifest: dict, config: di
         ValueError: If ``config`` already has the term off: the pairing would
             compare off against off, and the main table would not be Eq. 1.
     """
-    if not ((config.get("agents") or {}).get("shipping") or {}).get("level_shift", True):
-        raise ValueError(f"{region}: agents.shipping.level_shift is false in the region "
-                         "config; the main results and this ablation need it on.")
+    _require_eq1(region, config)
     train, test, keep, train_keep, y, window = _main_split(frame, manifest)
     tiers = tuple(range(1, len(_TIER_ORDER) + 1))
-    on_test = _all_agent_scores(config, train, test)
-    on_train = _all_agent_scores(config, train, train)
-    off = _without_eq1(config)
-    off_test = {**on_test, "shipping": _agent_scores("shipping", off, train, test)}
-    off_train = {**on_train, "shipping": _agent_scores("shipping", off, train, train)}
+    on_test, on_train, off, off_test, off_train = _eq1_scores(config, train, test)
     print(f"\n[{region}] {_NO_EQ1}")
     rows = _tier_rows(region, off, train, test, keep, train_keep, tiers, window,
                       agent_scores=(off_test, off_train), **bootstrap)
@@ -983,6 +1004,105 @@ def no_eq1_ablation(region: str, frame: pd.DataFrame, manifest: dict, config: di
         out.append({**row, "circularity": _NO_EQ1_CIRCULARITY,
                     "alert_rule": _THRESHOLD_RULE, "eq1": _NO_EQ1, **paired})
     return out
+
+
+#: ``family`` of the per-agent ablation rows.
+_ABLATION = "agent_ablation"
+
+
+def _ablation_circularity(agents: list[str], eq1: bool) -> str:
+    """As the tiers: the shipping agent with Eq. 1 carries the label's own
+    statistic ("high"), without it "medium"; a set without shipping reads
+    other features only ("low")."""
+    if "shipping" not in agents:
+        return "low"
+    return _TIER_CIRCULARITY if eq1 else _NO_EQ1_CIRCULARITY
+
+
+def _ablation_rows(region: str, config: dict, on_test: dict, on_train: dict, y, keep,
+                   train_keep, window: dict, eq1: bool, **bootstrap) -> list[dict]:
+    """The full enabled set, each enabled agent alone, and each left out.
+
+    Every row fuses through :func:`_compose` (enabled agents, renormalised
+    weights), so the full set is the top tier and an agent alone is Tier 1's
+    arithmetic. Leave-one-out rows carry ``loo_delta_auc``: the paired
+    AUC(without the agent) - AUC(full set) on the same resampled blocks.
+    Each row is thresholded on its own training composite.
+
+    ``agent`` is the agent kept (``ablation == "single"``) or left out
+    (``"leave-one-out"``); ``fusion_weights`` are the row's renormalised
+    weights; ``agents_unavailable`` names enabled agents that produced no
+    scores (they are in no row).
+    """
+    k = len(_TIER_ORDER)
+    full, used = _compose(k, on_test, config)
+    if full is None:
+        return []
+    evaluable = len(np.unique(y[keep])) > 1
+    disabled = ",".join(d for d in _TIER_ORDER if not _enabled(config, d))
+    unavailable = ",".join(d for d in _TIER_ORDER
+                           if _enabled(config, d) and on_test.get(d) is None)
+    label = "on" if eq1 else "off"
+    print(f"\n[{region}] agent ablation, Eq. 1 {label}: full set [{','.join(used)}]")
+
+    def row(method: str, ablation: str, agent: str, test_scores: dict,
+            train_scores: dict) -> dict | None:
+        scores, members = _compose(k, test_scores, config)
+        if scores is None:
+            return None
+        reference, _ = _compose(k, train_scores, config)
+        metrics = _evaluate(y, scores, reference if reference is not None else scores,
+                            keep=keep, train_keep=train_keep if reference is not None
+                            else keep, **bootstrap)
+        paired: dict = {}
+        if ablation == "leave-one-out" and evaluable:
+            d = _delta(y, scores, full, keep=keep, **bootstrap)
+            paired = {"loo_delta_auc": d["delta_auc"],
+                      "loo_delta_auc_ci_low": d["delta_auc_ci_low"],
+                      "loo_delta_auc_ci_high": d["delta_auc_ci_high"],
+                      "loo_delta_valid": d["delta_valid"]}
+        shown = (f" LOO - full={paired['loo_delta_auc']:+.3f} "
+                 f"[{paired['loo_delta_auc_ci_low']:+.3f}, {paired['loo_delta_auc_ci_high']:+.3f}]"
+                 if paired else "")
+        print(f"   {method:<28} AUC={metrics['auc']!s:<7.7} "
+              f"alert_rate={metrics['alert_rate']:.2f}{shown}")
+        return {"region": region, "method": method, "kind": "agent-ablation",
+                "family": _ABLATION, "ablation": ablation, "agent": agent,
+                "agents": ",".join(members), "n_agents": len(members),
+                "agents_disabled": disabled, "agents_unavailable": unavailable,
+                "fusion_weights": ",".join(
+                    f"{d}={w:.4f}" for d, w in _fusion_weights(k, test_scores, config).items()),
+                "circularity": _ablation_circularity(members, eq1),
+                "alert_rule": _THRESHOLD_RULE, "eq1": label,
+                **metrics, **paired, **window}
+
+    rows = [row("full enabled set", "full", "", on_test, on_train)]
+    rows += [row(f"{a} alone", "single", a, {a: on_test[a]}, {a: on_train.get(a)})
+             for a in used]
+    rows += [row(f"without {a}", "leave-one-out", a,
+                 {d: s for d, s in on_test.items() if d != a},
+                 {d: s for d, s in on_train.items() if d != a}) for a in used]
+    return [r for r in rows if r is not None]
+
+
+def agent_ablation(region: str, frame: pd.DataFrame, manifest: dict, config: dict,
+                   **bootstrap) -> tuple[list[dict], list[dict]]:
+    """Each enabled agent alone and each left out, with Eq. 1 on and off.
+
+    Returns ``(rows_with_eq1, rows_without)``. Same split, masked days,
+    threshold rule and bootstrap blocks as :func:`run_region`; with Eq. 1 off
+    only the shipping agent is refitted (:func:`_without_eq1`), the others'
+    scores are reused. Appendix only.
+
+    Raises:
+        ValueError: If ``config`` already has Eq. 1 off (:func:`_require_eq1`).
+    """
+    _require_eq1(region, config)
+    train, test, keep, train_keep, y, window = _main_split(frame, manifest)
+    on_test, on_train, off, off_test, off_train = _eq1_scores(config, train, test)
+    common = dict(y=y, keep=keep, train_keep=train_keep, window=window, **bootstrap)
+    return (_ablation_rows(region, config, on_test, on_train, eq1=True, **common),
+            _ablation_rows(region, off, off_test, off_train, eq1=False, **common))
 
 
 #: Tiers re-scored in the split-date sensitivity table.
@@ -1024,6 +1144,8 @@ def main() -> int:
     sensitivity: list[dict] = []
     all_agents: list[dict] = []
     no_eq1: list[dict] = []
+    ablation_on: list[dict] = []
+    ablation_off: list[dict] = []
     for region in regions:
         frame, manifest = _load(region)
         config = load_config_for_region(region)
@@ -1031,6 +1153,9 @@ def main() -> int:
         sensitivity += split_sensitivity(region, frame, manifest, config)
         all_agents += all_agents_sensitivity(region, frame, manifest, config)
         no_eq1 += no_eq1_ablation(region, frame, manifest, config)
+        with_eq1, without_eq1 = agent_ablation(region, frame, manifest, config)
+        ablation_on += with_eq1
+        ablation_off += without_eq1
 
     results = pd.DataFrame(rows)
     results.to_csv(_OUT / "method_comparison_results.csv", index=False)
@@ -1046,6 +1171,10 @@ def main() -> int:
     ablation.to_csv(_OUT / "method_comparison_no_eq1.csv", index=False)
     print(f"Wrote {_OUT / 'method_comparison_no_eq1.csv'} ({len(ablation)} rows; "
           "Eq. 1 ablation, not the main result)")
+    for name, part in (("agent_ablation.csv", ablation_on),
+                       ("agent_ablation_no_eq1.csv", ablation_off)):
+        pd.DataFrame(part).to_csv(_OUT / name, index=False)
+        print(f"Wrote {_OUT / name} ({len(part)} rows; per-agent ablation, not the main result)")
     return 0
 
 

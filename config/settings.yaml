@@ -67,7 +67,8 @@ agents:
     z_threshold: 2.0
     # Eq. 1: anomaly = max(shock, duration). false drops the duration term
     # (level_shift_score) and restores the pre-f7b87ff shock-only aggregation;
-    # for the ablation (eval/method_comparison_no_eq1.csv) only.
+    # for the ablations (eval/method_comparison_no_eq1.csv,
+    # eval/agent_ablation_no_eq1.csv) only; the harness sets it there itself.
     level_shift: true
   market:
     enabled: true
