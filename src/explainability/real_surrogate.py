@@ -6,7 +6,8 @@ to fit the same model on each region's real frame (``data/eval/``):
 
 * :func:`canonical_features` — the 17 features of :data:`ALL_FEATURE_NAMES`;
   a feature the region does not supply is NaN, never zero;
-* :func:`temporal_split` — first 70 % of rows train, last 30 % test;
+* :func:`temporal_split` — the evaluation's fixed date split
+  (settings.yaml ``evaluation``), the same one the method comparison uses;
 * :func:`composite_from_agent_scores` — the target, from the existing
   :meth:`RiskEngine.compute_risk`, with its per-agent breakdown;
 * :func:`fit_surrogate` and :func:`evaluate_surrogate` — the unchanged
@@ -27,11 +28,10 @@ import pandas as pd
 
 from src.aggregation.risk_engine import RiskEngine
 from src.agents.base_agent import DetectionResult
+from src.evaluation.window import split_by_date
 from src.explainability.shap_explainer import ALL_FEATURE_NAMES, FEATURE_AGENT_MAP
 
 logger = logging.getLogger(__name__)
-
-TRAIN_FRACTION: float = 0.70
 
 
 def canonical_features(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
@@ -54,14 +54,13 @@ def canonical_features(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     return out, missing
 
 
-def temporal_split(
-    frame: pd.DataFrame, train_fraction: float = TRAIN_FRACTION
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """First ``train_fraction`` of rows (by time) train, the rest test. No shuffling."""
-    if "timestamp" in frame.columns:
-        frame = frame.sort_values("timestamp", kind="stable")
-    cut = int(len(frame) * train_fraction)
-    return frame.iloc[:cut].copy(), frame.iloc[cut:].copy()
+def temporal_split(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The evaluation's fixed date split (settings.yaml ``evaluation``). No shuffling.
+
+    The same split as ``scripts/run_method_comparison.py``. A row-fraction cut
+    here would fit the surrogate on days the harness tests on.
+    """
+    return split_by_date(frame)
 
 
 def composite_from_agent_scores(

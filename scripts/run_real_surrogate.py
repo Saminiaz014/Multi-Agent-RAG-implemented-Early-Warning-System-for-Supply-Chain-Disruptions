@@ -237,7 +237,8 @@ def main() -> int:
     payload = {
         "target": "RiskEngine.compute_risk risk_score (weighted mean over active agents, agreement-amplified)",
         "model": "RandomForestRegressor(n_estimators=100, random_state=42)",
-        "split": "temporal per region: first 70% of rows train, last 30% test; no shuffling",
+        "split": "temporal per region: settings.yaml evaluation.split_date / end_date "
+                 "(same as the method comparison); no shuffling",
         "missing_feature_policy": MISSING_POLICY,
         "flagged_definition": "test days with RiskEngine.classify_risk >= medium (risk_score >= risk_medium)",
         "fidelity_mapping": "FEATURE_AGENT_MAP (thesis Table 12): top-1 / any of top-3 |SHAP| features' agent "

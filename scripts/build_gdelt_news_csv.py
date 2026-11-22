@@ -22,6 +22,17 @@ FILTER_VERSION and a logged reason here):
                  and Panama 58.9% (Hormuz 47.8%, Bab el-Mandeb 83.3%). The new boxes were
                  sized to contain the coordinates GDELT itself assigns to the corridor's
                  named features (see GAZETTEER NOTE below). Hormuz and Bab el-Mandeb unchanged.
+                 No evaluation result (AUC, F1, method comparison) using GDELT news was
+                 computed or viewed before v2 was frozen. The only data inspected were v1's
+                 2019 Q1 zero-volume shares above and GDELT's own feature geocodes.
+  (output, filter unchanged) 2026-11-22  total_events column added: the day's well-formed
+                 export rows, all locations, so corridor volume can be normalised per day.
+                 DISCLOSURE: added after method-comparison results with un-normalised
+                 GDELT news (70/30 split, test from 2023-10-28) had been viewed. The same
+                 applies to the downstream choices made on 2026-11-22: volume per 100k
+                 events, forward-filling unpublished days, and the evaluation split date.
+                 The zero-volume rule (tone NaN, agent sentiment 0) was set before any
+                 result and re-confirmed by the author afterwards.
 """
 import argparse, csv, datetime as dt, hashlib, http.client, io, json, os, sys, time, zipfile, zlib
 from collections import defaultdict
@@ -182,7 +193,7 @@ def process(blob: bytes) -> dict:
     return {"agg": dict(agg), "bad_rows": bad_rows, "n_rows": n_rows}
 
 
-def row(day, a):
+def row(day, a, total_events=None):
     n_e, n_a = a["n_events"], a["n_articles"]
     return {
         "date": day.isoformat(),
@@ -191,7 +202,22 @@ def row(day, a):
         "news_tone": round(a["tone_x_art"] / n_a, 4) if n_a else "",   # NaN when no coverage
         "goldstein_mean": round(a["goldstein_sum"] / n_e, 4) if n_e else "",
         "n_material_conflict": a["n_material_conflict"],
+        # every well-formed event in the day's export, any location: the denominator
+        # for normalising corridor volume against GDELT's own output that day
+        "total_events": "" if total_events is None else total_events,
     }
+
+
+def write_region_csv(path, prog, reg, start, end):
+    """One row per processed day; missing/pending/failed days get no row."""
+    with path.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(row(start, empty_agg()).keys()))
+        w.writeheader()
+        for d in _days(start, end):
+            k = d.isoformat()
+            if k in prog["done"]:
+                day = prog["done"][k]
+                w.writerow(row(d, day["agg"].get(reg, empty_agg()), day.get("n_rows")))
 
 
 def missing_in_range(missing: list[str], start: dt.date, end: dt.date) -> list[str]:
@@ -350,13 +376,7 @@ def main():
                     for d in _days(start, end) if d.isoformat() in prog["done"])
     for reg in BBOXES:
         path = OUT / f"{reg}.csv"
-        with path.open("w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(row(start, empty_agg()).keys()))
-            w.writeheader()
-            for d in _days(start, end):
-                k = d.isoformat()
-                if k in prog["done"]:
-                    w.writerow(row(d, prog["done"][k]["agg"].get(reg, empty_agg())))
+        write_region_csv(path, prog, reg, start, end)
         with path.open() as f:
             n_rows = sum(1 for _ in f) - 1
         zeros, n_done = zero[reg]

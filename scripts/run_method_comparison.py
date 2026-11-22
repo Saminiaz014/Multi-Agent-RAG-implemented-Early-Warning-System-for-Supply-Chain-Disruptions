@@ -6,8 +6,11 @@ held-out window.
 
 Three design decisions carry most of the weight:
 
-**One temporal split, applied to everyone.** The last 30% of each region's
-series is the test window; nothing is fitted on it. A supervised model scored
+**One temporal split, applied to everyone.** Every region trains on the days
+before ``evaluation.split_date`` in ``config/settings.yaml`` and is tested
+from that date to ``evaluation.end_date``; nothing is fitted on the test
+window. A fixed date replaced the old last-30% rule, whose cut moved whenever
+the series grew. A supervised model scored
 on the rows it was fitted to would post an inflated number that is not
 comparable with an unsupervised detector, so both are judged on data neither
 has seen. The split is temporal rather than random because shuffling days of a
@@ -51,14 +54,12 @@ from sklearn.linear_model import LogisticRegression  # noqa: E402
 from sklearn.metrics import confusion_matrix, f1_score, roc_auc_score  # noqa: E402
 
 from src.core.config_manager import load_config_for_region  # noqa: E402
+from src.evaluation.window import eval_window, split_by_date  # noqa: E402,F401
 
 logger = logging.getLogger(__name__)
 
 _CACHE = _PROJECT_ROOT / "data" / "eval"
 _OUT = _PROJECT_ROOT / "eval"
-
-#: Fraction of each series held out. Temporal, not random.
-_TEST_FRACTION = 0.30
 
 #: Agents in the order tiers add them, with the feature prefix each reads.
 _TIER_ORDER: tuple[str, ...] = (
@@ -109,8 +110,11 @@ def _load(region: str) -> tuple[pd.DataFrame, dict]:
 
 
 def _split(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    cut = int(len(frame) * (1 - _TEST_FRACTION))
-    return frame.iloc[:cut].copy(), frame.iloc[cut:].copy()
+    """Train before ``split_date``; test from it through ``end_date``.
+
+    See :func:`src.evaluation.window.split_by_date`.
+    """
+    return split_by_date(frame)
 
 
 def _score_metrics(
@@ -441,8 +445,12 @@ def main() -> int:
         train, test = _split(frame)
         y_test = test["y_true"].astype(int).to_numpy()
         evaluable = len(np.unique(y_test)) > 1
+        window = {"test_start": str(test["timestamp"].min().date()),
+                  "test_end": str(test["timestamp"].max().date()),
+                  "n_test": len(test), "test_positives": int(y_test.sum())}
 
         print(f"\n[{region}] train={len(train)} test={len(test)} "
+              f"[{test['timestamp'].min().date()} .. {test['timestamp'].max().date()}] "
               f"test_positives={int(y_test.sum())} "
               f"{'' if evaluable else '(FP harness only — no positives in test)'}")
 
@@ -455,7 +463,7 @@ def main() -> int:
                              "circularity": _CIRCULARITY.get(name, "unknown"),
                              "auc": np.nan, "f1": np.nan,
                              "fpr": np.nan, "alert_rate": np.nan,
-                             "not_applicable": str(exc)})
+                             "not_applicable": str(exc), **window})
                 print(f"   {name:<24} n/a — {exc}")
                 continue
             except Exception as exc:
@@ -468,7 +476,7 @@ def main() -> int:
             rows.append({"region": region, "method": name, "kind": kind,
                          "family": "baseline",
                          "circularity": _CIRCULARITY.get(name, "unknown"),
-                         **metrics})
+                         **metrics, **window})
             print(f"   {name:<24} AUC={metrics['auc']!s:<7.7} "
                   f"F1={metrics['f1']!s:<6.6} alert_rate={metrics['alert_rate']:.2f}")
 
@@ -484,7 +492,7 @@ def main() -> int:
             rows.append({"region": region, "method": f"Tier {tier}", "kind": "multi-agent",
                          "family": "tier", "agents": ",".join(used),
                          "circularity": _TIER_CIRCULARITY,
-                         "n_agents": len(used), **metrics})
+                         "n_agents": len(used), **metrics, **window})
             print(f"   Tier {tier} ({len(used)} agents){'':<7} AUC={metrics['auc']!s:<7.7} "
                   f"F1={metrics['f1']!s:<6.6} alert_rate={metrics['alert_rate']:.2f} "
                   f"[{','.join(used)}]")

@@ -68,7 +68,7 @@ FEATURE_DEFINITIONS: dict[str, str] = {
     # News — GDELT
     "sentiment_score": "tone of news about the region",
     "source_consensus": "how much news sources agree",
-    "article_volume": "number of news articles published",
+    "article_volume": "corridor news share of GDELT",
     "sentiment_magnitude": "strength of emotion in the news",
     "recency_weighted_score": "recent news tone, newest weighted most",
 }

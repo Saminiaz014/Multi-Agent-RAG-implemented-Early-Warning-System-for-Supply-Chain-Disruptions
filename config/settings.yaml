@@ -212,6 +212,27 @@ thresholds:
   risk_medium: 0.51
   risk_low: 0.30
 
+# Evaluation window for scripts/run_method_comparison.py. Identical for every
+# region; region overlays must not override it.
+#
+#   split_date  First test day; training is every day before it. A fixed date
+#               replaces the old 70/30 fraction, whose cut moved whenever the
+#               series grew (Bab el-Mandeb Tier 1 AUC 0.68 -> 0.52 from that
+#               alone). Chosen from the label timeline: every labelled episode
+#               except Hormuz 2019Q4 starts after it, so the test window
+#               contains their onsets. No result under this date was computed
+#               before it was chosen. DISCLOSURE: results under the earlier
+#               70/30 cuts (test from 2023-08-31 and 2023-10-28) had been seen,
+#               including a run with un-normalised GDELT news (test from
+#               2023-10-28), before this date was set on 2026-11-22.
+#   end_date    Last evaluated day. ACLED (geopolitical) data ends one year
+#               before the build date; 2025-11-21 is its last covered day
+#               (Panama's frame ends 2025-11-20). Fixed so a later rebuild
+#               cannot move it. It excludes the April-May 2026 Hormuz shutdown.
+evaluation:
+  split_date: "2023-07-01"
+  end_date: "2025-11-21"
+
 rag:
   collection_name: "disruption_cases"
   top_k: 3  # Number of similar cases to retrieve for RAG (legacy ContextRetriever.query)

@@ -283,9 +283,14 @@ class NewsAgent(BaseAgent):
                 [n for n in w["dominant_narrative"] if isinstance(n, str) and n]
                 if "dominant_narrative" in w.columns else []
             )
-            confidence = float(
-                np.clip(w["consensus_norm"].mean() + 0.1, 0.0, 1.0)
-            )
+            # Without a consensus measure (GDELT sources), fall back to the
+            # window's mean score instead of crashing on a None column.
+            has_consensus = "source_consensus" in w.columns
+            confidence = float(np.clip(
+                (w["consensus_norm"].astype(float).mean() + 0.1)
+                if has_consensus else w["anomaly_score"].mean(),
+                0.0, 1.0,
+            ))
             results.append({
                 "agent": "news_sentiment",
                 "anomaly_score": float(w["anomaly_score"].max()),
@@ -293,8 +298,11 @@ class NewsAgent(BaseAgent):
                 "signals": {
                     "sentiment_score": float(w["sentiment_score"].min()),
                     "sentiment_magnitude": float(w["sentiment_magnitude"].max()),
-                    "source_consensus": float(w["source_consensus"].max()),
-                    "article_volume": int(w["article_volume"].max()),
+                    "source_consensus": (
+                        float(w["source_consensus"].max()) if has_consensus else None
+                    ),
+                    # float: GDELT volume is normalised (per 100k events)
+                    "article_volume": float(w["article_volume"].max()),
                     "sentiment_velocity": float(w["sentiment_velocity"].min()),
                     "recency_weighted_score": float(w["recency_weighted_score"].min()),
                 },

@@ -7,10 +7,17 @@ loads a pre-aggregated daily-sentiment frame. API mode is stubbed
 with the full planned pipeline (NewsAPI / GDELT → VADER + embeddings
 + DBSCAN cluster + source-consensus + recency weighting) documented
 in the docstring.
+
+``gdelt_events`` mode reads the per-region daily series built from the
+GDELT 1.0 event exports by ``scripts/build_gdelt_news_csv.py``. It is the
+source the evaluation dataset uses, since the GDELT DOC 2.0 API behind
+``api`` mode answers this machine with HTTP 429 on every request.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -111,6 +118,12 @@ _API_COMPOSITE_WEIGHTS: dict[str, float] = {
     "sentiment": 0.40, "velocity": 0.20, "volume": 0.15,
 }
 
+# --- GDELT 1.0 event-export mode ------------------------------------------
+#: Where scripts/build_gdelt_news_csv.py writes <region>.csv + manifest.
+_GDELT_EVENTS_DIR: Path = Path(__file__).resolve().parents[2] / "data" / "eval" / "news"
+#: article_volume is corridor articles per this many GDELT events that day.
+_GDELT_VOLUME_PER: float = 100_000.0
+
 
 class NewsConnector(BaseConnector):
     """Daily news-sentiment generator for the Hormuz corridor.
@@ -118,8 +131,9 @@ class NewsConnector(BaseConnector):
     Args:
         config: Reads ``data_mode``, ``csv_path``, ``lead_days``,
             ``location_context`` (for API keyword generation),
-            ``newsapi_keywords`` (explicit override for those keywords), and
-            an ``api`` sub-block.
+            ``newsapi_keywords`` (explicit override for those keywords), an
+            ``api`` sub-block, and for ``gdelt_events`` mode ``region`` (e.g.
+            ``"hormuz"``) and optionally ``gdelt_events_dir``.
     """
 
     LOCATION: str = _LOCATION
@@ -206,10 +220,152 @@ class NewsConnector(BaseConnector):
             return self.load_csv()
         if self.data_mode == "api":
             return self.fetch_api()
+        if self.data_mode == "gdelt_events":
+            return self.load_gdelt_events()
         raise ValueError(
             f"Unknown data_mode={self.data_mode!r}; "
-            "expected 'synthetic', 'csv', or 'api'."
+            "expected 'synthetic', 'csv', 'api', or 'gdelt_events'."
         )
+
+    # ------------------------------------------------------- gdelt_events
+    def load_gdelt_events(self) -> pd.DataFrame:
+        """Load one region's daily news series from the GDELT 1.0 exports.
+
+        Reads ``<gdelt_events_dir>/<region>.csv`` and its manifest, both
+        written by ``scripts/build_gdelt_news_csv.py``. The CSV must hash to
+        the manifest's ``sha256``, so a regenerated or hand-edited file cannot
+        be scored under the old filter's provenance.
+
+        Tone and recency map onto the NewsAgent schema as in :meth:`fetch_api`.
+        Volume is normalised differently, and ``composite_news_risk`` and
+        ``is_disruption`` are not produced (nothing on this path reads them):
+
+        * ``sentiment_score``: the article-weighted GDELT tone / 10, clipped
+          to [-1, 1].
+        * ``sentiment_magnitude``: its absolute value.
+        * ``recency_weighted_score``: the config's ``api.recency_weights``,
+          applied by calendar lag; unpublished days are skipped, not counted.
+        * ``article_volume``: corridor articles per 100,000 GDELT events that
+          day (``news_volume / total_events``). This removes GDELT's own
+          output changes: its daily volume falls after 2019, and some export
+          files are partial. The denominator is that day's own total, so no
+          future data enters, unlike the DOC mode's whole-series p95 scaling.
+        * ``news_tone``: the raw article-weighted tone, NaN on zero-volume
+          days. It is kept for inspection and not used as a model feature.
+
+        A day with no matching coverage is a real observation ("peace time"),
+        not missing data. Its tone is undefined, so ``news_tone`` is NaN. The
+        agent's ``sentiment_score`` is 0 there, meaning no sentiment signal,
+        and volume is 0. Quiet days therefore dilute the recency average, so
+        a single hostile article cannot hold the score down for a whole
+        window. Days GDELT never published have no row in the CSV and none
+        here. They are listed in ``attrs["news_source"]["missing_days"]``.
+
+        ``source_consensus`` is omitted, as in :meth:`fetch_api`. The export
+        is aggregated per day, with no per-outlet breakdown.
+
+        Returns:
+            Daily frame sorted by ``timestamp``, with the build provenance
+            in ``df.attrs["news_source"]``.
+
+        Raises:
+            ValueError: If ``region`` is not configured, if the CSV does not
+                match its manifest, if the backfill has failed days or pending
+                days inside the series, if a day has articles but no tone, or
+                if ``total_events`` is absent or not positive.
+            FileNotFoundError: If the region's CSV or manifest is absent.
+        """
+        region = self.config.get("region")
+        if not region:
+            raise ValueError(
+                "data_mode='gdelt_events' needs config['region'] (e.g. "
+                "'hormuz') to pick the region's GDELT series."
+            )
+        base = Path(self.config.get("gdelt_events_dir") or _GDELT_EVENTS_DIR)
+        csv_path = base / f"{region}.csv"
+        manifest_path = base / f"{region}.manifest.json"
+        if not csv_path.exists() or not manifest_path.exists():
+            raise FileNotFoundError(
+                f"No GDELT news series for {region!r} in {base}. "
+                "Run scripts/build_gdelt_news_csv.py first."
+            )
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        digest = hashlib.sha256(csv_path.read_bytes()).hexdigest()
+        if digest != manifest.get("sha256"):
+            raise ValueError(
+                f"{csv_path.name} does not match its manifest (sha256 "
+                f"{digest[:12]} vs {str(manifest.get('sha256'))[:12]}). "
+                "Rebuild it with scripts/build_gdelt_news_csv.py."
+            )
+
+        raw = pd.read_csv(csv_path)
+        # Only days GDELT never published may be absent. A failed download, or
+        # a pending day before the series' end, is a hole that downstream gap
+        # filling would wrongly treat as "never published".
+        if manifest.get("failed_days"):
+            raise ValueError(
+                f"{csv_path.name}: backfill has failed days "
+                f"{manifest['failed_days'][:5]}; rerun scripts/build_gdelt_news_csv.py."
+            )
+        last_day = str(pd.to_datetime(raw["date"]).max().date()) if len(raw) else ""
+        early_pending = [d for d in manifest.get("pending_days") or [] if d <= last_day]
+        if early_pending:
+            raise ValueError(
+                f"{csv_path.name}: pending days inside the series "
+                f"{early_pending[:5]}; rerun scripts/build_gdelt_news_csv.py."
+            )
+        if "total_events" not in raw.columns:
+            raise ValueError(
+                f"{csv_path.name} has no total_events column; rebuild it with "
+                "the current scripts/build_gdelt_news_csv.py."
+            )
+        total = pd.to_numeric(raw["total_events"], errors="coerce")
+        if not (total > 0).all():
+            raise ValueError(
+                f"{csv_path.name}: total_events missing or not positive on "
+                f"{raw.loc[~(total > 0), 'date'].tolist()[:5]}"
+            )
+        volume = pd.to_numeric(raw["news_volume"], errors="raise").astype(int)
+        tone = pd.to_numeric(raw["news_tone"], errors="coerce")
+        if (tone.isna() & (volume > 0)).any():
+            raise ValueError(
+                f"{csv_path.name}: days with articles but no tone: "
+                f"{raw.loc[tone.isna() & (volume > 0), 'date'].tolist()[:5]}"
+            )
+        # Tone stays NaN where there was no coverage. The agent's sentiment
+        # input is 0 there: no coverage carries no sentiment signal.
+        sentiment = (tone.fillna(0.0) / _GDELT_TONE_SCALE).clip(-1.0, 1.0)
+
+        df = pd.DataFrame({
+            "timestamp": pd.to_datetime(raw["date"]),
+            "sentiment_score": sentiment,
+            "sentiment_magnitude": sentiment.abs(),
+            "article_volume": volume * _GDELT_VOLUME_PER / total,
+            "news_tone": tone,
+        }).sort_values("timestamp").reset_index(drop=True)
+        weights_cfg = (self.config.get("api", {}) or {}).get("recency_weights", {})
+        # Weight by calendar lag, not row position: across days GDELT never
+        # published, "yesterday" must not mean the last row before the gap.
+        calendar = df.set_index("timestamp")["sentiment_score"].asfreq("D")
+        recency = self._recency_weighted(calendar, weights_cfg)
+        df.insert(4, "recency_weighted_score",
+                  recency.reindex(df["timestamp"]).to_numpy())
+        df.attrs["news_source"] = {
+            "source": "GDELT 1.0 daily event export",
+            "builder": "scripts/build_gdelt_news_csv.py",
+            "filter_version": manifest.get("filter_version"),
+            "filter_sha256": manifest.get("filter_sha256"),
+            "csv_sha256": digest,
+            "missing_days": list(manifest.get("missing_days") or []),
+        }
+        logger.info(
+            "[NewsConnector/gdelt_events] %s -> %d days [%s .. %s], filter %s, "
+            "zero-volume days=%d",
+            region, len(df), df["timestamp"].min().date(),
+            df["timestamp"].max().date(), manifest.get("filter_version"),
+            int((volume == 0).sum()),
+        )
+        return df
 
     # ---------------------------------------------------------- synthetic
     def generate_dataset(
@@ -494,19 +650,25 @@ class NewsConnector(BaseConnector):
         recent_weight = float(weights_cfg.get("recent_weight", 0.5))
         old_weight = float(weights_cfg.get("old_weight", 0.1))
 
-        weights = [fresh_weight] * fresh_days
-        weights += [recent_weight] * max(recent_days - fresh_days, 0)
-        weights += [old_weight] * _RECENCY_TAIL_DAYS
-        total = sum(weights) or 1.0
+        weights = np.asarray(
+            [fresh_weight] * fresh_days
+            + [recent_weight] * max(recent_days - fresh_days, 0)
+            + [old_weight] * _RECENCY_TAIL_DAYS
+        )
+
+        def weighted_mean(window: np.ndarray) -> float:
+            # Most recent first. NaN entries (days with no data) are skipped
+            # and the remaining weights renormalised.
+            values = window[::-1]
+            w = weights[: len(values)]
+            seen = ~np.isnan(values)
+            if not seen.any() or w[seen].sum() <= 0:
+                return np.nan
+            return float(np.dot(values[seen], w[seen]) / w[seen].sum())
 
         return (
             sentiment.rolling(window=len(weights), min_periods=1)
-            .apply(
-                lambda w: float(
-                    np.dot(w[::-1], weights[: len(w)]) / sum(weights[: len(w)])
-                ),
-                raw=True,
-            )
+            .apply(weighted_mean, raw=True)
             .fillna(sentiment)
         )
 

@@ -222,10 +222,16 @@ def write_report(results: pd.DataFrame) -> None:
     lines: list[str] = []
 
     lines.append("# Method comparison and agent ablation\n")
+    if {"test_start", "test_end"} <= set(results.columns):
+        window = (f"{results['test_start'].min()} to {results['test_end'].max()}, "
+                  "the same fixed dates for every region (settings.yaml "
+                  "`evaluation`); every method is fitted only on earlier days")
+    else:
+        window = "a fixed temporal split"
     lines.append(
-        "All figures are measured on a held-out window (last 30% of each "
-        "region's series, temporal split). Features are real connector output; "
-        "labels are the level-shift rule. Nothing here is assumed.\n"
+        f"All figures are measured on a held-out window: {window}. Features "
+        "are real connector output; labels are the level-shift rule. Nothing "
+        "here is assumed.\n"
     )
 
     lines.append("\n## Per-region results\n")
@@ -252,22 +258,34 @@ def write_report(results: pd.DataFrame) -> None:
 
     lines.append("\n## What the numbers show\n")
 
-    # Monotonicity: does adding agents help?
-    lines.append("\n### Adding agents does not monotonically improve AUC\n")
+    # Monotonicity: does adding agents help? Every claim below is computed.
+    lines.append("\n### Does adding agents improve AUC?\n")
+    peaks: list[str] = []
+    tier3_drops: list[bool] = []
     for region in sorted(tiers["region"].unique()):
         series = tiers[tiers.region == region].sort_values("method")
         values = series["auc"].tolist()
         names = series["method"].tolist()
         peak = names[int(np.argmax(values))]
+        peaks.append(peak)
+        if len(values) >= 3:
+            tier3_drops.append(values[2] < values[1])
         lines.append(
             f"- **{region}**: " + " -> ".join(f"{v:.3f}" for v in values)
             + f"  (best: {peak})"
         )
-    lines.append(
-        "\nIn every region the peak is Tier 1 or Tier 2, and adding the "
-        "geopolitical agent at Tier 3 lowers AUC each time. This does not "
-        "support the claim that each agent adds value.\n"
-    )
+    if peaks and all(p in ("Tier 1", "Tier 2") for p in peaks):
+        lines.append(
+            "\nIn every region the peak is Tier 1 or Tier 2"
+            + (", and adding the geopolitical agent at Tier 3 lowers AUC each "
+               "time" if tier3_drops and all(tier3_drops) else "")
+            + ". This does not support the claim that each agent adds value.\n"
+        )
+    else:
+        lines.append(
+            f"\nPeaks by region: {', '.join(peaks)}. The tier progression is "
+            "not uniform across regions.\n"
+        )
 
     # Sub-chance tiers.
     below = tiers[tiers.auc < 0.5]
@@ -305,7 +323,7 @@ def write_report(results: pd.DataFrame) -> None:
         base_rate = malacca[malacca.family == "baseline"]["alert_rate"].mean()
         lines.append("\n### False-positive harness (Malacca)\n")
         lines.append(
-            f"Malacca has zero labelled disruptions across 2019-2026, so every "
+            f"Malacca has zero labelled disruptions in the evaluated data, so every "
             f"alert is a false alarm. Mean alert rate: **tiers {tier_rate:.0%}**, "
             f"**baselines {base_rate:.0%}**. "
             + ("The multi-agent tiers are the noisier of the two.\n"
@@ -313,19 +331,25 @@ def write_report(results: pd.DataFrame) -> None:
                "The tiers are the quieter of the two.\n")
         )
 
+    n_regions = results["region"].nunique()
+    untrainable = (
+        results[results["not_applicable"].notna()]["region"].nunique()
+        if "not_applicable" in results.columns else 0
+    )
     lines.append("\n## Limits of this evaluation\n")
     lines.append(
-        "- **Supervised baselines are mostly untrainable here.** Every labelled "
-        "disruption is recent (Houthi 2024, Gatun drought 2023-24), so a "
-        "temporal split leaves no positives in training for three of four "
-        "regions. Those rows are reported as not-applicable rather than as a "
-        "0.5 score, which would have read as 'no better than chance'.\n"
-        "- **One split, no confidence intervals.** Positive counts are 133-244 "
-        "days; treat differences under roughly 0.05 AUC as noise.\n"
+        f"- **Supervised baselines are untrainable in {untrainable} of "
+        f"{n_regions} regions.** Most labelled disruptions are recent (Houthi "
+        "2024, Gatun drought 2023-24), so the temporal split leaves no "
+        "positives in training there. Those rows are reported as "
+        "not-applicable rather than as a 0.5 score, which would have read as "
+        "'no better than chance'.\n"
+        "- **One split, no confidence intervals.** Treat differences under "
+        "roughly 0.05 AUC as noise.\n"
         "- **Malacca cannot be evaluated for detection** — no positives at all.\n"
-        "- **Panama alone has news features** (18 vs 14), because GDELT only "
-        "answered for that region. Its tier 5 is therefore not directly "
-        "comparable with the others'.\n"
+        "- **News features come from GDELT 1.0 event exports** (corridor box "
+        "filter v2) in every region; volume is articles per 100k GDELT "
+        "events that day.\n"
         "- **The label is one definition among several.** The level-shift rule "
         "recovers two documented events, but agents built against a different "
         "definition of disruption will score poorly whatever their merit.\n"

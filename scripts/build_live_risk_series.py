@@ -6,8 +6,8 @@ that series per region:
 1. Fetch the live connectors exactly as ``build_eval_dataset.py`` does, but
    keep every shipping day (``drop_incomplete=False``): a domain whose source
    ends earlier is NaN after its last day rather than cutting the whole frame.
-2. Fit each active agent on the first 70 % of days (the evaluation's temporal
-   split) and score every day with it.
+2. Fit each active agent on the days before the evaluation's split date
+   (settings.yaml ``evaluation.split_date``) and score every day with it.
 3. Aggregate each day with :class:`RiskEngine` over the agents that have data
    that day, so weights renormalise exactly as when an agent is unavailable
    in a live run.
@@ -49,9 +49,9 @@ from src.agents.base_agent import DetectionResult  # noqa: E402
 from src.aggregation.risk_engine import RiskEngine  # noqa: E402
 from src.core.config_manager import load_config_for_region  # noqa: E402
 from src.core.regions import get_region, list_regions  # noqa: E402
+from src.evaluation.window import eval_window  # noqa: E402
 
 LIVE_DIR = _PROJECT_ROOT / "data" / "live"
-TRAIN_FRACTION = 0.70
 
 
 def fetch(region: str) -> pd.DataFrame:
@@ -81,7 +81,7 @@ def score(region: str, frame: pd.DataFrame) -> pd.DataFrame:
     config = load_config_for_region(region)
     frame = frame.sort_values("timestamp").reset_index(drop=True)
     frame["timestamp"] = pd.to_datetime(frame["timestamp"])
-    cut = frame["timestamp"].iloc[int(len(frame) * TRAIN_FRACTION)]
+    cut = eval_window()["split_date"]
 
     out = pd.DataFrame({"timestamp": frame["timestamp"], "y_true": frame["y_true"]})
     for domain in get_region(region).active_agents():

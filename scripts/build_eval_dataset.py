@@ -13,9 +13,22 @@ Each region's frame merges the live connectors on a daily index:
 * natural_disaster — GDACS alerts + USGS seismicity
 * geopolitical — ACLED conflict events
 
-news_sentiment is fetched when GDELT answers and omitted when it does not;
-the column set for each region is recorded in the manifest so a later run
-cannot quietly compare a five-feature region against a four-feature one.
+* news_sentiment — GDELT 1.0 daily event exports, corridor box filter
+  (``NewsConnector`` ``gdelt_events`` mode, reading the series that
+  ``scripts/build_gdelt_news_csv.py`` builds under ``data/eval/news/``)
+
+A domain that cannot be loaded is omitted, and the column set for each region
+is recorded in the manifest, so a later run cannot quietly compare a
+five-feature region against a four-feature one. The news filter's version and
+hashes go in the manifest as ``news_source``.
+
+News days GDELT never published are forward-filled from the last published
+day, not interpolated like the other domains, so no filled news value uses
+future data. Any other gap in the news series is an error.
+
+``--refresh-news`` swaps only the news columns of the cached frames for the
+current GDELT series. The other domains are not re-pulled, so their values and
+the frame's rows stay exactly as they were.
 
 Ground truth is the shipping connector's ``is_disruption`` — a 2-sigma
 persistent drop in transits, plus the pinned April-May 2026 Hormuz shutdown.
@@ -31,6 +44,7 @@ Usage::
 
     python scripts/build_eval_dataset.py
     python scripts/build_eval_dataset.py --region panama --force
+    python scripts/build_eval_dataset.py --refresh-news
 """
 
 from __future__ import annotations
@@ -38,6 +52,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -144,17 +159,95 @@ def _fetch_domain(domain: str, config: dict) -> pd.DataFrame | None:
             block = dict(config["ingestion"]["market"])
             return MarketConnector(source_mode="api", config=block).fetch()
 
+        if domain == "news_sentiment":
+            return _load_news(config)
         block = dict(config["agents"][domain])
         block["data_mode"] = "api"
         connector = {
             "natural_disaster": DisasterConnector,
             "geopolitical": GeopoliticalConnector,
-            "news_sentiment": NewsConnector,
         }[domain]
         return connector(config=block).fetch()
     except Exception as exc:
         logger.warning("  %s unavailable: %s", domain, str(exc)[:160])
         return None
+
+
+def _load_news(config: dict, news_dir: str | Path | None = None) -> pd.DataFrame:
+    """The region's GDELT 1.0 news series. Errors propagate.
+
+    The DOC 2.0 API (``api`` mode) is IP-blocked here (HTTP 429 on every
+    request); the GDELT 1.0 export series built by
+    ``scripts/build_gdelt_news_csv.py`` replaces it.
+    """
+    from src.ingestion import NewsConnector
+
+    block = dict(config["agents"]["news_sentiment"])
+    block["data_mode"] = "gdelt_events"
+    block.setdefault("region", config["region"]["name"])
+    if news_dir is not None:
+        block["gdelt_events_dir"] = str(news_dir)
+    return NewsConnector(config=block).fetch()
+
+
+#: How a news day GDELT never published is filled in the evaluation frame.
+_NEWS_GAP_FILL = "forward-fill from the last published day (no future data)"
+
+
+def attach_news(frame: pd.DataFrame, news: pd.DataFrame, *,
+                outside: str = "raise") -> tuple[pd.DataFrame, dict]:
+    """Merge the news series onto ``frame`` with the news gap policy.
+
+    Days inside the news series' range that it has no row for must be days
+    GDELT never published (the manifest's ``missing_days``). They are
+    forward-filled from the last published day, so no filled value uses
+    future data. Linear interpolation would draw on the next published day,
+    which for the 18-day June 2025 outage means up to 18 days ahead.
+
+    Args:
+        frame: Time-ordered frame without news columns.
+        news: The news connector's frame (``gdelt_events`` mode).
+        outside: ``"raise"`` if a frame day lies outside the news series'
+            range, or ``"nan"`` to leave such days NaN (the live series).
+
+    Returns:
+        ``(frame, news_source)``: the merged frame and the provenance block
+        for the manifest, including the forward-filled days.
+
+    Raises:
+        ValueError: If a gap is not a GDELT-missing day, if the frame is not
+            time-ordered, or (``outside="raise"``) if a frame day lies
+            outside the news coverage.
+    """
+    domain = "news_sentiment"
+    columns = list(_DOMAIN_FEATURES[domain])
+    prefixed = [f"{domain}__{c}" for c in columns]
+    if not pd.to_datetime(frame["timestamp"]).is_monotonic_increasing:
+        raise ValueError("attach_news needs a time-ordered frame (forward-fill).")
+    block = news[["timestamp", *columns]].rename(columns=dict(zip(columns, prefixed)))
+    out = frame.merge(block, on="timestamp", how="left")
+
+    ts = pd.to_datetime(out["timestamp"])
+    inside = (ts >= news["timestamp"].min()) & (ts <= news["timestamp"].max())
+    if outside == "raise" and (~inside).any():
+        uncovered = ts[~inside]
+        raise ValueError(
+            f"{len(uncovered)} frame days fall outside the news series' "
+            f"coverage ({uncovered.min().date()} .. {uncovered.max().date()}); "
+            "extend the GDELT backfill rather than dropping rows."
+        )
+    source = dict(news.attrs.get("news_source") or {})
+    holes = [str(t.date()) for t in ts[inside & out[prefixed[0]].isna()]]
+    unexplained = sorted(set(holes) - set(source.get("missing_days") or []))
+    if unexplained:
+        raise ValueError(
+            f"news has no row for {len(unexplained)} days not listed as "
+            f"GDELT-missing: {unexplained[:5]}; rebuild the news series."
+        )
+    out[prefixed] = out[prefixed].ffill()
+    out.loc[~inside, prefixed] = float("nan")     # never extend past coverage
+    source.update(gap_fill=_NEWS_GAP_FILL, days_forward_filled=holes)
+    return out, source
 
 
 def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFrame, dict]:
@@ -198,6 +291,8 @@ def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFram
 
     present: dict[str, list[str]] = {}
     for domain, df in frames.items():
+        if domain == "news_sentiment":
+            continue                      # attached below, with its own gap rule
         columns = [c for c in _DOMAIN_FEATURES[domain] if c in df.columns]
         if not columns:
             continue
@@ -215,6 +310,13 @@ def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFram
     merged[feature_columns] = merged[feature_columns].interpolate(
         limit_area="inside"
     )
+    news_source = None
+    if "news_sentiment" in frames:
+        # Same function as --refresh-news, so the two paths cannot diverge.
+        merged, news_source = attach_news(merged, frames["news_sentiment"],
+                                          outside="nan")
+        present["news_sentiment"] = list(_DOMAIN_FEATURES["news_sentiment"])
+        feature_columns = [c for c in merged.columns if "__" in c]
     before = len(merged)
     if drop_incomplete:
         merged = merged.dropna(subset=feature_columns, how="any")
@@ -253,21 +355,117 @@ def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFram
         "positive_days_shock": int(merged["y_true_shock"].sum())
         if not merged.empty else 0,
     }
+    if news_source is not None:
+        manifest["news_source"] = news_source
     return merged, manifest
+
+
+def replace_news(frame: pd.DataFrame, manifest: dict,
+                 news: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Swap a cached frame's news columns for a freshly loaded news series.
+
+    Every other column and every row stays as cached, so the other domains'
+    values do not move. News is attached by :func:`attach_news`, the same
+    function :func:`build_region` uses, so the two paths give the same values.
+
+    Args:
+        frame: A cached evaluation frame (``timestamp`` plus prefixed features).
+        manifest: Its manifest; a copy is updated and returned.
+        news: The news connector's frame (``gdelt_events`` mode).
+
+    Returns:
+        ``(frame, manifest)`` with the news columns replaced.
+
+    Raises:
+        ValueError: If any frame day falls outside the news series' coverage
+            (dropping such rows would change the evaluation's row set for
+            every other method), or as :func:`attach_news`.
+    """
+    domain = "news_sentiment"
+    out = frame.drop(columns=[c for c in frame.columns
+                              if c.startswith(f"{domain}__")])
+    out, source = attach_news(out, news, outside="raise")
+
+    m = dict(manifest)
+    m["domains_present"] = {**m.get("domains_present", {}),
+                            domain: list(_DOMAIN_FEATURES[domain])}
+    m["domains_missing"] = [d for d in m.get("domains_missing", []) if d != domain]
+    m["feature_columns"] = [c for c in out.columns if "__" in c]
+    m["news_source"] = source
+    m["rows"] = int(len(out))
+    return out, m
+
+
+def _replace_file(tmp: Path, target: Path, tries: int = 10) -> None:
+    """``os.replace`` with retries: OneDrive briefly locks files it syncs."""
+    for attempt in range(tries):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if attempt == tries - 1:
+                raise
+            time.sleep(0.5 * (attempt + 1))
+
+
+def refresh_news(region: str, news_dir: str | Path | None = None) -> dict:
+    """Replace the news columns of ``region``'s cached frame on disk.
+
+    Errors propagate (a sha mismatch, failed backfill days, a gap that is not
+    GDELT-missing) rather than being reduced to "unavailable". Each file is
+    written to a temporary sibling and swapped in.
+    """
+    target = _CACHE_DIR / f"{region}.csv"
+    manifest_path = _CACHE_DIR / f"{region}.manifest.json"
+    # round_trip so rewriting the file cannot nudge other domains' floats.
+    frame = pd.read_csv(target, parse_dates=["timestamp"],
+                        float_precision="round_trip")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    news = _load_news(load_config_for_region(region), news_dir)
+    frame, manifest = replace_news(frame, manifest, news)
+
+    tmp_csv = target.with_name(target.name + ".tmp")
+    frame.to_csv(tmp_csv, index=False)
+    tmp_manifest = manifest_path.with_name(manifest_path.name + ".tmp")
+    tmp_manifest.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    _replace_file(tmp_csv, target)
+    _replace_file(tmp_manifest, manifest_path)
+    return manifest
 
 
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--region", action="append", dest="regions")
-    parser.add_argument("--relabel", action="store_true",
-                        help="Recompute y_true on cached frames; no API calls.")
-    parser.add_argument("--force", action="store_true",
-                        help="Rebuild even if a cached frame exists.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--relabel", action="store_true",
+                      help="Recompute y_true on cached frames; no API calls.")
+    mode.add_argument("--force", action="store_true",
+                      help="Rebuild even if a cached frame exists.")
+    mode.add_argument("--refresh-news", action="store_true",
+                      help="Replace only the news columns of cached frames "
+                           "with the GDELT 1.0 series; no other API calls.")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     regions = args.regions or list_regions()
+
+    if args.refresh_news:
+        failed = 0
+        for region in regions:
+            try:
+                m = refresh_news(region)
+            except Exception as exc:
+                failed += 1
+                print(f"  {region}: FAILED: {exc}")
+                continue
+            src = m["news_source"]
+            print(f"  {region}: news replaced -> {m['rows']} rows, "
+                  f"{len(m['feature_columns'])} features, filter "
+                  f"{src.get('filter_version')} ({str(src.get('csv_sha256'))[:12]}), "
+                  f"{len(src['days_forward_filled'])} days forward-filled, "
+                  f"missing={m['domains_missing']}")
+        return 1 if failed else 0
 
     manifests = []
     for region in regions:

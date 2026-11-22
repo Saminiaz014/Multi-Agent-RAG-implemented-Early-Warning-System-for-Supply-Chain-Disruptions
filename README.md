@@ -767,7 +767,7 @@ Full file layout in [Project Structure](#project-structure). Construction histor
 
 Three decisions carry the weight of the entire evaluation. Each exists to prevent a specific way of accidentally reporting a flattering number.
 
-**1. One temporal split, applied to everyone.** The last 30 % of each region's series is the test window and nothing is fitted on it. A supervised model scored on its own training rows posts an inflated number that is not comparable with an unsupervised detector. The split is **temporal rather than random** because shuffling days of a time series leaks the future into the past and destroys the ordering every rolling window depends on.
+**1. One temporal split, applied to everyone.** Every region trains on the days before `evaluation.split_date` (2023-07-01, `config/settings.yaml`) and is tested from that date to `evaluation.end_date` (2025-11-21, the last day ACLED covers); nothing is fitted on the test window. A supervised model scored on its own training rows posts an inflated number that is not comparable with an unsupervised detector. The split is **temporal rather than random** because shuffling days of a time series leaks the future into the past and destroys the ordering every rolling window depends on.
 
 **2. Tiers instantiate real agents.** A tier is a set of agent classes; each is fitted and run, and the composite is the weighted mean of their scores under the project's own weights. Approximating a tier by averaging "the first N feature columns" would measure nothing — the first two columns of these frames are both shipping features, so a "Tier 2" built that way would contain no market signal at all despite its label.
 

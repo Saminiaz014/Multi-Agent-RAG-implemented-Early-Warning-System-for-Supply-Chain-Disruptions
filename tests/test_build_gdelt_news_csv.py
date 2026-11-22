@@ -9,6 +9,8 @@ import zipfile
 from pathlib import Path
 from urllib.error import HTTPError
 
+import numpy as np
+import pandas as pd
 import pytest
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "build_gdelt_news_csv.py"
@@ -255,3 +257,24 @@ def test_save_progress_retries_on_permission_error(monkeypatch, tmp_path) -> Non
     prog_f = tmp_path / "_progress.json"
     g._save_progress({"filter_version": "v2", "done": {}, "missing": []}, prog_f)
     assert prog_f.exists() and calls["n"] == 3
+
+
+# ------------------------------------ volume normalisation + zero-day tone
+def test_row_carries_total_events_for_normalisation() -> None:
+    r = g.row(dt.date(2019, 1, 1), g.empty_agg(), total_events=120000)
+    assert r["total_events"] == 120000
+
+
+def test_written_csv_keeps_tone_nan_on_zero_volume_days(tmp_path) -> None:
+    lat, lon = _centre("hormuz")
+    agg = g.process(_zip([_line(lat, lon, n_art=4, tone=-3.0)]))["agg"]
+    prog = {"done": {"2019-01-01": {"agg": {}, "n_rows": 1000},
+                     "2019-01-02": {"agg": agg, "n_rows": 2000}},
+            "missing": ["2019-01-03"]}
+    path = tmp_path / "hormuz.csv"
+    g.write_region_csv(path, prog, "hormuz", dt.date(2019, 1, 1), dt.date(2019, 1, 3))
+    df = pd.read_csv(path)
+    assert df["date"].tolist() == ["2019-01-01", "2019-01-02"]    # missing day: no row
+    assert df.loc[0, "news_volume"] == 0 and np.isnan(df.loc[0, "news_tone"])   # NaN, not 0
+    assert df.loc[1, "news_tone"] == -3.0
+    assert df["total_events"].tolist() == [1000, 2000]

@@ -9,10 +9,10 @@ from src.explainability.real_surrogate import canonical_features, temporal_split
 from src.explainability.shap_explainer import ALL_FEATURE_NAMES
 
 
-def _frame(n: int = 100) -> pd.DataFrame:
+def _frame(n: int = 100, start: str = "2019-01-01") -> pd.DataFrame:
     rng = np.random.default_rng(1)
     frame = pd.DataFrame({
-        "timestamp": pd.date_range("2019-01-01", periods=n, freq="D"),
+        "timestamp": pd.date_range(start, periods=n, freq="D"),
         "shipping__vessel_count": rng.integers(20, 60, n).astype(float),
         "market__brent_crude_usd": rng.normal(70, 5, n),
         "geopolitical__military_activity_index": rng.random(n),
@@ -20,10 +20,11 @@ def _frame(n: int = 100) -> pd.DataFrame:
     return frame.sample(frac=1.0, random_state=0)  # shuffled on purpose
 
 
-def test_split_is_temporal() -> None:
-    train, test = temporal_split(_frame())
-    assert len(train) == 70 and len(test) == 30
-    assert train["timestamp"].max() < test["timestamp"].min()
+def test_split_is_temporal_at_the_evaluation_split_date() -> None:
+    train, test = temporal_split(_frame(start="2023-06-01"))     # shuffled input
+    assert train["timestamp"].max() == pd.Timestamp("2023-06-30")
+    assert test["timestamp"].min() == pd.Timestamp("2023-07-01")
+    assert train["timestamp"].is_monotonic_increasing
 
 
 def test_missing_sources_are_nan_not_zero() -> None:

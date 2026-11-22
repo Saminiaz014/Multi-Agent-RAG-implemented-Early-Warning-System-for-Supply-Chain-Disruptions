@@ -2,7 +2,8 @@
 
 Alerts are the evaluation harness's own (``scripts/run_method_comparison.py``):
 the all-agent tier's composite above the 90th percentile of its training-window
-scores, on the last 30% of each region's frame. Nothing about the model, label,
+scores, on the evaluation's fixed test window (settings.yaml ``evaluation``:
+from ``split_date`` to ``end_date``). Nothing about the model, label,
 thresholds or aggregation is changed.
 
 SHAP values come from one of two surrogates:
