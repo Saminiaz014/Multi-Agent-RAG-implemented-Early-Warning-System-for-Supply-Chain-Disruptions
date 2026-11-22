@@ -13,7 +13,9 @@ It also flags methods whose alert rate rises by more than 20 points under
 B6 CUSUM's training vs test score distribution.
 
 Scores and thresholds come from ``scripts/run_method_comparison.py``'s own
-functions, so this is the harness's view, not a re-implementation.
+functions, so this is the harness's view, not a re-implementation. The three
+controls (M1, M2, ORACLE) no longer use the threshold rule in the harness
+(``_DIRECT_ALERTS``); their rows here show what the rule would do to them.
 
 Usage::
 

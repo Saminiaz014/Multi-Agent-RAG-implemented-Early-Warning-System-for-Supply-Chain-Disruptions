@@ -18,7 +18,7 @@ All figures are measured on a held-out window: 2023-07-01 to 2025-11-21, the sam
 | B4 EWMA deviation | unsupervised | 0.544 [0.505, 0.594] | 0.258 | 0.19 |
 | B1 rolling z | unsupervised | 0.525 [0.494, 0.557] | 0.133 | 0.10 |
 | B5 AR residual | unsupervised | 0.509 [0.491, 0.521] | 0.066 | 0.07 |
-| M2 never alert | control | 0.500 [0.500, 0.500] | 0.443 | 1.00 |
+| M2 never alert | control | 0.500 [0.500, 0.500] | 0.000 | 0.00 |
 | M1 always alert | control | 0.500 [0.500, 0.500] | 0.443 | 1.00 |
 | M0 random | control | 0.494 [0.444, 0.541] | 0.192 | 0.10 |
 | Tier 5 | multi-agent | 0.491 [0.372, 0.579] | 0.439 | 0.67 |
@@ -26,7 +26,7 @@ All figures are measured on a held-out window: 2023-07-01 to 2025-11-21, the sam
 | Tier 4 | multi-agent | 0.470 [0.353, 0.557] | 0.413 | 0.65 |
 | Tier 3 | multi-agent | 0.469 [0.353, 0.556] | 0.416 | 0.65 |
 | B6 CUSUM | unsupervised | 0.308 [0.113, 0.500] | 0.480 | 0.74 |
-| *ORACLE label t-1 (ceiling, not a method)* | oracle | 0.997 [0.991, 1.000] | 0.443 | 1.00 |
+| *ORACLE label t-1 (ceiling, not a method)* | oracle | 0.997 [0.991, 1.000] | 0.996 | 0.28 |
 
 Ceiling: ORACLE label t-1 (0.997 [0.991, 1.000]) reads yesterday's true label, which no detector has at inference. It bounds what one-day-lagged knowledge of the answer would score.
 
@@ -46,7 +46,7 @@ Best baseline M3 persistence (0.966 [0.920, 0.996]) vs best tier Tier 1 (0.747 [
 | Tier 1 | multi-agent | 0.574 [0.516, 0.633] | 0.028 | 0.17 |
 | M0 random | control | 0.517 [0.462, 0.571] | 0.153 | 0.10 |
 | M1 always alert | control | 0.500 [0.500, 0.500] | 0.269 | 1.00 |
-| M2 never alert | control | 0.500 [0.500, 0.500] | 0.269 | 1.00 |
+| M2 never alert | control | 0.500 [0.500, 0.500] | 0.000 | 0.00 |
 | Tier 2 | multi-agent | 0.497 [0.384, 0.594] | 0.032 | 0.13 |
 | B5 AR residual | unsupervised | 0.492 [0.471, 0.513] | 0.077 | 0.12 |
 | B4 EWMA deviation | unsupervised | 0.490 [0.450, 0.533] | 0.090 | 0.13 |
@@ -56,7 +56,7 @@ Best baseline M3 persistence (0.966 [0.920, 0.996]) vs best tier Tier 1 (0.747 [
 | Tier 4 | multi-agent | 0.440 [0.304, 0.555] | 0.161 | 0.24 |
 | Tier 3 | multi-agent | 0.439 [0.303, 0.554] | 0.160 | 0.24 |
 | Tier 5 | multi-agent | 0.431 [0.298, 0.544] | 0.143 | 0.22 |
-| *ORACLE label t-1 (ceiling, not a method)* | oracle | 0.987 [0.969, 0.997] | 0.269 | 1.00 |
+| *ORACLE label t-1 (ceiling, not a method)* | oracle | 0.987 [0.969, 0.997] | 0.977 | 0.16 |
 
 Ceiling: ORACLE label t-1 (0.987 [0.969, 0.997]) reads yesterday's true label, which no detector has at inference. It bounds what one-day-lagged knowledge of the answer would score.
 
@@ -79,12 +79,12 @@ Best baseline B7 logistic regression (0.939 [0.877, 0.981]) vs best tier Tier 1 
 | B5 AR residual | unsupervised | 0.508 [0.485, 0.528] | 0.069 | 0.10 |
 | B4 EWMA deviation | unsupervised | 0.506 [0.433, 0.583] | 0.145 | 0.12 |
 | M0 random | control | 0.501 [0.446, 0.561] | 0.126 | 0.10 |
-| M2 never alert | control | 0.500 [0.500, 0.500] | 0.297 | 1.00 |
+| M2 never alert | control | 0.500 [0.500, 0.500] | 0.000 | 0.00 |
 | M1 always alert | control | 0.500 [0.500, 0.500] | 0.297 | 1.00 |
 | B1 rolling z | unsupervised | 0.481 [0.422, 0.539] | 0.147 | 0.10 |
 | M8 matrix profile | unsupervised | 0.436 [0.354, 0.521] | 0.027 | 0.09 |
 | B6 CUSUM | unsupervised | 0.219 [0.055, 0.377] | 0.345 | 0.84 |
-| *ORACLE label t-1 (ceiling, not a method)* | oracle | 0.996 [0.986, 1.000] | 0.297 | 1.00 |
+| *ORACLE label t-1 (ceiling, not a method)* | oracle | 0.996 [0.986, 1.000] | 0.993 | 0.17 |
 
 Ceiling: ORACLE label t-1 (0.996 [0.986, 1.000]) reads yesterday's true label, which no detector has at inference. It bounds what one-day-lagged knowledge of the answer would score.
 
@@ -155,8 +155,8 @@ Malacca has zero labelled disruptions in the evaluated data, so every alert is a
 ## Limits of this evaluation
 
 - **Supervised baselines are untrainable in 3 of 4 regions.** Most labelled disruptions are recent (Houthi 2024, Gatun drought 2023-24), so the temporal split leaves no positives in training there. Those rows are reported as not-applicable rather than as a 0.5 score, which would have read as 'no better than chance'.
-- **Intervals are 95% moving-block bootstrap CIs** (30-day blocks, 1,000 resamples) on the test window, with the training threshold held fixed. Every method in a region gets the same resamples, so intervals are paired. Non-overlapping intervals show a clear difference; overlapping ones are inconclusive on their own. Tier differences use the paired interval of the difference (the same resampled blocks for both tiers); a paired interval that excludes 0 is a clear difference. AUC and F1 intervals use only resamples that contain both classes: at least 998 of 1,000 for every scored method. They cover test-sample uncertainty only, not the choice of split or label, and they are conditional on the few disruption episodes in each test window, so they do not measure skill on a new kind of disruption.
-- **Alert rule:** a day alerts when its score >= the method's 90th percentile of training scores (masked days left out). A score tied with that threshold counts as an alert. These rows alert on every scored test day, so their F1 and alert rate are always-alert values: M1 always alert (all regions); M2 never alert (all regions); ORACLE label t-1 (all regions). The ceiling row bounds AUC only.
+- **Intervals are 95% moving-block bootstrap CIs** (30-day blocks, 1,000 resamples) on the test window, with the training threshold (or a row's direct alerts) held fixed. Every method in a region gets the same resamples, so intervals are paired. Non-overlapping intervals show a clear difference; overlapping ones are inconclusive on their own. Tier differences use the paired interval of the difference (the same resampled blocks for both tiers); a paired interval that excludes 0 is a clear difference. AUC and F1 intervals use only resamples that contain both classes: at least 998 of 1,000 for every scored method. They cover test-sample uncertainty only, not the choice of split or label, and they are conditional on the few disruption episodes in each test window, so they do not measure skill on a new kind of disruption.
+- **Alert rule:** a day alerts when its score >= the method's 90th percentile of training scores (masked days left out). A score tied with that threshold counts as an alert. These rows define their alerts directly instead: M1 always alert (every day); M2 never alert (no day); ORACLE label t-1 (yesterday's label is 1).
 - **Days GDELT never published are masked:** 18 test days in every region are left out of every method's score (point estimates and intervals) and out of every training threshold. They are not filled.
 - **Malacca cannot be evaluated for detection** — no positives at all.
 - **News features come from GDELT 1.0 event exports** (corridor box filter v2) in every region; volume is articles per 100k GDELT events that day. The news agent's tone means skip days without articles instead of counting them as neutral tone.

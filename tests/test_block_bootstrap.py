@@ -198,3 +198,41 @@ def test_bootstrap_alert_rule_counts_ties_as_alerts() -> None:
     out = block_bootstrap_ci(y, scores, threshold=0.5, block=30, n_resamples=50)
     assert out["f1_ci_low"] == out["f1_ci_high"] == 1.0
     assert out["alert_rate_ci_low"] > 0.0
+
+
+# ------------------------------------------------- alerts given directly
+def test_given_alerts_replace_the_threshold_rule_but_not_auc() -> None:
+    """A control's alerts are defined directly; its scores still give AUC."""
+    y = _runs()
+    scores = y * 0.6 + np.random.default_rng(4).normal(0, 0.5, len(y))
+    by_rule = block_bootstrap_ci(y, scores, 0.5, block=30, n_resamples=100)
+    # The rule's own alerts, given directly, reproduce every interval,
+    # with and without masked days.
+    assert block_bootstrap_ci(y, scores, alerts=scores >= 0.5,
+                              block=30, n_resamples=100) == by_rule
+    keep = np.ones(len(y), dtype=bool)
+    keep[100:130] = False
+    assert (block_bootstrap_ci(y, scores, alerts=scores >= 0.5, keep=keep,
+                               block=30, n_resamples=100)
+            == block_bootstrap_ci(y, scores, 0.5, keep=keep, block=30, n_resamples=100))
+    every = block_bootstrap_ci(y, scores, None, alerts=np.ones(len(y), dtype=bool),
+                               block=30, n_resamples=100)
+    none = block_bootstrap_ci(y, scores, None, alerts=np.zeros(len(y), dtype=bool),
+                              block=30, n_resamples=100)
+    assert every["alert_rate_ci_low"] == every["alert_rate_ci_high"] == 1.0
+    assert none["alert_rate_ci_low"] == none["alert_rate_ci_high"] == 0.0
+    assert none["f1_ci_high"] == 0.0
+    for out in (every, none):                          # AUC never reads the alerts
+        for key in ("auc_ci_low", "auc_ci_high", "bootstrap_valid"):
+            assert out[key] == by_rule[key]
+
+
+def test_threshold_and_alerts_are_exclusive() -> None:
+    y = _runs()
+    s = y.astype(float)
+    with pytest.raises(ValueError, match="threshold or alerts"):
+        block_bootstrap_ci(y, s, None, block=30, n_resamples=10)
+    with pytest.raises(ValueError, match="threshold or alerts"):
+        block_bootstrap_ci(y, s, 0.5, alerts=y == 1, block=30, n_resamples=10)
+    with pytest.raises(ValueError, match="alerts"):
+        block_bootstrap_ci(y, s, None, alerts=(y == 1)[:-1], block=30, n_resamples=10)

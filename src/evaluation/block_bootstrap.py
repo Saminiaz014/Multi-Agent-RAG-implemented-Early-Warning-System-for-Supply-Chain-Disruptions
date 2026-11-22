@@ -8,7 +8,9 @@ resamples contiguous blocks instead, which keeps the within-block dependence.
 
 The decision threshold is held fixed across resamples. It was set on the
 training window, so the interval reflects test-sample uncertainty only, not
-re-calibration.
+re-calibration. A method whose alerts are defined directly (a control that
+alerts every day, say) passes those alerts instead, and each resample takes
+the alerts of its days.
 
 Blocks are drawn over calendar days. Days that must not be scored (``keep``
 False, e.g. a news outage) are dropped from each resample after drawing, so a
@@ -86,8 +88,9 @@ def _bounds(values: list[float], ci: float) -> tuple[float, float]:
 def block_bootstrap_ci(
     y_true: np.ndarray,
     scores: np.ndarray,
-    threshold: float,
+    threshold: float | None = None,
     *,
+    alerts: np.ndarray | None = None,
     keep: np.ndarray | None = None,
     block: int = 30,
     n_resamples: int = 1000,
@@ -103,7 +106,10 @@ def block_bootstrap_ci(
         y_true: Binary labels for the test window, in time order.
         scores: The method's scores for the same days.
         threshold: Alert threshold, fixed from the training window; a day
-            alerts when its score is ``>=`` it.
+            alerts when its score is ``>=`` it. ``None`` when ``alerts`` is
+            given.
+        alerts: The test days' alerts, defined directly rather than by the
+            threshold rule. AUC still comes from ``scores``.
         keep: True on days that are scored. ``None`` scores every day.
         block: Block length in days.
         n_resamples: Number of bootstrap resamples.
@@ -117,21 +123,27 @@ def block_bootstrap_ci(
         when there are none (a test window without positives).
 
     Raises:
-        ValueError: If ``y_true``, ``scores`` and ``keep`` differ in length,
-            if ``block`` is below 1 or not shorter than the series, if
+        ValueError: If ``y_true``, ``scores``, ``alerts`` and ``keep`` differ
+            in length, if not exactly one of ``threshold`` and ``alerts`` is
+            given, if ``block`` is below 1 or not shorter than the series, if
             ``n_resamples`` is below 1, or if ``ci`` is not in (0, 1).
     """
     y = np.asarray(y_true).astype(int)
     s = np.nan_to_num(np.asarray(scores, dtype=float))
     if len(y) != len(s):
         raise ValueError(f"y_true has {len(y)} days, scores {len(s)}")
+    if (threshold is None) == (alerts is None):
+        raise ValueError("give exactly one of threshold or alerts")
+    fired = (s >= threshold) if alerts is None else np.asarray(alerts, dtype=bool)
+    if len(fired) != len(y):
+        raise ValueError(f"alerts has {len(fired)} days, y_true {len(y)}")
     _check(len(y), block, n_resamples, ci)
     mask = _keep_mask(keep, len(y))
 
     auc, f1, alert = [], [], []
     for idx in _resamples(mask, block, n_resamples, seed):
         yb, sb = y[idx], s[idx]
-        predicted = (sb >= threshold).astype(int)          # same rule as the point metrics
+        predicted = fired[idx].astype(int)                 # same rule as the point metrics
         alert.append(predicted.mean() if len(idx) else np.nan)
         if len(idx) and yb.min() != yb.max():
             auc.append(roc_auc_score(yb, sb))

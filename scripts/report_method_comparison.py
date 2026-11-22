@@ -348,7 +348,8 @@ def _ci_note(results: pd.DataFrame) -> str:
               "that excludes 0 is a clear difference." if _has_delta(results) else "")
     return (
         f"- **Intervals are {pct} moving-block bootstrap CIs** ({how}) on "
-        "the test window, with the training threshold held fixed. Every method "
+        "the test window, with the training threshold (or a row's direct "
+        "alerts) held fixed. Every method "
         "in a region gets the same resamples, so intervals are paired. "
         "Non-overlapping intervals show a clear difference; overlapping ones "
         "are inconclusive on their own." + paired + valid + " They cover test-sample "
@@ -383,13 +384,24 @@ def _dating_note(results: pd.DataFrame) -> str:
 
 
 def _alert_rule_note(results: pd.DataFrame) -> str:
-    """The alert rule, and which rows alert on every scored test day.
+    """The alert rule, the controls defined directly, and tie-driven rows.
 
-    Under ``>=``, a constant score (or one at its floor on 90%+ of training
-    days) alerts every day, so its F1 and alert rate are always-alert
-    values. Listed from the CSV, not hard-coded; nothing is special-cased.
+    Read from the CSV's ``alert_rule`` column, not hard-coded: rows whose
+    rule starts ``direct:`` (the controls) set their alerts themselves. Of
+    the others, under ``>=`` a constant score (or one at its floor on 90%+ of
+    training days) alerts every day, so its F1 and alert rate are
+    always-alert values; those are listed, not special-cased.
     """
-    always = results[results["alert_rate"] >= 1.0]
+    rule = (results["alert_rule"].fillna("") if "alert_rule" in results.columns
+            else pd.Series("", index=results.index))
+    is_direct = rule.str.startswith("direct:")
+    direct = ""
+    if is_direct.any():
+        first = results[is_direct].groupby("method", sort=False)["alert_rule"].first()
+        shown = [f"{m} ({r.removeprefix('direct:').strip()})" for m, r in first.items()]
+        direct = (" These rows define their alerts directly instead: "
+                  + "; ".join(shown) + ".")
+    always = results[~is_direct & (results["alert_rate"] >= 1.0)]
     listed = ""
     if not always.empty:
         names = []
@@ -400,12 +412,10 @@ def _alert_rule_note(results: pd.DataFrame) -> str:
             names.append(f"{method} ({span})")
         listed = (" These rows alert on every scored test day, so their F1 and "
                   "alert rate are always-alert values: " + "; ".join(names) + ".")
-    ceiling = (" The ceiling row bounds AUC only."
-               if _is_ceiling(results).any() else "")
     return (
         "- **Alert rule:** a day alerts when its score >= the method's 90th "
         "percentile of training scores (masked days left out). A score tied "
-        "with that threshold counts as an alert." + listed + ceiling + "\n"
+        "with that threshold counts as an alert." + direct + listed + "\n"
     )
 
 

@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import f1_score, roc_auc_score
 
 _ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location(
@@ -207,3 +207,104 @@ def test_a_constant_score_alerts_every_day() -> None:
     assert np.isnan(quiet["auc"]) and quiet["alert_rate"] == 1.0
     assert rmc._evaluate(y.repeat(50), np.ones(200), np.ones(100),
                          n_resamples=20)["alert_rate_ci_low"] == 1.0
+
+
+# ------------------------------------------------ controls, defined directly
+def _control_frame() -> pd.DataFrame:
+    """Under 10% training positives, and a positive run across the split.
+
+    With so few training positives the ORACLE's training 90th percentile is
+    0, so the threshold rule would alert on every day; only the direct rule
+    alerts on exactly the days after a positive one.
+    """
+    ts = pd.date_range("2022-01-01", "2025-11-21", freq="D")
+    y = (((ts >= "2023-03-01") & (ts < "2023-03-21"))
+         | ((ts >= "2023-06-20") & (ts < "2023-07-10"))
+         | ((ts >= "2024-06-01") & (ts < "2024-09-01"))).astype(int)
+    rng = np.random.default_rng(5)
+    return pd.DataFrame({"timestamp": ts, "y_true": y,
+                         "shipping__vessel_count": 100 - 30 * y + rng.normal(0, 5, len(ts))})
+
+
+#: A masked test day right after a positive one: it must stay unscored.
+_CONTROL_MASKED = ["2024-06-02", "2025-06-14"]
+
+
+@pytest.fixture(scope="module")
+def control_rows() -> dict[str, dict]:
+    """One run_region over the control frame, shared by the control tests."""
+    manifest = {"region": "x", "news_source": {"days_masked": _CONTROL_MASKED},
+                **_NEW_POLICY}
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(rmc, "_agent_scores", lambda d, c, tr, te: np.zeros(len(te)))
+        rows = rmc.run_region("x", _control_frame(), manifest, {}, n_resamples=20)
+    return {r["method"]: r for r in rows}
+
+
+def _test_days(frame: pd.DataFrame):
+    train, test = rmc._split(frame)
+    yesterday = frame["y_true"].shift(1).fillna(0).astype(int).to_numpy()[len(train):]
+    keep = ~test["timestamp"].isin(pd.to_datetime(_CONTROL_MASKED)).to_numpy()
+    return train, test, test["y_true"].to_numpy(), yesterday, keep
+
+
+def test_m2_never_alerts(control_rows) -> None:
+    m2 = control_rows["M2 never alert"]
+    assert m2["alert_rate"] == 0.0 and m2["fpr"] == 0.0 and m2["f1"] == 0.0
+    assert m2["alert_rate_ci_low"] == m2["alert_rate_ci_high"] == 0.0
+    assert m2["auc"] == 0.5                       # AUC still comes from the score
+    assert m2["alert_rule"].startswith("direct")
+
+
+def test_m1_alerts_every_day(control_rows) -> None:
+    m1 = control_rows["M1 always alert"]
+    _, _, y, _, keep = _test_days(_control_frame())
+    assert m1["alert_rate"] == 1.0 and m1["fpr"] == 1.0
+    assert m1["alert_rate_ci_low"] == m1["alert_rate_ci_high"] == 1.0
+    assert m1["f1"] == pytest.approx(f1_score(y[keep], np.ones(keep.sum())))
+    assert m1["alert_rule"].startswith("direct")
+
+
+def test_oracle_alerts_match_yesterdays_label(control_rows) -> None:
+    frame = _control_frame()
+    train, test, y, yesterday, keep = _test_days(frame)
+    assert yesterday[0] == 1                      # its yesterday is a training day
+    alerts = rmc._DIRECT_ALERTS["ORACLE label t-1"][1](train, test)
+    assert np.array_equal(alerts, yesterday == 1)
+    oracle = control_rows["ORACLE label t-1"]
+    yk, ak = y[keep], yesterday[keep]
+    assert oracle["alert_rate"] == pytest.approx(ak.mean())
+    assert oracle["f1"] == pytest.approx(f1_score(yk, ak))
+    assert oracle["fpr"] == pytest.approx(ak[yk == 0].mean())
+    assert oracle["alert_rule"].startswith("direct")
+
+
+def test_only_the_controls_skip_the_threshold_rule(control_rows) -> None:
+    direct = {m for m, r in control_rows.items() if r["alert_rule"] != rmc._THRESHOLD_RULE}
+    assert direct == {"M1 always alert", "M2 never alert", "ORACLE label t-1"}
+    assert set(rmc._DIRECT_ALERTS) == direct
+
+
+def test_direct_alerts_leave_auc_and_its_ci_unchanged() -> None:
+    y, s, train = _scored()
+    alerts = np.random.default_rng(2).random(len(y)) < 0.3
+    by_rule = rmc._evaluate(y, s, train, n_resamples=50)
+    direct = rmc._evaluate(y, s, train, alerts=alerts, n_resamples=50)
+    for key in ("auc", "auc_ci_low", "auc_ci_high", "bootstrap_valid"):
+        assert direct[key] == by_rule[key]
+    assert direct["alert_rate"] == pytest.approx(alerts.mean())
+    assert direct["f1"] == pytest.approx(f1_score(y, alerts))
+
+
+def test_direct_alerts_on_a_window_without_positives() -> None:
+    """Malacca: no positives, so only the alert rate is defined, from the alerts."""
+    quiet = rmc._score_metrics(np.zeros(4), np.ones(4), alerts=np.zeros(4, dtype=bool))
+    assert np.isnan(quiet["auc"]) and quiet["alert_rate"] == 0.0
+
+
+def test_alerts_and_a_threshold_are_not_both_accepted() -> None:
+    y, s = np.array([0, 1, 0, 1]), np.arange(4.0)
+    with pytest.raises(ValueError, match="not both"):
+        rmc._score_metrics(y, s, threshold=1.0, alerts=s > 1)
+    with pytest.raises(ValueError, match="not both"):
+        rmc._score_metrics(y, s, train_scores=s, alerts=s > 1)

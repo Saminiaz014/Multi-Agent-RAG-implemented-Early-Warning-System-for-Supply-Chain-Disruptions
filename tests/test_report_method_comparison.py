@@ -216,24 +216,35 @@ def test_ranking_graph_keeps_the_ceiling_out_of_the_bars(tmp_path, monkeypatch) 
     assert drawn and all("ORACLE label t-1" not in labels for labels in drawn)
 
 
+_RULE = "score >= training p90"
+
+
 def test_alert_rule_and_always_alerting_rows_are_explained(tmp_path, monkeypatch) -> None:
-    results = _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]})
+    results = _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]}).assign(alert_rule=_RULE)
     extra = [_row("panama", "M1 always alert", 0.5, family="baseline", kind="control",
-                  alert_rate=1.0),
+                  alert_rate=1.0, alert_rule="direct: every day"),
              _row("panama", "M2 never alert", 0.5, family="baseline", kind="control",
-                  alert_rate=1.0),
+                  alert_rate=0.0, alert_rule="direct: no day"),
              _row("panama", "ORACLE label t-1", 0.99, family="ceiling", kind="oracle",
-                  alert_rate=1.0)]
+                  alert_rate=0.17, alert_rule="direct: yesterday's label is 1"),
+             _row("panama", "B9 constant", 0.5, family="baseline", alert_rate=1.0,
+                  alert_rule=_RULE)]
     text = _report(tmp_path, monkeypatch, pd.concat([results, pd.DataFrame(extra)]))
     note = next(line for line in text.splitlines() if "Alert rule" in line)
     assert "score >= " in note and "90th percentile" in note
-    for name in ("M1 always alert", "M2 never alert", "ORACLE label t-1"):
-        assert name in note
-    assert "Tier 1" not in note                         # only rows alerting every day
-    assert "bounds AUC only" in note
+    # The controls' own rules, read from the CSV.
+    for shown in ("M1 always alert (every day)", "M2 never alert (no day)",
+                  "ORACLE label t-1 (yesterday's label is 1)"):
+        assert shown in note
+    # Only threshold-rule rows are listed as alerting every day through a tie.
+    always = note.split("every scored test day")[1]
+    assert "B9 constant" in always and "M1 always alert" not in always
+    assert "Tier 1" not in note
+    assert "bounds AUC only" not in note                # the ceiling's F1 is its own now
 
 
 def test_alert_rule_note_without_always_alerting_rows(tmp_path, monkeypatch) -> None:
     text = _report(tmp_path, monkeypatch, _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]}))
     note = next(line for line in text.splitlines() if "Alert rule" in line)
     assert "every scored test day" not in note
+    assert "directly" not in note                       # no alert_rule column: no controls

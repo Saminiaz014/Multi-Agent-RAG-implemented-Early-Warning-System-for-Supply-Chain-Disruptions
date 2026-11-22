@@ -39,6 +39,12 @@ block-bootstrap ``delta_auc`` against Tier 1 on the same resampled blocks, and
 ``evaluation.sensitivity_split_dates``. The oracle is written as family
 ``ceiling``: a reference row, not a baseline.
 
+A day alerts when its score is ``>=`` the method's training 90th percentile.
+The three controls whose meaning is an alert pattern define it directly
+instead (:data:`_DIRECT_ALERTS`): M1 alerts every day, M2 on no day, the
+ORACLE on the days after a labelled day. Their scores still give AUC; the
+``alert_rule`` column records which rule each row used.
+
 Usage::
 
     python scripts/run_method_comparison.py
@@ -50,6 +56,7 @@ import json
 import logging
 import sys
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -150,22 +157,31 @@ def _threshold(scores: np.ndarray, train_scores: np.ndarray | None,
 def _evaluate(y_true: np.ndarray, scores: np.ndarray,
               train_scores: np.ndarray | None = None, *,
               keep: np.ndarray | None = None, train_keep: np.ndarray | None = None,
-              **bootstrap) -> dict:
+              alerts: np.ndarray | None = None, **bootstrap) -> dict:
     """:func:`_score_metrics` plus moving-block bootstrap CIs on the test window.
 
     The threshold stays the training one in every resample. ``keep`` marks
     the test days that are scored and ``train_keep`` the training days the
     threshold is taken from; masked days (a news outage) count in neither.
+    ``alerts`` gives the test days' alerts directly (:data:`_DIRECT_ALERTS`),
+    in which case no threshold is taken and AUC still comes from ``scores``.
     Bootstrap settings default to settings.yaml ``evaluation.bootstrap``, and
     keyword overrides (e.g. ``n_resamples``) are for tests.
     """
     y = np.asarray(y_true)
     s = np.asarray(scores, dtype=float)
     mask = np.ones(len(y), dtype=bool) if keep is None else np.asarray(keep, dtype=bool)
-    threshold = _threshold(s[mask] if train_scores is None else s, train_scores, train_keep)
-    metrics = _score_metrics(y[mask], s[mask], threshold=threshold)
+    if alerts is None:
+        threshold = _threshold(s[mask] if train_scores is None else s, train_scores,
+                               train_keep)
+        metrics = _score_metrics(y[mask], s[mask], threshold=threshold)
+    else:
+        threshold, alerts = None, np.asarray(alerts, dtype=bool)
+        if len(alerts) != len(y):
+            raise ValueError(f"alerts has {len(alerts)} days, y_true {len(y)}")
+        metrics = _score_metrics(y[mask], s[mask], alerts=alerts[mask])
     cfg = {**bootstrap_config(), **bootstrap}
-    ci = block_bootstrap_ci(y, s, threshold, keep=mask, **cfg)
+    ci = block_bootstrap_ci(y, s, threshold, alerts=alerts, keep=mask, **cfg)
     return {**metrics, **ci, "bootstrap_block": cfg["block"],
             "bootstrap_n": cfg["n_resamples"], "bootstrap_ci": cfg["ci"]}
 
@@ -226,7 +242,7 @@ def _family(name: str, kind: str) -> str:
 
 def _score_metrics(
     y_true: np.ndarray, scores: np.ndarray, train_scores: np.ndarray | None = None,
-    *, threshold: float | None = None,
+    *, threshold: float | None = None, alerts: np.ndarray | None = None,
 ) -> dict:
     """AUC plus threshold metrics at a train-calibrated operating point.
 
@@ -245,17 +261,27 @@ def _score_metrics(
     never fired, and a score floored at 0 on at least 90% of training days had a
     threshold of 0 that its zero days could not reach. With ``>=`` a tie
     alerts, so such a method alerts on every tied day instead; that is
-    reported, not special-cased (eval/diagnostics/alert_rule.py).
+    reported, not special-cased (eval/diagnostics/alert_rule.py). The three
+    controls whose meaning is an alert pattern pass ``alerts`` instead
+    (:data:`_DIRECT_ALERTS`), so M2 never alerts and the ORACLE alerts on
+    the days after a labelled day; AUC still comes from ``scores``.
 
     ``threshold`` passes in one already computed by :func:`_threshold`.
     """
     scores = np.nan_to_num(np.asarray(scores, dtype=float))
-    if threshold is None:
-        threshold = _threshold(scores, train_scores)
+    if alerts is not None:
+        if threshold is not None or train_scores is not None:
+            raise ValueError("give alerts, or a threshold / train_scores, not both")
+        predicted = np.asarray(alerts, dtype=bool).astype(int)
+        if len(predicted) != len(scores):
+            raise ValueError(f"alerts has {len(predicted)} days, scores {len(scores)}")
+    else:
+        if threshold is None:
+            threshold = _threshold(scores, train_scores)
+        predicted = (scores >= threshold).astype(int)
     if len(np.unique(y_true)) < 2:
         return {"auc": np.nan, "f1": np.nan, "fpr": np.nan,
-                "alert_rate": float((scores >= threshold).mean())}
-    predicted = (scores >= threshold).astype(int)
+                "alert_rate": float(predicted.mean())}
     tn, fp, fn, tp = confusion_matrix(y_true, predicted, labels=[0, 1]).ravel()
     return {
         "auc": float(roc_auc_score(y_true, scores)),
@@ -378,16 +404,15 @@ def m0_random(train, test, features):
 
 
 def m1_always(train, test, features):
-    """Trivial control: constant 1. Alerts every day."""
+    """Trivial control: constant 1. Alerts every day (:data:`_DIRECT_ALERTS`)."""
     return np.ones(len(train) + len(test))
 
 
 def m2_never(train, test, features):
-    """Trivial control: constant 0.
+    """Trivial control: constant 0. Alerts on no day (:data:`_DIRECT_ALERTS`).
 
-    Named for its intent. A constant equals its own training 90th percentile,
-    so under the ``>=`` alert rule it alerts on every day, like M1 (issue 9;
-    reported, not special-cased).
+    Its alerts are defined directly: a constant equals its own training 90th
+    percentile, so under the ``>=`` threshold rule it would alert every day.
     """
     return np.zeros(len(train) + len(test))
 
@@ -453,9 +478,23 @@ def oracle_label_persistence(train, test, features):
     Reported to show what perfect one-day-lagged knowledge would score, so the
     real methods can be read against an upper bound rather than only against
     chance. Any method approaching this is either excellent or leaking.
+
+    Its alerts are defined directly, as the days after a labelled day
+    (:func:`_yesterday_positive`). With under 10% positive training days its
+    training 90th percentile is 0, and the threshold rule would alert every day.
     """
     joined = pd.concat([train, test])
     return joined["y_true"].astype(float).shift(1).fillna(0.0).to_numpy()
+
+
+def _yesterday_positive(train, test) -> np.ndarray:
+    """The ORACLE's alerts: test days whose previous day is labelled positive.
+
+    The first test day reads the last training day, so ``train`` must be the
+    full, contiguous training window.
+    """
+    label = pd.concat([train, test])["y_true"].astype(int).shift(1).fillna(0)
+    return label.to_numpy()[-len(test):] == 1
 
 
 BASELINES = {
@@ -474,6 +513,25 @@ BASELINES = {
     "B7 logistic regression": (b7_logistic_regression, "supervised"),
     "B8 random forest": (b8_random_forest, "supervised"),
 }
+
+#: The alert rule of every row not in :data:`_DIRECT_ALERTS`.
+_THRESHOLD_RULE = "score >= training p90"
+
+#: Controls whose alerts are defined directly, not by the threshold rule:
+#: name -> (the ``alert_rule`` recorded, ``(train, test) -> test-day alerts``).
+#: Their meaning is the alert pattern itself, which the rule would distort
+#: (a constant ties its own threshold). Their scores still give AUC.
+_DIRECT_ALERTS: dict[str, tuple[str, Callable[[pd.DataFrame, pd.DataFrame], np.ndarray]]] = {
+    "M1 always alert": ("direct: every day",
+                        lambda train, test: np.ones(len(test), dtype=bool)),
+    "M2 never alert": ("direct: no day",
+                       lambda train, test: np.zeros(len(test), dtype=bool)),
+    "ORACLE label t-1": ("direct: yesterday's label is 1", _yesterday_positive),
+}
+
+
+def _alert_rule(name: str) -> str:
+    return _DIRECT_ALERTS[name][0] if name in _DIRECT_ALERTS else _THRESHOLD_RULE
 
 
 # ---------------------------------------------------------------- agents
@@ -700,6 +758,7 @@ def run_region(region: str, frame: pd.DataFrame, manifest: dict, config: dict,
             rows.append({"region": region, "method": name, "kind": kind,
                          "family": family,
                          "circularity": _CIRCULARITY.get(name, "unknown"),
+                         "alert_rule": _alert_rule(name),
                          "auc": np.nan, "f1": np.nan,
                          "fpr": np.nan, "alert_rate": np.nan,
                          "not_applicable": str(exc), **window})
@@ -709,17 +768,27 @@ def run_region(region: str, frame: pd.DataFrame, manifest: dict, config: dict,
             print(f"   {name:<24} FAILED: {str(exc)[:60]}")
             continue
         scores = np.asarray(scores, dtype=float)
+        # The controls' alerts are defined directly; everyone else's come from
+        # the threshold rule. The full training window keeps the ORACLE's
+        # first test day reading the last training day.
+        alerts = _DIRECT_ALERTS[name][1](train, test) if name in _DIRECT_ALERTS else None
         metrics = _evaluate(y_test, scores[-len(test):], scores[: len(fit_train)],
-                            keep=keep, train_keep=fit_keep, **bootstrap)
+                            keep=keep, train_keep=fit_keep, alerts=alerts, **bootstrap)
         rows.append({"region": region, "method": name, "kind": kind,
                      "family": family,
                      "circularity": _CIRCULARITY.get(name, "unknown"),
+                     "alert_rule": _alert_rule(name),
                      **metrics, **window})
         print(f"   {name:<24} AUC={metrics['auc']!s:<7.7} "
               f"F1={metrics['f1']!s:<6.6} alert_rate={metrics['alert_rate']:.2f}")
 
-    rows += _tier_rows(region, config, train, test, keep, train_keep,
-                       tuple(range(1, len(_TIER_ORDER) + 1)), window, **bootstrap)
+    # Tiers always use the threshold rule. (In the rare case a tier has no
+    # training composite, _tier_rows falls back to the test scores' p90; no
+    # tier in the cached frames does.)
+    rows += [{**row, "alert_rule": _THRESHOLD_RULE}
+             for row in _tier_rows(region, config, train, test, keep, train_keep,
+                                   tuple(range(1, len(_TIER_ORDER) + 1)), window,
+                                   **bootstrap)]
     return rows
 
 
