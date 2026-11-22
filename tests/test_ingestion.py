@@ -813,6 +813,8 @@ class TestMarketApiMode:
             "observations": [
                 {
                     "date": d.strftime("%Y-%m-%d"),
+                    # first published three days later (ALFRED realtime_start)
+                    "realtime_start": (d + pd.Timedelta(days=3)).strftime("%Y-%m-%d"),
                     # every 50th value missing, as FRED encodes it
                     "value": "." if i % 50 == 49 else f"{80 + (i % 20)}",
                 }

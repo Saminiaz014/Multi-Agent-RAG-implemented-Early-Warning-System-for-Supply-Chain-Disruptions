@@ -232,6 +232,10 @@ thresholds:
 evaluation:
   split_date: "2023-07-01"
   end_date: "2025-11-21"
+  # Split-date sensitivity (eval/split_sensitivity.csv): Tier 1 and Tier 4
+  # re-scored with the split moved six months either way; end_date unchanged.
+  # The main results always use split_date above.
+  sensitivity_split_dates: ["2023-01-01", "2023-07-01", "2024-01-01"]
   # 95% moving-block bootstrap CIs on the test window. 30-day blocks match
   # the label's 30-day window and its 14+ day runs, so resamples keep the
   # day-to-day dependence an ordinary bootstrap would break. The threshold

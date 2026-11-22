@@ -1,6 +1,16 @@
 """News-sentiment risk-scoring agent.
 
 Threshold-based detector with consensus + velocity + volume amplifiers.
+
+Tone is only observed on days with articles. A day with ``article_volume``
+0 has no tone (its ``sentiment_score`` of 0 means "no signal", not neutral
+coverage), and a day with no news data at all (NaN, e.g. a GDELT outage) has
+neither. Tone *means* skip those days: the recency-weighted tone the score
+uses (``recency_weighted_score``, built NaN-aware by the connector) and the
+diagnostic 7-day mean below. Velocity keeps its original definition, the
+3-day change in the daily ``sentiment_score``. A day without any news data
+scores NaN, so it is never read as calm.
+
 Score formula:
 
     anomaly_score = 0.40 * normalised_negative_sentiment
@@ -151,9 +161,14 @@ class NewsAgent(BaseAgent):
         if not self._is_fitted:
             raise RuntimeError("NewsAgent.preprocess called before fit().")
         df = data.copy().reset_index(drop=True)
-        df["sentiment_rolling_7d"] = df["sentiment_score"].rolling(
-            window=7, min_periods=2
-        ).mean().fillna(df["sentiment_score"])
+        # No articles, no tone: mask before averaging, so quiet days are
+        # skipped rather than counted as neutral tone. Diagnostic only: the
+        # score reads the connector's recency_weighted_score, the same kind
+        # of NaN-aware tone mean.
+        tone = df["sentiment_score"].where(df["article_volume"] > 0)
+        df["sentiment_rolling_7d"] = tone.rolling(window=7, min_periods=1).mean()
+        # Velocity: unchanged daily definition; a day with no news data at
+        # all (NaN) gives no velocity signal.
         df["sentiment_velocity"] = df["sentiment_score"].diff(periods=3).fillna(0.0)
         df["volume_rolling_30d"] = df["article_volume"].rolling(
             window=30, min_periods=5
@@ -166,10 +181,15 @@ class NewsAgent(BaseAgent):
             raise RuntimeError("NewsAgent.detect called before fit().")
         out = data.copy()
 
-        # Each component normalised into [0, 1] before weighting.
-        neg_sent = (
-            np.clip(-out["recency_weighted_score"], 0.0, 1.0)
-        ).to_numpy()
+        # A day with no news data at all is not scored (NaN), never "calm".
+        no_data = (out["sentiment_score"].isna()
+                   & out["article_volume"].isna()).to_numpy()
+
+        # Each component normalised into [0, 1] before weighting; a component
+        # that cannot be computed on a day contributes no signal.
+        neg_sent = np.nan_to_num(
+            np.clip(-out["recency_weighted_score"], 0.0, 1.0).to_numpy()
+        )
         consensus = (
             np.clip(out["source_consensus"], 0.0, 1.0).to_numpy()
             if "source_consensus" in out.columns
@@ -178,10 +198,10 @@ class NewsAgent(BaseAgent):
         # Negative velocity = sentiment dropping fast = high risk.
         velocity = np.clip(-out["sentiment_velocity"], 0.0, 1.0).to_numpy()
         baseline_vol = out["volume_rolling_30d"].replace(0.0, 1.0).to_numpy()
-        volume_factor = np.clip(
+        volume_factor = np.nan_to_num(np.clip(
             out["article_volume"].to_numpy() / baseline_vol
             / self._volume_spike_multiplier, 0.0, 1.0,
-        )
+        ))
 
         # Renormalise over the components actually available. consensus is
         # absent for GDELT-sourced data; scoring it as zero would read as
@@ -214,7 +234,7 @@ class NewsAgent(BaseAgent):
         out["consensus_norm"] = consensus
         out["velocity_norm"] = velocity
         out["volume_spike_norm"] = volume_factor
-        out["anomaly_score"] = np.clip(weighted, 0.0, 1.0)
+        out["anomaly_score"] = np.where(no_data, np.nan, np.clip(weighted, 0.0, 1.0))
         out["is_anomaly"] = out["anomaly_score"] >= self._threshold
         logger.info(
             "[NewsAgent.detect] %d rows | %d raw flags (threshold=%.2f)",

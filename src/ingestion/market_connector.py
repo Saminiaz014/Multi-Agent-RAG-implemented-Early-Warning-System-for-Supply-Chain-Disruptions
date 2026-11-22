@@ -11,8 +11,11 @@ Supports three ingestion modes selected via ``source_mode``:
 - ``"synthetic"``: Generate the legacy daily synthetic dataset with three
   disruption scenarios aligned with the shipping connector. Retained as
   a fallback so detection agents have ground-truth labels for testing.
-- ``"api"``: Live FRED / Alpha Vantage integration — stubbed out and
-  raises ``NotImplementedError``.
+- ``"api"``: Live FRED. Every value is stamped on the day it was first
+  published (ALFRED first release), not on its reference date: a monthly
+  PPI dated the 1st of its month is released about six weeks later, so the
+  reference-date frame carries it forward before anyone could have known
+  it. The CSV exports carry no release dates and stay on reference dates.
 
 The connector emits a unified daily-frequency schema that downstream
 agents can consume regardless of which mode produced the data.
@@ -100,6 +103,70 @@ _FREIGHT_SIGMA: float = 1.5
 _API_TIMEOUT: int = 60
 _API_ATTEMPTS: int = 3
 _API_BACKOFF_SECONDS: float = 2.0
+
+# ALFRED: the whole real-time period, initial release only (output_type=4),
+# so each observation comes with the date it was first published.
+_FRED_REALTIME_ALL: tuple[str, str] = ("1776-07-04", "9999-12-31")
+_FRED_INITIAL_RELEASE: int = 4
+
+
+def as_published(frame: pd.DataFrame, available: dict[str, pd.Series],
+                 start_column: str | None = None) -> pd.DataFrame:
+    """Re-stamp reference-dated columns on the days they were public.
+
+    Args:
+        frame: Daily frame on reference dates, sorted by ``timestamp``.
+        available: Column name -> the date each row's value became public,
+            aligned with ``frame``'s rows. A row is never treated as public
+            before its own day.
+        start_column: Start the frame when this column first has a value;
+            other columns are NaN (False for a boolean column) until their
+            own first release. ``None`` starts once every column has one.
+
+    Returns:
+        A daily frame indexed by publication date: on day ``t`` each column
+        holds its value from the latest row that was public by ``t``. It
+        ends on the last publication. A row overtaken by a later row before
+        it was published never appears.
+    """
+    ts = pd.to_datetime(frame["timestamp"]).to_numpy(dtype="datetime64[ns]")
+    effective: dict[str, np.ndarray] = {}
+    for column, when in available.items():
+        when = pd.to_datetime(pd.Series(when).to_numpy()).to_numpy(dtype="datetime64[ns]")
+        when = np.maximum(when, ts)
+        # The latest row public by t is the last row whose suffix-minimum
+        # availability is <= t; the suffix minimum is non-decreasing.
+        effective[column] = np.minimum.accumulate(when[::-1])[::-1]
+    start = (effective[start_column][0] if start_column is not None
+             else max(e[0] for e in effective.values()))
+    end = max(e[-1] for e in effective.values())
+    grid = pd.date_range(start, end, freq="D")
+    out = pd.DataFrame({"timestamp": grid})
+    for column, eff in effective.items():
+        pos = np.searchsorted(eff, grid.to_numpy(dtype="datetime64[ns]"), side="right") - 1
+        values = frame[column].to_numpy()
+        if values.dtype == bool:
+            out[column] = np.where(pos >= 0, values[np.maximum(pos, 0)], False)
+        else:
+            out[column] = np.where(pos >= 0, values[np.maximum(pos, 0)].astype(float),
+                                   np.nan)
+    return out
+
+
+def _row_release(ts: pd.Series, obs: pd.DataFrame) -> pd.Series:
+    """For each reference-dated row, when every observation up to it was public.
+
+    A daily row's value comes from the last observation on or before it
+    (forward-filled), and a rolling feature reads all earlier ones, so the
+    row is public once all observations up to that day are.
+    """
+    left = pd.DataFrame({"timestamp": pd.to_datetime(ts).astype("datetime64[ns]")})
+    right = obs[["timestamp", "released"]].assign(
+        timestamp=lambda d: pd.to_datetime(d["timestamp"]).astype("datetime64[ns]"),
+        released=lambda d: pd.to_datetime(d["released"]).astype("datetime64[ns]"),
+    ).sort_values("timestamp")
+    merged = pd.merge_asof(left, right, on="timestamp", direction="backward")
+    return merged["released"].bfill().cummax()
 
 
 class MarketConnector(BaseConnector):
@@ -191,7 +258,9 @@ class MarketConnector(BaseConnector):
                 f"Unknown market source_mode={self.source_mode!r}; "
                 "expected 'csv', 'synthetic', or 'api'."
             )
+        attrs = dict(df.attrs)
         df = self.validate(df)
+        df.attrs.update(attrs)
         self._log_summary(df, mode)
         return df
 
@@ -430,19 +499,25 @@ class MarketConnector(BaseConnector):
         )
 
     def _fetch_fred_series(self, series_id: str, value_column: str) -> pd.DataFrame:
-        """Fetch one FRED series as a two-column frame.
+        """Fetch one FRED series, as first published, with its release dates.
+
+        Requests ALFRED's initial-release vintage (``output_type=4`` over the
+        whole real-time period): each observation's value as first published
+        and ``realtime_start``, the day it was published.
 
         Args:
             series_id: FRED series identifier, e.g. ``"DCOILBRENTEU"``.
             value_column: Name to give the observation column.
 
         Returns:
-            ``timestamp`` plus ``value_column``, missing observations dropped.
+            ``timestamp`` (reference date), ``value_column`` and ``released``
+            (first-release date); missing observations dropped.
 
         Raises:
-            RuntimeError: If the series cannot be fetched after retrying, or
-                comes back empty. A short series would quietly change the
-                rebasing and volatility baselines derived from it.
+            RuntimeError: If the series cannot be fetched after retrying,
+                comes back empty, or has no first-release dates. A short
+                series would quietly change the rebasing and volatility
+                baselines derived from it.
         """
         for attempt in range(1, _API_ATTEMPTS + 1):
             try:
@@ -453,6 +528,9 @@ class MarketConnector(BaseConnector):
                         "api_key": self.fred_api_key,
                         # FRED defaults to XML; without this, .json() raises.
                         "file_type": "json",
+                        "output_type": _FRED_INITIAL_RELEASE,
+                        "realtime_start": _FRED_REALTIME_ALL[0],
+                        "realtime_end": _FRED_REALTIME_ALL[1],
                     },
                     timeout=_API_TIMEOUT,
                 )
@@ -471,27 +549,51 @@ class MarketConnector(BaseConnector):
                 )
                 time.sleep(_API_BACKOFF_SECONDS * attempt)
 
-        rows = [
-            {"timestamp": pd.Timestamp(o["date"]), value_column: float(o["value"])}
-            # FRED writes "." for a missing observation, not null.
-            for o in observations
-            if o.get("value") not in (".", "", None)
-        ]
-        if not rows:
+        usable = [o for o in observations
+                  # FRED writes "." for a missing observation, not null.
+                  if o.get("value") not in (".", "", None)]
+        if not usable:
             raise RuntimeError(
                 f"FRED series {series_id} returned no usable observations."
             )
-        return pd.DataFrame(rows)
+        if any(not o.get("realtime_start") for o in usable):
+            raise RuntimeError(
+                f"FRED series {series_id} came back without first-release "
+                "dates (realtime_start); cannot stamp values on publication."
+            )
+        return pd.DataFrame([
+            {"timestamp": pd.Timestamp(o["date"]), value_column: float(o["value"]),
+             "released": pd.Timestamp(o["realtime_start"])}
+            for o in usable
+        ])
+
+    @staticmethod
+    def _median_release_lag(frame: pd.DataFrame) -> int:
+        """Median days from reference date to first release.
+
+        ALFRED stamps every observation older than a series' first vintage
+        with that vintage's date, so those are left out: they measure when
+        the archive began, not the publication delay.
+        """
+        later = frame[frame["released"] > frame["released"].min()]
+        lags = (later if not later.empty else frame)
+        return int((lags["released"] - lags["timestamp"]).dt.days.median())
 
     def fetch_from_api(self) -> pd.DataFrame:
-        """Fetch the three FRED series live instead of from local CSV exports.
+        """Fetch the three FRED series live, dated by first publication.
 
         Same series the CSV path reads — ``DCOILBRENTEU`` (Brent, daily),
         ``PCU4831114831115`` (deep-sea freight PPI, monthly) and
         ``TSIFRGHTC`` (freight transport services % change, monthly) — pulled
-        from ``api.stlouisfed.org`` and passed through the identical
-        :meth:`_merge_and_derive` transform, so a live pull and a CSV export
-        produce the same numbers for the same dates.
+        from ``api.stlouisfed.org`` as first published. They pass through the
+        same :meth:`_merge_and_derive` transform on reference dates, and each
+        derived column is then re-stamped by :func:`as_published` on the day
+        its inputs were public: Brent-derived columns on Brent's release
+        dates (EIA publishes weekly), the freight index on the PPI's,
+        ``freight_services_pct_change`` on the TSI's, and the co-spike label
+        once both Brent and the PPI were out. ``timestamp`` is therefore the
+        day a forecaster could have known the value, and a live pull no
+        longer matches a reference-dated CSV export day for day.
 
         Alpha Vantage is not used: FRED already serves every series this
         connector needs, and adding a second vendor for intraday prices would
@@ -517,7 +619,31 @@ class MarketConnector(BaseConnector):
             _FREIGHT_SERVICES_VALUE_COLUMN, "freight_services_pct_change"
         )
 
-        df = self._merge_and_derive(brent, ppi, services)
+        reference = self._merge_and_derive(
+            brent.drop(columns="released"), ppi.drop(columns="released"),
+            services.drop(columns="released"),
+        )
+        on_brent = _row_release(reference["timestamp"], brent)
+        on_ppi = _row_release(reference["timestamp"], ppi)
+        df = as_published(reference, {
+            "brent_crude_usd": on_brent,
+            "trade_volume_index": on_brent,
+            "freight_rate_index": on_ppi,
+            "freight_services_pct_change": _row_release(reference["timestamp"], services),
+            "is_disruption": np.maximum(on_brent, on_ppi),
+        }, start_column="brent_crude_usd")
+        lags = {sid: self._median_release_lag(frame)
+                for sid, frame in ((_BRENT_VALUE_COLUMN, brent),
+                                   (_FREIGHT_PPI_VALUE_COLUMN, ppi),
+                                   (_FREIGHT_SERVICES_VALUE_COLUMN, services))}
+        df.attrs["market_source"] = {
+            "source": "FRED / ALFRED",
+            "dating": ("first-release date (ALFRED output_type=4): each value "
+                       "enters on the day it was first published, carried "
+                       "forward until the next release"),
+            "values": "as first published (later revisions not used)",
+            "median_release_lag_days": lags,
+        }
         logger.info(
             "[MarketConnector/FRED] %d days [%s .. %s] brent mean=$%.2f "
             "disruption_days=%d",

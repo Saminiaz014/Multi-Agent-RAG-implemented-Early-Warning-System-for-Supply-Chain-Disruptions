@@ -86,3 +86,21 @@ def test_real_surrogate_uses_the_same_split() -> None:
     b_train, b_test = temporal_split(frame)
     assert a_train["timestamp"].tolist() == b_train["timestamp"].tolist()
     assert a_test["timestamp"].tolist() == b_test["timestamp"].tolist()
+
+
+def test_sensitivity_split_dates_come_from_settings() -> None:
+    from src.evaluation.window import sensitivity_split_dates
+    assert sensitivity_split_dates() == [pd.Timestamp("2023-01-01"),
+                                         pd.Timestamp("2023-07-01"),
+                                         pd.Timestamp("2024-01-01")]
+
+
+def test_split_date_can_be_overridden_for_the_sensitivity_table() -> None:
+    from src.evaluation.window import split_by_date
+    frame = _frame("2019-01-01", "2026-03-01")
+    train, test = split_by_date(frame, split_date="2024-01-01")
+    assert train["timestamp"].max() == pd.Timestamp("2023-12-31")
+    assert test["timestamp"].min() == pd.Timestamp("2024-01-01")
+    assert test["timestamp"].max() == pd.Timestamp("2025-11-21")   # end_date unchanged
+    default_train, _ = split_by_date(frame)
+    assert default_train["timestamp"].max() == pd.Timestamp("2023-06-30")

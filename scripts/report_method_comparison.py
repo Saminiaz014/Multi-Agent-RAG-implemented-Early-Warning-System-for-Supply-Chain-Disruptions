@@ -132,7 +132,8 @@ def graph_alert_rate(results: pd.DataFrame) -> None:
     if malacca.empty:
         return
     malacca = malacca.sort_values("alert_rate")
-    colors = ["#e53935" if f == "tier" else "#42a5f5" for f in malacca["family"]]
+    colors = ["#e53935" if f == "tier" else "#90a4ae" if f == "ceiling" else "#42a5f5"
+              for f in malacca["family"]]
 
     fig, ax = plt.subplots(figsize=(11, 6))
     ax.barh(range(len(malacca)), malacca["alert_rate"], color=colors, alpha=0.85)
@@ -144,8 +145,9 @@ def graph_alert_rate(results: pd.DataFrame) -> None:
                  fontweight="bold")
     ax.grid(axis="x", alpha=0.3)
     handles = [plt.Rectangle((0, 0), 1, 1, color=c, alpha=0.85)
-               for c in ("#42a5f5", "#e53935")]
-    ax.legend(handles, ["baseline", "multi-agent tier"], loc="lower right")
+               for c in ("#42a5f5", "#e53935", "#90a4ae")]
+    ax.legend(handles, ["baseline", "multi-agent tier", "ceiling (oracle)"],
+              loc="lower right")
     fig.tight_layout()
     fig.savefig(_G_METHOD / "A2_false_positive_harness.png", dpi=200)
     plt.close(fig)
@@ -169,6 +171,10 @@ def graph_tiers(results: pd.DataFrame) -> None:
         if pd.notna(best):
             ax.axhline(best, color="#42a5f5", linestyle="-", linewidth=2,
                        label=f"best real baseline ({best:.3f}; no oracle or controls)")
+        top = results[(results.region == region) & _is_ceiling(results)]["auc"].dropna()
+        if not top.empty:
+            ax.axhline(float(top.iloc[0]), color="#90a4ae", linestyle=":", linewidth=2,
+                       label=f"ceiling: oracle, yesterday's label ({top.iloc[0]:.3f})")
         ax.axhline(0.5, color="black", linestyle="--", linewidth=1, label="chance")
 
         ax.set_xticks(range(len(region_tiers)))
@@ -196,7 +202,10 @@ def graph_region_rankings(results: pd.DataFrame) -> None:
     """One ranking per region, coloured by circularity with the label."""
     scored = results.dropna(subset=["auc"])
     for region in sorted(scored["region"].unique()):
-        rows = scored[scored.region == region].sort_values("auc")
+        in_region = scored[scored.region == region]
+        # The ceiling is a reference line, not a ranked bar.
+        top = in_region[_is_ceiling(in_region)]
+        rows = in_region[~_is_ceiling(in_region)].sort_values("auc")
         colours = [_CIRC_COLOUR.get(c, "#90a4ae") for c in rows["circularity"]]
 
         fig, ax = plt.subplots(figsize=(11, 7))
@@ -205,6 +214,10 @@ def graph_region_rankings(results: pd.DataFrame) -> None:
         ax.set_yticks(range(len(rows)))
         ax.set_yticklabels(rows["method"], fontsize=9)
         ax.axvline(0.5, color="black", linestyle="--", linewidth=1)
+        for _, row in top.iterrows():
+            ax.axvline(row["auc"], color="#90a4ae", linestyle=":", linewidth=2)
+            ax.text(row["auc"], len(rows) - 0.4, f" ceiling: {row['method']} "
+                    f"({row['auc']:.3f})", fontsize=8, ha="right", color="#607d8b")
         ax.set_xlim(0, 1.05)
         ax.set_xlabel("AUC (dashed = chance)", fontweight="bold")
         ax.set_title(
@@ -286,8 +299,39 @@ def graph_f1_fpr(results: pd.DataFrame) -> None:
     plt.close(fig)
 
 
+def _has_delta(rows: pd.DataFrame) -> bool:
+    return {"delta_auc", "delta_auc_ci_low", "delta_auc_ci_high"} <= set(rows.columns)
+
+
+def _delta_cell(row: pd.Series) -> str:
+    if pd.isna(row.get("delta_auc")):
+        return "—"
+    cell = (f"{row['delta_auc']:+.3f} [{row['delta_auc_ci_low']:+.3f}, "
+            f"{row['delta_auc_ci_high']:+.3f}]")
+    return f"**{cell}**" if _delta_verdict(row) != "inconclusive" else cell
+
+
+def _delta_verdict(row: pd.Series) -> str:
+    """'below' / 'above' when the paired interval excludes 0, else 'inconclusive'."""
+    if row["delta_auc_ci_high"] < 0:
+        return "below"
+    if row["delta_auc_ci_low"] > 0:
+        return "above"
+    return "inconclusive"
+
+
+def _settings_used(results: pd.DataFrame) -> dict | None:
+    """The bootstrap settings the CSV was produced with, else the current ones."""
+    cols = {"bootstrap_block", "bootstrap_n", "bootstrap_ci"}
+    if cols <= set(results.columns) and results["bootstrap_n"].notna().any():
+        row = results.dropna(subset=["bootstrap_n"]).iloc[0]
+        return {"block": int(row["bootstrap_block"]), "n_resamples": int(row["bootstrap_n"]),
+                "ci": float(row["bootstrap_ci"])}
+    return _bootstrap_settings()
+
+
 def _ci_note(results: pd.DataFrame) -> str:
-    cfg = _bootstrap_settings()
+    cfg = _settings_used(results)
     how = (f"{cfg['block']}-day blocks, {cfg['n_resamples']:,} resamples" if cfg
            else "settings.yaml `evaluation.bootstrap`")
     valid = ""
@@ -296,23 +340,98 @@ def _ci_note(results: pd.DataFrame) -> str:
         valid = (" AUC and F1 intervals use only resamples that contain both "
                  f"classes: at least {int(scored['bootstrap_valid'].min()):,} of "
                  f"{cfg['n_resamples']:,} for every scored method.")
+    pct = f"{cfg['ci']:.0%}" if cfg else "95%"
+    paired = (" Tier differences use the paired interval of the difference "
+              "(the same resampled blocks for both tiers); a paired interval "
+              "that excludes 0 is a clear difference." if _has_delta(results) else "")
     return (
-        f"- **Intervals are {_ci_pct()} moving-block bootstrap CIs** ({how}) on "
+        f"- **Intervals are {pct} moving-block bootstrap CIs** ({how}) on "
         "the test window, with the training threshold held fixed. Every method "
         "in a region gets the same resamples, so intervals are paired. "
         "Non-overlapping intervals show a clear difference; overlapping ones "
-        "are inconclusive on their own." + valid + " They cover test-sample "
+        "are inconclusive on their own." + paired + valid + " They cover test-sample "
         "uncertainty only, not the choice of split or label, and they are "
         "conditional on the few disruption episodes in each test window, so "
         "they do not measure skill on a new kind of disruption.\n"
     )
 
 
-def write_report(results: pd.DataFrame) -> None:
+def _is_ceiling(rows: pd.DataFrame) -> pd.Series:
+    return (rows["family"] == "ceiling") | (rows["kind"] == "oracle")
+
+
+def _dating_note(results: pd.DataFrame) -> str:
+    """The data-dating policy, stated only when the results CSV records it.
+
+    The harness writes ``frame_policy`` after checking each frame's manifest,
+    so a CSV produced from older frames makes no such claim.
+    """
+    if "frame_policy" not in results.columns or results["frame_policy"].isna().any():
+        return ""
+    return (
+        "- **Values enter on the day they were known, where the source says.** "
+        "FRED market series are stamped on their first-release date (ALFRED) "
+        "and carried forward until the next release; gaps in other domains are "
+        "forward-filled, never interpolated. Shipping (PortWatch) and conflict "
+        "(ACLED) values stay on their event dates: their roughly weekly "
+        "publication lag is not modelled. A few scaling constants (the freight "
+        "index's rebase, the trade-volume and conflict-intensity scales) are "
+        "still taken over the whole sample.\n"
+    )
+
+
+def _masked_note(results: pd.DataFrame) -> str:
+    """How many test days were masked (no news published) and left unscored."""
+    if "n_masked" not in results.columns or not results["n_masked"].fillna(0).any():
+        return ""
+    per_region = results.groupby("region")["n_masked"].max().astype(int)
+    counts = sorted(set(per_region))
+    shown = (f"{counts[0]} test days in every region" if len(counts) == 1
+             else ", ".join(f"{r} {n}" for r, n in per_region.items()) + " test days")
+    return (f"- **Days GDELT never published are masked:** {shown} are left out "
+            "of every method's score (point estimates and intervals) and out of "
+            "every training threshold. They are not filled.\n")
+
+
+def _sensitivity_section(sensitivity: pd.DataFrame) -> list[str]:
+    """Tier 1 and Tier 4 at each split date, with the paired Tier 4 - Tier 1."""
+    out = ["\n### Split-date sensitivity\n",
+           "Tier 1 and Tier 4 re-scored with the split moved; the end date, the "
+           "masked days and the training-window threshold rule are unchanged. "
+           "The main tables use the settings.yaml split.\n",
+           "| region | split | scored test days (positives) | Tier 1 AUC | "
+           "Tier 4 AUC | Tier 4 - Tier 1 (paired) |",
+           "|---|---|---|---|---|---|"]
+    ranges: list[str] = []
+    for region in sorted(sensitivity["region"].unique()):
+        rows = sensitivity[sensitivity.region == region]
+        for split in sorted(rows["split_date"].unique()):
+            at = rows[rows.split_date == split].set_index("method")
+            t1 = at.loc["Tier 1"] if "Tier 1" in at.index else None
+            t4 = at.loc["Tier 4"] if "Tier 4" in at.index else None
+            ref = t1 if t1 is not None else t4
+            cells = [(_auc_cell(r) if r is not None and pd.notna(r.get("auc")) else "—")
+                     for r in (t1, t4)]
+            delta = (_delta_cell(t4) if t4 is not None and _has_delta(sensitivity)
+                     else "—")
+            out.append(f"| {region} | {split} | {int(ref['n_test'])} "
+                       f"({int(ref['test_positives'])}) | {cells[0]} | {cells[1]} | "
+                       f"{delta} |")
+        t1_auc = rows[rows.method == "Tier 1"]["auc"].dropna()
+        if len(t1_auc) > 1:
+            ranges.append(f"{region}: Tier 1 AUC ranges {t1_auc.min():.3f}-"
+                          f"{t1_auc.max():.3f}")
+    if ranges:
+        out.append("\n" + "; ".join(ranges) + ".\n")
+    return out
+
+
+def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None) -> None:
     """Report the measured findings, including the unflattering ones."""
     scored = results.dropna(subset=["auc"])
     tiers = scored[scored.family == "tier"]
     baselines = _real_baselines(scored)
+    ceiling = scored[_is_ceiling(scored)]
     lines: list[str] = []
 
     lines.append("# Method comparison and agent ablation\n")
@@ -330,7 +449,9 @@ def write_report(results: pd.DataFrame) -> None:
 
     lines.append("\n## Per-region results\n")
     for region in sorted(scored["region"].unique()):
-        region_rows = scored[scored.region == region].sort_values("auc", ascending=False)
+        in_region = scored[scored.region == region]
+        region_rows = in_region[~_is_ceiling(in_region)].sort_values("auc", ascending=False)
+        region_ceiling = ceiling[ceiling.region == region]
         best_baseline = baselines[baselines.region == region].nlargest(1, "auc")
         best_tier = tiers[tiers.region == region].nlargest(1, "auc")
         lines.append(f"\n### {region}\n")
@@ -341,6 +462,18 @@ def write_report(results: pd.DataFrame) -> None:
             lines.append(
                 f"| {row['method']} | {row['kind']} | {_auc_cell(row)} | "
                 f"{row['f1']:.3f} | {row['alert_rate']:.2f} |"
+            )
+        # The ceiling sits below the ranked methods, not among them.
+        for _, row in region_ceiling.iterrows():
+            lines.append(
+                f"| *{row['method']} (ceiling, not a method)* | {row['kind']} | "
+                f"{_auc_cell(row)} | {row['f1']:.3f} | {row['alert_rate']:.2f} |"
+            )
+        for _, row in region_ceiling.iterrows():
+            lines.append(
+                f"\nCeiling: {row['method']} ({_auc_cell(row)}) reads yesterday's "
+                "true label, which no detector has at inference. It bounds what "
+                "one-day-lagged knowledge of the answer would score.\n"
             )
         if not best_baseline.empty and not best_tier.empty:
             bb, bt = best_baseline.iloc[0], best_tier.iloc[0]
@@ -378,6 +511,17 @@ def write_report(results: pd.DataFrame) -> None:
     hedge = (f" These are point estimates: consecutive tiers' intervals are "
              f"clearly apart in {apart} of {steps} steps, and overlap alone is "
              "inconclusive." if steps else "")
+    compared = (tiers.dropna(subset=["delta_auc"]) if _has_delta(tiers)
+                else tiers.iloc[0:0])
+    if not compared.empty:
+        verdicts = compared.apply(_delta_verdict, axis=1)
+        n = len(compared)
+        below_n, above_n = int((verdicts == "below").sum()), int((verdicts == "above").sum())
+        hedge = (" These are point estimates. Tested against Tier 1 with the paired "
+                 "difference on the same resampled blocks, a tier is clearly below "
+                 f"Tier 1 in {below_n} of {n} comparisons, clearly above in "
+                 f"{above_n} of {n}, and inconclusive (interval includes 0) in "
+                 f"{n - below_n - above_n} of {n}.")
     if peaks and all(p in ("Tier 1", "Tier 2") for p in peaks):
         lines.append(
             "\nIn every region the peak is Tier 1 or Tier 2"
@@ -391,6 +535,18 @@ def write_report(results: pd.DataFrame) -> None:
             f"\nPeaks by region: {', '.join(peaks)}. The tier progression is "
             "not uniform across regions." + hedge + "\n"
         )
+    if not compared.empty:
+        tier_names = sorted(compared["method"].unique())
+        lines.append("\n#### Paired ΔAUC against Tier 1 (Tier k - Tier 1)\n")
+        lines.append("Bold: the paired interval excludes 0.\n")
+        lines.append("| region | " + " | ".join(tier_names) + " |")
+        lines.append("|---|" + "---|" * len(tier_names))
+        for region in sorted(compared["region"].unique()):
+            at = compared[compared.region == region].set_index("method")
+            lines.append(f"| {region} | " + " | ".join(
+                _delta_cell(at.loc[t]) if t in at.index else "—" for t in tier_names) + " |")
+    if sensitivity is not None and not sensitivity.empty:
+        lines += _sensitivity_section(sensitivity)
 
     # Sub-chance tiers.
     below = tiers[tiers.auc < 0.5]
@@ -468,11 +624,14 @@ def write_report(results: pd.DataFrame) -> None:
         + (_ci_note(results) if _has_ci(results) else
            "- **One split, no confidence intervals.** Treat differences under "
            "roughly 0.05 AUC as noise.\n")
+        + _masked_note(results)
         + "- **Malacca cannot be evaluated for detection** — no positives at all.\n"
         "- **News features come from GDELT 1.0 event exports** (corridor box "
         "filter v2) in every region; volume is articles per 100k GDELT "
-        "events that day.\n"
-        "- **The label is one definition among several.** The level-shift rule "
+        "events that day. The news agent's tone means skip days without "
+        "articles instead of counting them as neutral tone.\n"
+        + _dating_note(results)
+        + "- **The label is one definition among several.** The level-shift rule "
         "recovers two documented events, but agents built against a different "
         "definition of disruption will score poorly whatever their merit.\n"
     )
@@ -484,13 +643,15 @@ def main() -> int:
     _G_METHOD.mkdir(parents=True, exist_ok=True)
     _G_TIER.mkdir(parents=True, exist_ok=True)
     results = _load()
+    sensitivity_csv = _EVAL / "split_sensitivity.csv"
+    sensitivity = pd.read_csv(sensitivity_csv) if sensitivity_csv.exists() else None
     graph_method_auc(results)
     graph_region_rankings(results)
     graph_heatmap(results)
     graph_f1_fpr(results)
     graph_alert_rate(results)
     graph_tiers(results)
-    write_report(results)
+    write_report(results, sensitivity=sensitivity)
     print(f"graphs -> {_G_METHOD}, {_G_TIER}")
     print(f"report -> {_EVAL / 'COMPARISON_REPORT.md'}")
     return 0

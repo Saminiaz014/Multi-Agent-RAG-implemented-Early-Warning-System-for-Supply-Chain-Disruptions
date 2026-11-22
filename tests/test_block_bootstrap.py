@@ -96,3 +96,97 @@ def test_blocks_widen_the_interval_for_autocorrelated_data() -> None:
 def test_rejects_mismatched_lengths() -> None:
     with pytest.raises(ValueError):
         block_bootstrap_ci(np.zeros(10), np.zeros(9), threshold=0.5)
+
+
+# ------------------------------------------------- masked days, paired deltas
+from sklearn.metrics import roc_auc_score  # noqa: E402
+
+from src.evaluation import block_bootstrap as bb  # noqa: E402
+
+
+def _pair(n: int = 900, seed: int = 11):
+    y = _runs(n)
+    rng = np.random.default_rng(seed)
+    common = rng.normal(0, 0.6, n)                 # shared error: correlated methods
+    a = y * 0.6 + common + rng.normal(0, 0.2, n)
+    b = y * 0.5 + common + rng.normal(0, 0.2, n)
+    return y, a, b
+
+
+def test_masked_days_are_left_out_of_point_and_interval() -> None:
+    y, a, _ = _pair()
+    keep = np.ones(len(y), dtype=bool)
+    keep[300:318] = False                          # an 18-day outage
+    out = block_bootstrap_ci(y, a, 0.5, keep=keep, block=30, n_resamples=50)
+    full = block_bootstrap_ci(y, a, 0.5, block=30, n_resamples=50)
+    a_masked = a.copy()
+    a_masked[~keep] = 99.0                         # garbage on masked days must not matter
+    again = block_bootstrap_ci(y, a_masked, 0.5, keep=keep, block=30, n_resamples=50)
+    assert out == again
+    assert out != full
+
+
+def test_keep_all_true_is_the_same_as_no_mask() -> None:
+    y, a, _ = _pair()
+    keep = np.ones(len(y), dtype=bool)
+    assert (block_bootstrap_ci(y, a, 0.5, keep=keep, block=30, n_resamples=50)
+            == block_bootstrap_ci(y, a, 0.5, block=30, n_resamples=50))
+
+
+def test_delta_of_a_method_with_itself_is_exactly_zero() -> None:
+    y, a, _ = _pair()
+    d = bb.paired_auc_delta_ci(y, a, a, block=30, n_resamples=100)
+    assert d["delta_auc"] == d["delta_auc_ci_low"] == d["delta_auc_ci_high"] == 0.0
+
+
+def test_delta_ci_is_the_percentile_of_per_resample_differences() -> None:
+    y, a, b = _pair()
+    d = bb.paired_auc_delta_ci(y, a, b, block=30, n_resamples=200, seed=42)
+    rng = np.random.default_rng(42)
+    diffs = []
+    for _ in range(200):
+        idx = moving_block_indices(len(y), 30, rng)
+        if y[idx].min() != y[idx].max():
+            diffs.append(roc_auc_score(y[idx], a[idx]) - roc_auc_score(y[idx], b[idx]))
+    lo, hi = np.percentile(diffs, [2.5, 97.5])
+    assert d["delta_auc"] == pytest.approx(roc_auc_score(y, a) - roc_auc_score(y, b))
+    assert d["delta_auc_ci_low"] == pytest.approx(lo)
+    assert d["delta_auc_ci_high"] == pytest.approx(hi)
+    assert d["delta_valid"] == len(diffs)
+
+
+def test_paired_delta_is_narrower_than_either_marginal_interval() -> None:
+    y, a, b = _pair()
+    d = bb.paired_auc_delta_ci(y, a, b, block=30, n_resamples=300)
+    ma = block_bootstrap_ci(y, a, 0.5, block=30, n_resamples=300)
+    mb = block_bootstrap_ci(y, b, 0.5, block=30, n_resamples=300)
+    width = d["delta_auc_ci_high"] - d["delta_auc_ci_low"]
+    assert width < ma["auc_ci_high"] - ma["auc_ci_low"]
+    assert width < mb["auc_ci_high"] - mb["auc_ci_low"]
+
+
+def test_every_method_and_every_delta_sees_the_same_resampled_blocks(monkeypatch) -> None:
+    calls: list[list[int]] = []
+    real = bb.moving_block_indices
+
+    def record(n, block, rng):
+        idx = real(n, block, rng)
+        calls.append(idx.tolist())
+        return idx
+
+    monkeypatch.setattr(bb, "moving_block_indices", record)
+    y, a, b = _pair()
+    bb.block_bootstrap_ci(y, a, 0.5, block=30, n_resamples=20)
+    first = calls[:]
+    calls.clear()
+    bb.block_bootstrap_ci(y, b * 3 - 1, 0.1, block=30, n_resamples=20)   # other scores
+    second = calls[:]
+    calls.clear()
+    bb.paired_auc_delta_ci(y, a, b, block=30, n_resamples=20)
+    assert first == second == calls
+
+
+def test_delta_rejects_mismatched_lengths() -> None:
+    y, a, b = _pair()
+    with pytest.raises(ValueError):
+        bb.paired_auc_delta_ci(y, a, b[:-1], block=30, n_resamples=10)

@@ -22,9 +22,16 @@ is recorded in the manifest, so a later run cannot quietly compare a
 five-feature region against a four-feature one. The news filter's version and
 hashes go in the manifest as ``news_source``.
 
-News days GDELT never published are forward-filled from the last published
-day, not interpolated like the other domains, so no filled news value uses
-future data. Any other gap in the news series is an error.
+No gap is filled with future data. Inside a source's coverage, a day it has
+no value for is forward-filled from the last earlier value (linear
+interpolation would read the next observation). FRED series are already
+stamped on the day each value was first published (``MarketConnector``), so
+carrying them forward is what a forecaster on that day would have known.
+
+News days GDELT never published are not filled at all. They stay NaN in the
+frame ("masked") and the method comparison leaves them out of every score;
+the frame keeps the row so the other domains' days are unchanged. Any other
+gap in the news series is an error.
 
 ``--refresh-news`` swaps only the news columns of the cached frames for the
 current GDELT series. The other domains are not re-pulled, so their values and
@@ -190,8 +197,13 @@ def _load_news(config: dict, news_dir: str | Path | None = None) -> pd.DataFrame
     return NewsConnector(config=block).fetch()
 
 
-#: How a news day GDELT never published is filled in the evaluation frame.
-_NEWS_GAP_FILL = "forward-fill from the last published day (no future data)"
+#: How a news day GDELT never published is treated in the evaluation frame.
+_NEWS_GAP_POLICY = ("masked: days GDELT never published stay NaN and are left "
+                    "out of every score; not forward-filled or interpolated")
+
+#: How a gap inside any other domain's coverage is filled.
+_GAP_FILL_POLICY = ("forward-fill from the last earlier value, inside each "
+                    "column's coverage only (no interpolation, no future data)")
 
 
 def attach_news(frame: pd.DataFrame, news: pd.DataFrame, *,
@@ -199,10 +211,11 @@ def attach_news(frame: pd.DataFrame, news: pd.DataFrame, *,
     """Merge the news series onto ``frame`` with the news gap policy.
 
     Days inside the news series' range that it has no row for must be days
-    GDELT never published (the manifest's ``missing_days``). They are
-    forward-filled from the last published day, so no filled value uses
-    future data. Linear interpolation would draw on the next published day,
-    which for the 18-day June 2025 outage means up to 18 days ahead.
+    GDELT never published (the manifest's ``missing_days``). They are left
+    NaN ("masked") and listed as ``days_masked``. Filling them would invent
+    news: linear interpolation reads the next published day (up to 18 days
+    ahead across the June 2025 outage), and forward-fill repeats one day's
+    coverage for weeks.
 
     Args:
         frame: Time-ordered frame without news columns.
@@ -212,7 +225,7 @@ def attach_news(frame: pd.DataFrame, news: pd.DataFrame, *,
 
     Returns:
         ``(frame, news_source)``: the merged frame and the provenance block
-        for the manifest, including the forward-filled days.
+        for the manifest, including the masked days.
 
     Raises:
         ValueError: If a gap is not a GDELT-missing day, if the frame is not
@@ -223,7 +236,7 @@ def attach_news(frame: pd.DataFrame, news: pd.DataFrame, *,
     columns = list(_DOMAIN_FEATURES[domain])
     prefixed = [f"{domain}__{c}" for c in columns]
     if not pd.to_datetime(frame["timestamp"]).is_monotonic_increasing:
-        raise ValueError("attach_news needs a time-ordered frame (forward-fill).")
+        raise ValueError("attach_news needs a time-ordered frame.")
     block = news[["timestamp", *columns]].rename(columns=dict(zip(columns, prefixed)))
     out = frame.merge(block, on="timestamp", how="left")
 
@@ -244,9 +257,7 @@ def attach_news(frame: pd.DataFrame, news: pd.DataFrame, *,
             f"news has no row for {len(unexplained)} days not listed as "
             f"GDELT-missing: {unexplained[:5]}; rebuild the news series."
         )
-    out[prefixed] = out[prefixed].ffill()
-    out.loc[~inside, prefixed] = float("nan")     # never extend past coverage
-    source.update(gap_fill=_NEWS_GAP_FILL, days_forward_filled=holes)
+    source.update(gap_policy=_NEWS_GAP_POLICY, days_masked=holes)
     return out, source
 
 
@@ -304,12 +315,15 @@ def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFram
         present[domain] = columns
 
     merged = merged.sort_values("timestamp").reset_index(drop=True)
-    # Interpolate only inside the observed range: extrapolating past an API's
-    # coverage would invent values at the edges where they are least checkable.
+    # Forward-fill only inside the observed range: extrapolating past an
+    # API's coverage would invent values at the edges, and interpolating
+    # would read the next observation, which a forecaster does not have yet.
     feature_columns = [c for c in merged.columns if "__" in c]
-    merged[feature_columns] = merged[feature_columns].interpolate(
-        limit_area="inside"
-    )
+    holes = merged[feature_columns].isna()
+    merged[feature_columns] = merged[feature_columns].ffill(limit_area="inside")
+    filled = (holes & merged[feature_columns].notna()).sum()
+    gap_fill = {"policy": _GAP_FILL_POLICY,
+                "cells_filled": {c: int(n) for c, n in filled.items() if n}}
     news_source = None
     if "news_sentiment" in frames:
         # Same function as --refresh-news, so the two paths cannot diverge.
@@ -318,13 +332,25 @@ def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFram
         present["news_sentiment"] = list(_DOMAIN_FEATURES["news_sentiment"])
         feature_columns = [c for c in merged.columns if "__" in c]
     before = len(merged)
+    news_columns = [c for c in feature_columns if c.startswith("news_sentiment__")]
+    masked = (pd.to_datetime(merged["timestamp"]).dt.strftime("%Y-%m-%d")
+              .isin((news_source or {}).get("days_masked") or []))
     if drop_incomplete:
-        merged = merged.dropna(subset=feature_columns, how="any")
+        # A masked news day is kept (its other domains are real data); any
+        # other missing value drops the day.
+        other = [c for c in feature_columns if c not in news_columns]
+        incomplete = merged[other].isna().any(axis=1)
+        if news_columns:
+            incomplete |= merged[news_columns].isna().any(axis=1) & ~masked
+        merged = merged[~incomplete]
+        masked = masked[~incomplete]
 
     manifest = {
         "region": region,
         "rows": int(len(merged)),
         "rows_dropped_incomplete": int(before - len(merged)),
+        "rows_news_masked": int(masked.sum()),
+        "gap_fill": gap_fill,
         "date_range": [
             str(merged["timestamp"].min().date()),
             str(merged["timestamp"].max().date()),
@@ -357,6 +383,8 @@ def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFram
     }
     if news_source is not None:
         manifest["news_source"] = news_source
+    if "market" in frames and frames["market"].attrs.get("market_source"):
+        manifest["market_source"] = frames["market"].attrs["market_source"]
     return merged, manifest
 
 
@@ -393,6 +421,7 @@ def replace_news(frame: pd.DataFrame, manifest: dict,
     m["feature_columns"] = [c for c in out.columns if "__" in c]
     m["news_source"] = source
     m["rows"] = int(len(out))
+    m["rows_news_masked"] = len(source["days_masked"])
     return out, m
 
 
@@ -463,7 +492,7 @@ def run(argv: list[str] | None = None) -> int:
             print(f"  {region}: news replaced -> {m['rows']} rows, "
                   f"{len(m['feature_columns'])} features, filter "
                   f"{src.get('filter_version')} ({str(src.get('csv_sha256'))[:12]}), "
-                  f"{len(src['days_forward_filled'])} days forward-filled, "
+                  f"{len(src['days_masked'])} days masked, "
                   f"missing={m['domains_missing']}")
         return 1 if failed else 0
 

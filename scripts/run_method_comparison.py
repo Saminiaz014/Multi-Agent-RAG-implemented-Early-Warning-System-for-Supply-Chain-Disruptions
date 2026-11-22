@@ -27,6 +27,15 @@ contains no market signal despite being labelled as containing one.
 labelled disruptions across 2019-2026, so AUC is undefined there. What it can
 measure is how often each method fires when nothing is happening.
 
+Days whose news GDELT never published (the 18-day June 2025 outage, and two
+single days in training) are *masked*: they stay in the frame so rolling
+features see real calendar time, but no method is scored on them and they are
+left out of every training threshold. Each tier row also carries a paired
+block-bootstrap ``delta_auc`` against Tier 1 on the same resampled blocks, and
+``eval/split_sensitivity.csv`` re-scores Tier 1 and Tier 4 at the
+``evaluation.sensitivity_split_dates``. The oracle is written as family
+``ceiling``: a reference row, not a baseline.
+
 Usage::
 
     python scripts/run_method_comparison.py
@@ -54,9 +63,10 @@ from sklearn.linear_model import LogisticRegression  # noqa: E402
 from sklearn.metrics import confusion_matrix, f1_score, roc_auc_score  # noqa: E402
 
 from src.core.config_manager import load_config_for_region  # noqa: E402
-from src.evaluation.block_bootstrap import block_bootstrap_ci  # noqa: E402
+from src.evaluation.block_bootstrap import (block_bootstrap_ci,  # noqa: E402
+                                            paired_auc_delta_ci)
 from src.evaluation.window import (bootstrap_config, eval_window,  # noqa: E402,F401
-                                   split_by_date)
+                                   sensitivity_split_dates, split_by_date)
 
 logger = logging.getLogger(__name__)
 
@@ -119,26 +129,94 @@ def _split(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return split_by_date(frame)
 
 
-def _threshold(scores: np.ndarray, train_scores: np.ndarray | None) -> float:
-    """The alert threshold: the 90th percentile of the training-window scores."""
-    reference = (np.nan_to_num(np.asarray(scores, dtype=float)) if train_scores is None
-                 else np.nan_to_num(np.asarray(train_scores, dtype=float)))
-    return float(np.quantile(reference, 0.90))
+def _threshold(scores: np.ndarray, train_scores: np.ndarray | None,
+               train_keep: np.ndarray | None = None) -> float:
+    """The alert threshold: the 90th percentile of the training-window scores.
+
+    ``train_keep`` drops masked training days from the reference.
+    """
+    reference = (np.asarray(scores, dtype=float) if train_scores is None
+                 else np.asarray(train_scores, dtype=float))
+    if train_scores is not None and train_keep is not None:
+        reference = reference[np.asarray(train_keep, dtype=bool)]
+    return float(np.quantile(np.nan_to_num(reference), 0.90))
 
 
 def _evaluate(y_true: np.ndarray, scores: np.ndarray,
-              train_scores: np.ndarray | None = None, **bootstrap) -> dict:
+              train_scores: np.ndarray | None = None, *,
+              keep: np.ndarray | None = None, train_keep: np.ndarray | None = None,
+              **bootstrap) -> dict:
     """:func:`_score_metrics` plus moving-block bootstrap CIs on the test window.
 
-    The threshold stays the training one in every resample. Bootstrap
-    settings default to settings.yaml ``evaluation.bootstrap``, and keyword
-    overrides (e.g. ``n_resamples``) are for tests.
+    The threshold stays the training one in every resample. ``keep`` marks
+    the test days that are scored and ``train_keep`` the training days the
+    threshold is taken from; masked days (a news outage) count in neither.
+    Bootstrap settings default to settings.yaml ``evaluation.bootstrap``, and
+    keyword overrides (e.g. ``n_resamples``) are for tests.
     """
-    threshold = _threshold(scores, train_scores)
-    metrics = _score_metrics(y_true, scores, threshold=threshold)
+    y = np.asarray(y_true)
+    s = np.asarray(scores, dtype=float)
+    mask = np.ones(len(y), dtype=bool) if keep is None else np.asarray(keep, dtype=bool)
+    threshold = _threshold(s[mask] if train_scores is None else s, train_scores, train_keep)
+    metrics = _score_metrics(y[mask], s[mask], threshold=threshold)
     cfg = {**bootstrap_config(), **bootstrap}
-    ci = block_bootstrap_ci(y_true, scores, threshold, **cfg)
-    return {**metrics, **ci}
+    ci = block_bootstrap_ci(y, s, threshold, keep=mask, **cfg)
+    return {**metrics, **ci, "bootstrap_block": cfg["block"],
+            "bootstrap_n": cfg["n_resamples"], "bootstrap_ci": cfg["ci"]}
+
+
+def _delta(y_true: np.ndarray, scores: np.ndarray, reference: np.ndarray, *,
+           keep: np.ndarray | None = None, **bootstrap) -> dict:
+    """Paired ``AUC(scores) - AUC(reference)`` with its block-bootstrap CI.
+
+    Same settings and seed as :func:`_evaluate`, so the difference is taken
+    over exactly the resampled blocks the per-method intervals use.
+    """
+    cfg = {**bootstrap_config(), **bootstrap}
+    return paired_auc_delta_ci(y_true, scores, reference, keep=keep, **cfg)
+
+
+def _masked_days(frame: pd.DataFrame, manifest: dict) -> np.ndarray:
+    """True on the frame's days whose news GDELT never published.
+
+    Raises:
+        ValueError: If the frame was built under the old policy that
+            forward-filled those days: their news values would be invented.
+    """
+    region = manifest.get("region")
+    source = manifest.get("news_source") or {}
+    if source.get("days_forward_filled"):
+        raise ValueError(
+            f"{region}: news days were forward-filled when this "
+            "frame was built; rebuild it with scripts/build_eval_dataset.py "
+            "(masked policy)."
+        )
+    # --refresh-news swaps only the news block, so a refreshed old frame
+    # would pass the check above with its other domains still interpolated
+    # and FRED still on reference dates. Only a full build records these.
+    gap = (manifest.get("gap_fill") or {}).get("policy") or ""
+    if not gap.startswith("forward-fill"):
+        raise ValueError(
+            f"{region}: the manifest records no forward-fill gap_fill policy, "
+            "so this frame predates the no-interpolation build (or was only "
+            "news-refreshed); rebuild with scripts/build_eval_dataset.py --force."
+        )
+    if "market" in (manifest.get("domains_present") or {}):
+        dating = (manifest.get("market_source") or {}).get("dating") or ""
+        if not dating.startswith("first-release"):
+            raise ValueError(
+                f"{region}: market values are not on first-release dates "
+                "(manifest market_source); rebuild with "
+                "scripts/build_eval_dataset.py --force."
+            )
+    days = set(source.get("days_masked") or [])
+    stamps = pd.to_datetime(frame["timestamp"]).dt.strftime("%Y-%m-%d")
+    return stamps.isin(days).to_numpy()
+
+
+def _family(name: str, kind: str) -> str:
+    """Row family: the oracle is a ceiling, not a baseline a tier competes with."""
+    return "ceiling" if kind == "oracle" else "baseline"
 
 
 def _score_metrics(
@@ -430,6 +508,35 @@ def _agent_scores(domain: str, config: dict, train, test) -> np.ndarray | None:
         return None
 
 
+def _all_agent_scores(config: dict, train, test,
+                      domains: tuple[str, ...] = _TIER_ORDER) -> dict[str, np.ndarray | None]:
+    """Each agent fitted once on train and scored on test.
+
+    Every tier is composed from these, so Tier k and Tier 1 share the exact
+    same shipping-agent scores and their paired difference measures only
+    what the added agents change.
+    """
+    return {domain: _agent_scores(domain, config, train, test) for domain in domains}
+
+
+def _compose(tier: int, scores: dict[str, np.ndarray | None],
+             config: dict) -> tuple[np.ndarray | None, list[str]]:
+    """Composite for a tier: the weighted mean of its available agents' scores."""
+    weights = config.get("weights", {}) or {}
+    total, mass, used = None, 0.0, []
+    for domain in _TIER_ORDER[:tier]:
+        agent = scores.get(domain)
+        if agent is None:
+            continue
+        weight = float(weights.get(domain, 0.1))
+        total = weight * agent if total is None else total + weight * agent
+        mass += weight
+        used.append(domain)
+    if mass <= 0:
+        return None, []
+    return total / mass, used
+
+
 def tier_scores(tier: int, config: dict, train, test) -> tuple[np.ndarray | None, list[str]]:
     """Composite score for a tier: the weighted mean of its agents' scores.
 
@@ -440,21 +547,144 @@ def tier_scores(tier: int, config: dict, train, test) -> tuple[np.ndarray | None
         ``(scores, agents_used)``. ``scores`` is ``None`` if no agent in the
         tier could be built.
     """
-    weights = config.get("weights", {}) or {}
-    total = np.zeros(len(test))
-    mass = 0.0
-    used: list[str] = []
-    for domain in _TIER_ORDER[:tier]:
-        scores = _agent_scores(domain, config, train, test)
+    return _compose(tier, _all_agent_scores(config, train, test, _TIER_ORDER[:tier]), config)
+
+
+#: What :func:`_masked_days` has verified about every frame scored here.
+_FRAME_POLICY = ("news masked on days GDELT never published; other gaps "
+                 "forward-filled; FRED values on their first-release dates")
+
+#: Baselines fitted row by row (no rolling state), which can simply leave
+#: masked training days out of the fit. Rolling baselines keep the calendar.
+_ROW_WISE: frozenset[str] = frozenset(
+    {"B3 isolation forest", "B7 logistic regression", "B8 random forest"})
+
+
+def _window(test: pd.DataFrame, y: np.ndarray, keep: np.ndarray) -> dict:
+    return {"test_start": str(test["timestamp"].min().date()),
+            "test_end": str(test["timestamp"].max().date()),
+            "n_test": int(keep.sum()), "n_masked": int((~keep).sum()),
+            "test_positives": int(y[keep].sum()), "frame_policy": _FRAME_POLICY}
+
+
+def _tier_rows(region: str, config: dict, train, test, keep, train_keep,
+               tiers: tuple[int, ...], window: dict, **bootstrap) -> list[dict]:
+    """Scored rows for the given tiers, each with its paired delta vs Tier 1."""
+    y = test["y_true"].astype(int).to_numpy()
+    domains = _TIER_ORDER[:max(tiers)]
+    on_test = _all_agent_scores(config, train, test, domains)
+    on_train = _all_agent_scores(config, train, train, domains)
+    tier1, _ = _compose(1, on_test, config)
+    evaluable = len(np.unique(y[keep])) > 1
+    rows = []
+    for tier in tiers:
+        scores, used = _compose(tier, on_test, config)
         if scores is None:
+            print(f"   Tier {tier:<19} no agents available")
             continue
-        weight = float(weights.get(domain, 0.1))
-        total += weight * scores
-        mass += weight
-        used.append(domain)
-    if mass <= 0:
-        return None, []
-    return total / mass, used
+        train_scores, _ = _compose(tier, on_train, config)
+        metrics = _evaluate(y, scores, train_scores if train_scores is not None else scores,
+                            keep=keep, train_keep=train_keep if train_scores is not None
+                            else keep, **bootstrap)
+        delta = {}
+        if tier1 is not None and tier != 1 and evaluable:
+            delta = _delta(y, scores, tier1, keep=keep, **bootstrap)
+        rows.append({"region": region, "method": f"Tier {tier}", "kind": "multi-agent",
+                     "family": "tier", "agents": ",".join(used),
+                     "circularity": _TIER_CIRCULARITY, "n_agents": len(used),
+                     **metrics, **delta, **window})
+        shown = (f" dAUC vs T1={delta['delta_auc']:+.3f} "
+                 f"[{delta['delta_auc_ci_low']:+.3f}, {delta['delta_auc_ci_high']:+.3f}]"
+                 if delta else "")
+        print(f"   Tier {tier} ({len(used)} agents){'':<7} AUC={metrics['auc']!s:<7.7} "
+              f"F1={metrics['f1']!s:<6.6} alert_rate={metrics['alert_rate']:.2f}"
+              f"{shown} [{','.join(used)}]")
+    return rows
+
+
+def run_region(region: str, frame: pd.DataFrame, manifest: dict, config: dict,
+               **bootstrap) -> list[dict]:
+    """Every baseline and every tier on the fixed split; masked days unscored."""
+    masked = _masked_days(frame, manifest)
+    features = [c for c in frame.columns if "__" in c]
+    train, test = _split(frame)
+    mask_of = pd.Series(~masked, index=frame.index)
+    train_keep = mask_of.loc[train.index].to_numpy()
+    keep = mask_of.loc[test.index].to_numpy()
+    y_test = test["y_true"].astype(int).to_numpy()
+    evaluable = len(np.unique(y_test[keep])) > 1
+    window = _window(test, y_test, keep)
+
+    print(f"\n[{region}] train={len(train)} test={len(test)} "
+          f"[{window['test_start']} .. {window['test_end']}] "
+          f"scored={window['n_test']} masked={window['n_masked']} "
+          f"test_positives={window['test_positives']} "
+          f"{'' if evaluable else '(FP harness only — no positives in test)'}")
+
+    rows: list[dict] = []
+    for name, (fn, kind) in BASELINES.items():
+        family = _family(name, kind)
+        # Row-wise models are fitted without the masked training days (their
+        # news features would be zero-filled); the threshold then uses every
+        # remaining training score.
+        fit_train, fit_keep = ((train[train_keep], None) if name in _ROW_WISE
+                               else (train, train_keep))
+        try:
+            scores = fn(fit_train, test, features)
+        except _NotTrainable as exc:
+            rows.append({"region": region, "method": name, "kind": kind,
+                         "family": family,
+                         "circularity": _CIRCULARITY.get(name, "unknown"),
+                         "auc": np.nan, "f1": np.nan,
+                         "fpr": np.nan, "alert_rate": np.nan,
+                         "not_applicable": str(exc), **window})
+            print(f"   {name:<24} n/a — {exc}")
+            continue
+        except Exception as exc:
+            print(f"   {name:<24} FAILED: {str(exc)[:60]}")
+            continue
+        scores = np.asarray(scores, dtype=float)
+        metrics = _evaluate(y_test, scores[-len(test):], scores[: len(fit_train)],
+                            keep=keep, train_keep=fit_keep, **bootstrap)
+        rows.append({"region": region, "method": name, "kind": kind,
+                     "family": family,
+                     "circularity": _CIRCULARITY.get(name, "unknown"),
+                     **metrics, **window})
+        print(f"   {name:<24} AUC={metrics['auc']!s:<7.7} "
+              f"F1={metrics['f1']!s:<6.6} alert_rate={metrics['alert_rate']:.2f}")
+
+    rows += _tier_rows(region, config, train, test, keep, train_keep,
+                       tuple(range(1, len(_TIER_ORDER) + 1)), window, **bootstrap)
+    return rows
+
+
+#: Tiers re-scored in the split-date sensitivity table.
+_SENSITIVITY_TIERS: tuple[int, ...] = (1, 4)
+
+
+def split_sensitivity(region: str, frame: pd.DataFrame, manifest: dict, config: dict,
+                      **bootstrap) -> list[dict]:
+    """Tier 1 and Tier 4 re-scored at each settings.yaml sensitivity split date.
+
+    Same harness as the main table (fixed end date, masked days unscored,
+    training-window threshold, paired delta vs Tier 1); only the split moves.
+    """
+    masked = _masked_days(frame, manifest)
+    mask_of = pd.Series(~masked, index=frame.index)
+    rows: list[dict] = []
+    for split_date in sensitivity_split_dates():
+        train, test = split_by_date(frame, split_date=split_date)
+        keep = mask_of.loc[test.index].to_numpy()
+        train_keep = mask_of.loc[train.index].to_numpy()
+        y = test["y_true"].astype(int).to_numpy()
+        window = {**_window(test, y, keep),
+                  "train_positives": int(train["y_true"].astype(int).sum())}
+        print(f"\n[{region}] sensitivity split {split_date.date()}: "
+              f"scored={window['n_test']} positives={window['test_positives']}")
+        for row in _tier_rows(region, config, train, test, keep, train_keep,
+                              _SENSITIVITY_TIERS, window, **bootstrap):
+            rows.append({"split_date": str(split_date.date()), **row})
+    return rows
 
 
 # ------------------------------------------------------------------- run
@@ -464,69 +694,19 @@ def main() -> int:
 
     regions = [p.stem for p in sorted(_CACHE.glob("*.csv"))]
     rows: list[dict] = []
-
+    sensitivity: list[dict] = []
     for region in regions:
         frame, manifest = _load(region)
         config = load_config_for_region(region)
-        features = [c for c in frame.columns if "__" in c]
-        train, test = _split(frame)
-        y_test = test["y_true"].astype(int).to_numpy()
-        evaluable = len(np.unique(y_test)) > 1
-        window = {"test_start": str(test["timestamp"].min().date()),
-                  "test_end": str(test["timestamp"].max().date()),
-                  "n_test": len(test), "test_positives": int(y_test.sum())}
-
-        print(f"\n[{region}] train={len(train)} test={len(test)} "
-              f"[{test['timestamp'].min().date()} .. {test['timestamp'].max().date()}] "
-              f"test_positives={int(y_test.sum())} "
-              f"{'' if evaluable else '(FP harness only — no positives in test)'}")
-
-        for name, (fn, kind) in BASELINES.items():
-            try:
-                scores = fn(train, test, features)
-            except _NotTrainable as exc:
-                rows.append({"region": region, "method": name, "kind": kind,
-                             "family": "baseline",
-                             "circularity": _CIRCULARITY.get(name, "unknown"),
-                             "auc": np.nan, "f1": np.nan,
-                             "fpr": np.nan, "alert_rate": np.nan,
-                             "not_applicable": str(exc), **window})
-                print(f"   {name:<24} n/a — {exc}")
-                continue
-            except Exception as exc:
-                print(f"   {name:<24} FAILED: {str(exc)[:60]}")
-                continue
-            scores = np.asarray(scores, dtype=float)
-            metrics = _evaluate(
-                y_test, scores[-len(test):], scores[: len(train)]
-            )
-            rows.append({"region": region, "method": name, "kind": kind,
-                         "family": "baseline",
-                         "circularity": _CIRCULARITY.get(name, "unknown"),
-                         **metrics, **window})
-            print(f"   {name:<24} AUC={metrics['auc']!s:<7.7} "
-                  f"F1={metrics['f1']!s:<6.6} alert_rate={metrics['alert_rate']:.2f}")
-
-        for tier in range(1, len(_TIER_ORDER) + 1):
-            scores, used = tier_scores(tier, config, train, test)
-            if scores is None:
-                print(f"   Tier {tier:<19} no agents available")
-                continue
-            train_scores, _ = tier_scores(tier, config, train, train)
-            metrics = _evaluate(
-                y_test, scores, train_scores if train_scores is not None else scores
-            )
-            rows.append({"region": region, "method": f"Tier {tier}", "kind": "multi-agent",
-                         "family": "tier", "agents": ",".join(used),
-                         "circularity": _TIER_CIRCULARITY,
-                         "n_agents": len(used), **metrics, **window})
-            print(f"   Tier {tier} ({len(used)} agents){'':<7} AUC={metrics['auc']!s:<7.7} "
-                  f"F1={metrics['f1']!s:<6.6} alert_rate={metrics['alert_rate']:.2f} "
-                  f"[{','.join(used)}]")
+        rows += run_region(region, frame, manifest, config)
+        sensitivity += split_sensitivity(region, frame, manifest, config)
 
     results = pd.DataFrame(rows)
     results.to_csv(_OUT / "method_comparison_results.csv", index=False)
     print(f"\nWrote {_OUT / 'method_comparison_results.csv'} ({len(results)} rows)")
+    table = pd.DataFrame(sensitivity)
+    table.to_csv(_OUT / "split_sensitivity.csv", index=False)
+    print(f"Wrote {_OUT / 'split_sensitivity.csv'} ({len(table)} rows)")
     return 0
 
 

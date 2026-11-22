@@ -30,17 +30,31 @@ def bootstrap_config() -> dict:
             "ci": float(block["ci"]), "seed": int(block["seed"])}
 
 
-def split_by_date(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def sensitivity_split_dates() -> list[pd.Timestamp]:
+    """Alternative split dates for the split-date sensitivity table."""
+    block = load_base_config()["evaluation"]
+    return [pd.Timestamp(d) for d in block["sensitivity_split_dates"]]
+
+
+def split_by_date(
+    frame: pd.DataFrame, split_date: str | pd.Timestamp | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Train before ``split_date``; test from it through ``end_date``.
 
     The frame is sorted by ``timestamp`` first, so shuffled input splits the
     same way. A frame ending before ``end_date`` is accepted with a warning,
     since it simply has a shorter test window.
 
+    Args:
+        split_date: Overrides settings.yaml's ``split_date``, for the
+            sensitivity table only. ``end_date`` always comes from settings.
+
     Raises:
         ValueError: If the frame has no days on one side of the split.
     """
     window = eval_window()
+    if split_date is not None:
+        window["split_date"] = pd.Timestamp(split_date)
     frame = frame.sort_values("timestamp", kind="stable")
     ts = pd.to_datetime(frame["timestamp"])
     train = frame[ts < window["split_date"]]

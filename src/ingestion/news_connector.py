@@ -244,7 +244,10 @@ class NewsConnector(BaseConnector):
           to [-1, 1].
         * ``sentiment_magnitude``: its absolute value.
         * ``recency_weighted_score``: the config's ``api.recency_weights``,
-          applied by calendar lag; unpublished days are skipped, not counted.
+          applied by calendar lag, over days that had articles. Zero-volume
+          days carry no tone and unpublished days no data, so both are
+          skipped and the weights renormalised; a window with no coverage at
+          all scores 0.0 (no sentiment signal).
         * ``article_volume``: corridor articles per 100,000 GDELT events that
           day (``news_volume / total_events``). This removes GDELT's own
           output changes: its daily volume falls after 2019, and some export
@@ -255,11 +258,13 @@ class NewsConnector(BaseConnector):
 
         A day with no matching coverage is a real observation ("peace time"),
         not missing data. Its tone is undefined, so ``news_tone`` is NaN. The
-        agent's ``sentiment_score`` is 0 there, meaning no sentiment signal,
-        and volume is 0. Quiet days therefore dilute the recency average, so
-        a single hostile article cannot hold the score down for a whole
-        window. Days GDELT never published have no row in the CSV and none
-        here. They are listed in ``attrs["news_source"]["missing_days"]``.
+        day's ``sentiment_score`` is 0 there, meaning no sentiment signal,
+        and volume is 0. The recency mean skips such days rather than
+        averaging them in as neutral tone, so quiet days do not dilute the
+        tone of the coverage there was. The cost: one hostile day can set
+        the recency tone for the rest of its window if nothing follows it.
+        Days GDELT never published have no row in the CSV and none here.
+        They are listed in ``attrs["news_source"]["missing_days"]``.
 
         ``source_consensus`` is omitted, as in :meth:`fetch_api`. The export
         is aggregated per day, with no per-outlet breakdown.
@@ -346,8 +351,11 @@ class NewsConnector(BaseConnector):
         weights_cfg = (self.config.get("api", {}) or {}).get("recency_weights", {})
         # Weight by calendar lag, not row position: across days GDELT never
         # published, "yesterday" must not mean the last row before the gap.
-        calendar = df.set_index("timestamp")["sentiment_score"].asfreq("D")
-        recency = self._recency_weighted(calendar, weights_cfg)
+        # The mean runs over tone, NaN on zero-volume days, so days without
+        # articles are skipped instead of counted as neutral.
+        observed = (df["news_tone"] / _GDELT_TONE_SCALE).clip(-1.0, 1.0)
+        calendar = pd.Series(observed.to_numpy(), index=df["timestamp"]).asfreq("D")
+        recency = self._recency_weighted(calendar, weights_cfg).fillna(0.0)
         df.insert(4, "recency_weighted_score",
                   recency.reindex(df["timestamp"]).to_numpy())
         df.attrs["news_source"] = {

@@ -223,16 +223,21 @@ def test_replace_news_changes_only_news_columns(tmp_path) -> None:
     out, m = bed.replace_news(frame, manifest, news)
     pd.testing.assert_frame_equal(out[["timestamp", "y_true", "shipping__vessel_count"]],
                                   frame[["timestamp", "y_true", "shipping__vessel_count"]])
-    # 01-04 unpublished: forward-filled from 01-03, never from the future 01-05.
-    assert out["news_sentiment__article_volume"].tolist() == [0, 10, 8, 8, 1]
+    # 01-04 unpublished: masked (NaN), neither forward-filled nor interpolated.
+    vol = out["news_sentiment__article_volume"]
+    assert vol.isna().tolist() == [False, False, False, True, False]
+    assert vol.dropna().tolist() == [0, 10, 8, 1]
+    assert out.loc[3, [f"news_sentiment__{c}" for c in
+                       bed._DOMAIN_FEATURES["news_sentiment"]]].isna().all()
     assert "news_sentiment__news_tone" not in out.columns     # NaN tone never reaches models
     assert m["domains_present"]["news_sentiment"] == list(bed._DOMAIN_FEATURES["news_sentiment"])
     assert m["feature_columns"] == ["shipping__vessel_count",
                                     *[f"news_sentiment__{c}" for c in
                                       bed._DOMAIN_FEATURES["news_sentiment"]]]
     assert m["news_source"]["filter_version"] == "v2"
-    assert m["news_source"]["days_forward_filled"] == ["2019-01-04"]
-    assert m["news_source"]["gap_fill"].startswith("forward-fill")
+    assert m["news_source"]["days_masked"] == ["2019-01-04"]
+    assert "days_forward_filled" not in m["news_source"]
+    assert m["news_source"]["gap_policy"].startswith("masked")
     assert m["rows"] == len(frame)
 
 
@@ -275,8 +280,12 @@ def test_build_region_attaches_news_like_replace_news(tmp_path, monkeypatch) -> 
     monkeypatch.setattr(bed, "_fetch_domain", lambda domain, config: frames.get(domain))
     merged, m = bed.build_region("hormuz")                  # drop_incomplete=True
     assert merged["timestamp"].max() == pd.Timestamp("2019-01-05")   # outside news: dropped
-    assert merged["news_sentiment__article_volume"].tolist() == [0, 10, 8, 8, 1]
-    assert m["news_source"]["days_forward_filled"] == ["2019-01-04"]
+    # The masked day stays in the frame (other domains intact) with NaN news.
+    assert len(merged) == 5
+    vol = merged["news_sentiment__article_volume"]
+    assert vol.isna().tolist() == [False, False, False, True, False]
+    assert m["news_source"]["days_masked"] == ["2019-01-04"]
+    assert m["rows_news_masked"] == 1
     live, _ = bed.build_region("hormuz", drop_incomplete=False)      # live series: NaN, no raise
     assert live["news_sentiment__article_volume"].iloc[5:].isna().all()
 
@@ -302,7 +311,8 @@ def test_refresh_news_on_disk_leaves_other_columns_byte_identical(tmp_path, monk
     after = pd.read_csv(cache / "hormuz.csv", dtype=str)
     keep = ["timestamp", "y_true", "shipping__vessel_count"]
     pd.testing.assert_frame_equal(before[keep], after[keep])
-    assert after["news_sentiment__article_volume"].tolist() == ["0.0", "10.0", "8.0", "8.0", "1.0"]
+    assert after["news_sentiment__article_volume"].fillna("").tolist() == [
+        "0.0", "10.0", "8.0", "", "1.0"]                      # 01-04 masked
 
 
 def test_refresh_news_surfaces_the_real_error(tmp_path, monkeypatch) -> None:
@@ -316,3 +326,102 @@ def test_refresh_news_surfaces_the_real_error(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(bed, "_CACHE_DIR", cache)
     with pytest.raises(ValueError, match="manifest"):
         bed.refresh_news("hormuz", news_dir=news_dir)
+
+
+def test_build_region_forward_fills_other_domains_never_interpolates(tmp_path, monkeypatch) -> None:
+    news = _connector(_write_news(tmp_path, "hormuz", _ROWS, missing=["2019-01-04"])).fetch()
+    shipping = _shipping(5)
+    shipping.loc[2, "congestion_index"] = np.nan            # a hole inside the series
+    shipping.loc[3, "congestion_index"] = 0.9
+    frames = {"shipping": shipping, "news_sentiment": news}
+    monkeypatch.setattr(bed, "load_config_for_region", lambda region: {})
+    monkeypatch.setattr(bed, "_fetch_domain", lambda domain, config: frames.get(domain))
+    merged, m = bed.build_region("hormuz")
+    # Linear interpolation would give 0.7, using the next day; forward-fill
+    # carries the last known value.
+    assert merged["shipping__congestion_index"].tolist()[:4] == [0.5, 0.5, 0.5, 0.9]
+    assert m["gap_fill"]["cells_filled"]["shipping__congestion_index"] == 1
+    assert m["gap_fill"]["policy"].startswith("forward-fill")
+
+
+def test_masked_news_day_with_another_domain_missing_is_still_dropped(tmp_path, monkeypatch) -> None:
+    news = _connector(_write_news(tmp_path, "hormuz", _ROWS, missing=["2019-01-04"])).fetch()
+    shipping = _shipping(5).drop(index=3)                  # no shipping row on 01-04
+    frames = {"shipping": shipping, "news_sentiment": news}
+    monkeypatch.setattr(bed, "load_config_for_region", lambda region: {})
+    monkeypatch.setattr(bed, "_fetch_domain", lambda domain, config: frames.get(domain))
+    merged, m = bed.build_region("hormuz")
+    assert pd.Timestamp("2019-01-04") not in set(merged["timestamp"])
+    assert m["rows_news_masked"] == 0
+
+
+def test_manifest_records_how_market_values_are_dated(tmp_path, monkeypatch) -> None:
+    news = _connector(_write_news(tmp_path, "hormuz", _ROWS, missing=["2019-01-04"])).fetch()
+    market = pd.DataFrame({"timestamp": pd.date_range("2019-01-01", periods=5, freq="D"),
+                           "brent_crude_usd": 60.0, "trade_volume_index": 0.5,
+                           "freight_rate_index": 100.0})
+    market.attrs["market_source"] = {"dating": "first-release date (ALFRED)"}
+    frames = {"shipping": _shipping(5), "news_sentiment": news, "market": market}
+    monkeypatch.setattr(bed, "load_config_for_region", lambda region: {})
+    monkeypatch.setattr(bed, "_fetch_domain", lambda domain, config: frames.get(domain))
+    _, m = bed.build_region("hormuz")
+    assert m["market_source"]["dating"].startswith("first-release")
+
+
+# --------------------------------------------- NaN-aware tone (no articles)
+def test_recency_tone_mean_skips_days_without_articles(tmp_path) -> None:
+    rows = ["2019-01-01,0,0,,,0,1000",                  # quiet, before any coverage
+            "2019-01-02,5,1,-8.0,0,0,1000",
+            "2019-01-03,0,0,,,0,1000", "2019-01-04,0,0,,,0,1000"]
+    df = _connector(_write_news(tmp_path, "hormuz", rows)).fetch()
+    rec = df.set_index("timestamp")["recency_weighted_score"]
+    assert rec.loc["2019-01-01"] == 0.0                 # no tone anywhere yet: no signal
+    # Quiet days carry no tone, so they do not pull the mean toward 0.
+    assert rec.loc["2019-01-03"] == pytest.approx(-0.8)
+    assert rec.loc["2019-01-04"] == pytest.approx(-0.8)
+    assert df.set_index("timestamp").loc["2019-01-03", "sentiment_score"] == 0.0
+
+
+def _agent_frame(tone, volume) -> pd.DataFrame:
+    n = len(tone)
+    return pd.DataFrame({"timestamp": pd.date_range("2019-01-01", periods=n, freq="D"),
+                         "sentiment_score": tone, "sentiment_magnitude": np.abs(tone),
+                         "article_volume": volume,
+                         "recency_weighted_score": tone})
+
+
+def _preprocessed(frame: pd.DataFrame) -> pd.DataFrame:
+    agent = NewsAgent()
+    agent.fit(frame)
+    return agent.preprocess(frame)
+
+
+def test_agent_tone_mean_skips_days_without_articles() -> None:
+    tone = np.array([-0.5, 0.0, 0.0, 0.0, -0.3])
+    out = _preprocessed(_agent_frame(tone, [5.0, 0.0, 0.0, 0.0, 5.0]))
+    assert out["sentiment_rolling_7d"].iloc[3] == pytest.approx(-0.5)   # not -0.125
+    assert out["sentiment_rolling_7d"].iloc[4] == pytest.approx(-0.4)
+
+
+def test_agent_velocity_keeps_its_original_daily_definition() -> None:
+    # Only the tone *mean* is NaN-aware. Velocity stays the 3-day change in
+    # the daily sentiment_score (0 on quiet days), as before; a day without
+    # any news data gives no velocity signal instead of NaN.
+    out = _preprocessed(_agent_frame(np.array([0.0, 0.0, 0.0, -0.6, np.nan, -0.6, -0.6]),
+                                     [0.0, 0.0, 0.0, 5.0, np.nan, 5.0, 5.0]))
+    assert out["sentiment_velocity"].iloc[3] == pytest.approx(-0.6)
+    assert out["sentiment_velocity"].notna().all()
+    assert out["sentiment_velocity"].iloc[4] == 0.0
+
+
+def test_agent_scores_nan_on_a_day_with_no_news_data_at_all() -> None:
+    tone = np.array([-0.2, -0.4, np.nan, np.nan, -0.6, -0.6, -0.6])
+    volume = np.array([5.0, 5.0, np.nan, np.nan, 5.0, 5.0, 5.0])
+    frame = _agent_frame(tone, volume)
+    agent = NewsAgent()
+    agent.fit(frame)
+    scored = agent.detect(agent.preprocess(frame))
+    assert scored["anomaly_score"].iloc[2:4].isna().all()     # masked: no observation
+    rest = scored["anomaly_score"].drop(index=[2, 3])
+    assert rest.notna().all() and rest.between(0.0, 1.0).all()
+    assert not scored["is_anomaly"].iloc[2:4].any()

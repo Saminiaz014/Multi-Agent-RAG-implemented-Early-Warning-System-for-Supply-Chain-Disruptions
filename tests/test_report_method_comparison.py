@@ -33,9 +33,9 @@ def _results(tier_aucs: dict[str, list[float]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _report(tmp_path, monkeypatch, results) -> str:
+def _report(tmp_path, monkeypatch, results, sensitivity=None) -> str:
     monkeypatch.setattr(rep, "_EVAL", tmp_path)
-    rep.write_report(results)
+    rep.write_report(results, sensitivity=sensitivity)
     return (tmp_path / "COMPARISON_REPORT.md").read_text(encoding="utf-8")
 
 
@@ -123,3 +123,94 @@ def test_untrainable_count_and_news_coverage_are_not_hard_coded(tmp_path, monkey
                    _results({"a": [0.9] * 5, "b": [0.9] * 5}))
     assert "Panama alone has news" not in text
     assert "2 of 2 regions" in text            # B7 n/a in both synthetic regions
+
+
+# ----------------------------------------------------- ceiling, deltas, splits
+def _region_table(text: str, region: str) -> list[str]:
+    block = text.split(f"### {region}\n", 1)[1]
+    return [line for line in block.splitlines() if line.startswith("| ")][2:]
+
+
+def test_oracle_is_a_ceiling_row_below_the_methods(tmp_path, monkeypatch) -> None:
+    results = _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]})
+    oracle = _row("panama", "ORACLE label t-1", 0.99, family="ceiling", kind="oracle")
+    text = _report(tmp_path, monkeypatch, pd.concat([results, pd.DataFrame([oracle])]))
+    table = _region_table(text, "panama")
+    assert "ORACLE" in table[-1] and "ceiling" in table[-1]
+    assert all("ORACLE" not in line for line in table[:-1])   # not ranked among methods
+    assert "Ceiling: ORACLE label t-1" in text
+    assert "Best baseline ORACLE" not in text
+
+
+def _with_deltas(results: pd.DataFrame, deltas: dict[str, tuple[float, float, float]]):
+    out = _with_ci(results, {})
+    for method, (d, lo, hi) in deltas.items():
+        sel = out["method"] == method
+        out.loc[sel, ["delta_auc", "delta_auc_ci_low", "delta_auc_ci_high"]] = [d, lo, hi]
+    return out
+
+
+def test_paired_delta_table_and_verdicts(tmp_path, monkeypatch) -> None:
+    base = _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]})
+    text = _report(tmp_path, monkeypatch, _with_deltas(base, {
+        "Tier 2": (-0.10, -0.15, -0.05),           # clearly below Tier 1
+        "Tier 3": (-0.20, -0.30, 0.01),            # includes 0: inconclusive
+        "Tier 4": (-0.20, -0.30, -0.10),
+        "Tier 5": (0.05, 0.01, 0.09)}))            # clearly above
+    assert "Paired" in text and "Tier k - Tier 1" in text
+    assert "-0.100 [-0.150, -0.050]" in text
+    assert "2 of 4" in text and "1 of 4" in text      # below / above / inconclusive counts
+    # Overlap wording is not used when the paired test is available.
+    assert "clearly apart in" not in text
+
+
+def test_split_sensitivity_table(tmp_path, monkeypatch) -> None:
+    base = _with_ci(_results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]}), {})
+    rows = []
+    for split, t1, t4 in (("2023-01-01", 0.88, 0.85), ("2023-07-01", 0.90, 0.70),
+                          ("2024-01-01", 0.93, 0.72)):
+        common = {"region": "panama", "split_date": split, "test_start": split,
+                  "test_end": "2025-11-21", "n_test": 700, "test_positives": 140}
+        rows.append({**common, "method": "Tier 1", "auc": t1,
+                     "auc_ci_low": t1 - 0.05, "auc_ci_high": t1 + 0.03})
+        rows.append({**common, "method": "Tier 4", "auc": t4,
+                     "auc_ci_low": t4 - 0.05, "auc_ci_high": t4 + 0.03,
+                     "delta_auc": t4 - t1, "delta_auc_ci_low": t4 - t1 - 0.04,
+                     "delta_auc_ci_high": t4 - t1 + 0.04})
+    text = _report(tmp_path, monkeypatch, base, sensitivity=pd.DataFrame(rows))
+    section = text.split("Split-date sensitivity", 1)[1]
+    assert "| panama | 2024-01-01 |" in section
+    assert "0.930 [0.880, 0.960]" in section
+    assert "-0.210 [-0.250, -0.170]" in section
+    assert "Tier 1 AUC ranges 0.880-0.930" in section
+
+
+def test_masked_days_are_stated(tmp_path, monkeypatch) -> None:
+    results = _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]})
+    results["n_masked"] = 18
+    text = _report(tmp_path, monkeypatch, results)
+    assert "18 test days" in text and "masked" in text
+
+
+def test_dating_claim_only_for_frames_that_record_it(tmp_path, monkeypatch) -> None:
+    results = _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]})
+    assert "first-release date" not in _report(tmp_path, monkeypatch, results)
+    results["frame_policy"] = "news masked; gaps forward-filled; FRED first-release"
+    assert "first-release date" in _report(tmp_path, monkeypatch, results)
+
+
+def test_ranking_graph_keeps_the_ceiling_out_of_the_bars(tmp_path, monkeypatch) -> None:
+    results = _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]})
+    oracle = _row("panama", "ORACLE label t-1", 0.99, family="ceiling", kind="oracle")
+    frame = pd.concat([results, pd.DataFrame([oracle])], ignore_index=True)
+    drawn: list[list[str]] = []
+    real = rep.plt.Axes.set_yticklabels
+
+    def spy(self, labels, *a, **kw):
+        drawn.append(list(labels))
+        return real(self, labels, *a, **kw)
+
+    monkeypatch.setattr(rep, "_G_METHOD", tmp_path)
+    monkeypatch.setattr(rep.plt.Axes, "set_yticklabels", spy)
+    rep.graph_region_rankings(frame)
+    assert drawn and all("ORACLE label t-1" not in labels for labels in drawn)
