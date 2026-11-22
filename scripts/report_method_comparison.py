@@ -419,6 +419,67 @@ def _alert_rule_note(results: pd.DataFrame) -> str:
     )
 
 
+def _tier_k(method: str) -> int:
+    return int(str(method).split()[-1])
+
+
+def _repeats(results: pd.DataFrame) -> set[tuple[str, str]]:
+    """``(region, method)`` of tiers that fuse exactly the previous tier's agents.
+
+    A tier whose added agent is disabled in its region is a copy of the tier
+    before it. It is marked in the tables and left out of every count and
+    mean, so a copy is not read as more evidence. Needs ``agents``.
+    """
+    if "agents" not in results.columns:
+        return set()
+    out: set[tuple[str, str]] = set()
+    tiers = results[results["family"] == "tier"]
+    for region, rows in tiers.groupby("region"):
+        rows = rows.iloc[np.argsort([_tier_k(m) for m in rows["method"]], kind="stable")]
+        agents = rows["agents"].fillna("").tolist()
+        out |= {(region, m) for m, a, prev in
+                zip(rows["method"].iloc[1:], agents[1:], agents[:-1]) if a == prev}
+    return out
+
+
+def _label(row: pd.Series, repeats: set[tuple[str, str]]) -> str:
+    """A row's method name, marked when it repeats the tier before it."""
+    name = row["method"]
+    if (row["region"], name) in repeats:
+        return f"{name} (= Tier {_tier_k(name) - 1})"
+    return name
+
+
+def _disabled_note(results: pd.DataFrame) -> str:
+    """Agents each region disables, and the tiers that therefore repeat.
+
+    Read from the tier rows' ``agents`` / ``agents_disabled`` columns. A tier
+    is named when it fuses exactly the agents of the tier before it.
+    """
+    if "agents_disabled" not in results.columns:
+        return ""
+    tiers = results[results["family"] == "tier"]
+    disabled = []
+    for region in sorted(tiers["region"].unique()):
+        off = sorted({d for cell in tiers[tiers.region == region]["agents_disabled"].fillna("")
+                      for d in str(cell).split(",") if d})
+        if off:
+            disabled.append(f"{region}: {', '.join(off)}")
+    if not disabled:
+        return ""
+    repeats = [f"{r} {m}" for r, m in sorted(_repeats(results))]
+    same = ("; these tiers therefore equal the tier before them: "
+            + "; ".join(repeats) if repeats else "")
+    return (
+        "- **Agents disabled by the region config** (`agents.<name>.enabled: "
+        "false`, on evidence grounds): " + "; ".join(disabled) + ". A disabled "
+        "agent is not run, and each tier fuses its enabled agents with the "
+        "weights renormalised over them" + same + ". "
+        "`eval/method_comparison_all_agents.csv` re-scores every tier with every "
+        "agent enabled, as an appendix sensitivity, not the main result.\n"
+    )
+
+
 def _masked_note(results: pd.DataFrame) -> str:
     """How many test days were masked (no news published) and left unscored."""
     if "n_masked" not in results.columns or not results["n_masked"].fillna(0).any():
@@ -434,6 +495,11 @@ def _masked_note(results: pd.DataFrame) -> str:
 
 def _sensitivity_section(sensitivity: pd.DataFrame) -> list[str]:
     """Tier 1 and Tier 4 at each split date, with the paired Tier 4 - Tier 1."""
+    def cell(row, tier: int) -> str:
+        shown = _auc_cell(row)
+        n = row.get("n_agents")
+        return shown + (f" ({int(n)} agents)" if pd.notna(n) and int(n) < tier else "")
+
     out = ["\n### Split-date sensitivity\n",
            "Tier 1 and Tier 4 re-scored with the split moved; the end date, the "
            "masked days and the training-window threshold rule are unchanged. "
@@ -449,8 +515,8 @@ def _sensitivity_section(sensitivity: pd.DataFrame) -> list[str]:
             t1 = at.loc["Tier 1"] if "Tier 1" in at.index else None
             t4 = at.loc["Tier 4"] if "Tier 4" in at.index else None
             ref = t1 if t1 is not None else t4
-            cells = [(_auc_cell(r) if r is not None and pd.notna(r.get("auc")) else "—")
-                     for r in (t1, t4)]
+            cells = [(cell(r, k) if r is not None and pd.notna(r.get("auc")) else "—")
+                     for r, k in ((t1, 1), (t4, 4))]
             delta = (_delta_cell(t4) if t4 is not None and _has_delta(sensitivity)
                      else "—")
             out.append(f"| {region} | {split} | {int(ref['n_test'])} "
@@ -462,6 +528,10 @@ def _sensitivity_section(sensitivity: pd.DataFrame) -> list[str]:
                           f"{t1_auc.max():.3f}")
     if ranges:
         out.append("\n" + "; ".join(ranges) + ".\n")
+    if "n_agents" in sensitivity.columns and (
+            sensitivity["n_agents"] < sensitivity["method"].map(_tier_k)).any():
+        out.append("A tier with fewer agents than its number (in brackets) is one "
+                   "whose region disables an agent it would add.\n")
     return out
 
 
@@ -471,6 +541,7 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
     tiers = scored[scored.family == "tier"]
     baselines = _real_baselines(scored)
     ceiling = scored[_is_ceiling(scored)]
+    repeats = _repeats(results)
     lines: list[str] = []
 
     lines.append("# Method comparison and agent ablation\n")
@@ -499,7 +570,7 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
         lines.append("|---|---|---|---|---|")
         for _, row in region_rows.iterrows():
             lines.append(
-                f"| {row['method']} | {row['kind']} | {_auc_cell(row)} | "
+                f"| {_label(row, repeats)} | {row['kind']} | {_auc_cell(row)} | "
                 f"{row['f1']:.3f} | {row['alert_rate']:.2f} |"
             )
         # The ceiling sits below the ranked methods, not among them.
@@ -530,6 +601,7 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
     lines.append("\n### Does adding agents improve AUC?\n")
     peaks: list[str] = []
     tier3_drops: list[bool] = []
+    no_geo: list[str] = []
     steps = apart = 0
     for region in sorted(tiers["region"].unique()):
         series = tiers[tiers.region == region].sort_values("method")
@@ -538,20 +610,38 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
         peak = names[int(np.argmax(values))]
         peaks.append(peak)
         if len(values) >= 3:
-            tier3_drops.append(values[2] < values[1])
+            # Only where Tier 3 really adds geopolitical (it is not disabled).
+            agents = (series["agents"].fillna("").str.split(",").tolist()
+                      if "agents" in series.columns else None)
+            if agents is None or ("geopolitical" in agents[2]
+                                  and "geopolitical" not in agents[1]):
+                tier3_drops.append(values[2] < values[1])
+            else:
+                no_geo.append(region)
         if _has_ci(series):
             for (_, a), (_, b) in zip(series.iloc[:-1].iterrows(), series.iloc[1:].iterrows()):
+                if (region, b["method"]) in repeats:
+                    continue
                 steps += 1
                 apart += "do not overlap" in _separation(a, b)
-        lines.append(
-            f"- **{region}**: " + " -> ".join(f"{v:.3f}" for v in values)
-            + f"  (best: {peak})"
-        )
+        marked = [f"{v:.3f}" + (" (=)" if (region, m) in repeats else "")
+                  for v, m in zip(values, names)]
+        lines.append(f"- **{region}**: " + " -> ".join(marked) + f"  (best: {peak})")
+    if any(r in {region for region, _ in repeats} for r in tiers["region"].unique()):
+        lines.append("\n(=): the tier repeats the one before it; the agent it would "
+                     "add is disabled in that region.")
+    with_delta = (tiers.dropna(subset=["delta_auc"]) if _has_delta(tiers)
+                  else tiers.iloc[0:0])
+    is_copy = pd.Series([(r, m) in repeats for r, m in
+                         zip(with_delta["region"], with_delta["method"])],
+                        index=with_delta.index, dtype=bool)
+    compared = with_delta[~is_copy]
+    copies = int(is_copy.sum())
+    left_out = (f" ({copies} tier{' that repeats the tier before it is' if copies == 1 else 's that repeat the tier before them are'} "
+                "not counted.)" if copies else "")
     hedge = (f" These are point estimates: consecutive tiers' intervals are "
              f"clearly apart in {apart} of {steps} steps, and overlap alone is "
              "inconclusive." if steps else "")
-    compared = (tiers.dropna(subset=["delta_auc"]) if _has_delta(tiers)
-                else tiers.iloc[0:0])
     if not compared.empty:
         verdicts = compared.apply(_delta_verdict, axis=1)
         n = len(compared)
@@ -561,11 +651,13 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
                  f"Tier 1 in {below_n} of {n} comparisons, clearly above in "
                  f"{above_n} of {n}, and inconclusive (interval includes 0) in "
                  f"{n - below_n - above_n} of {n}.")
+    hedge += left_out if hedge else ""
     if peaks and all(p in ("Tier 1", "Tier 2") for p in peaks):
         lines.append(
             "\nIn every region the peak is Tier 1 or Tier 2"
             + (", and adding the geopolitical agent at Tier 3 lowers AUC each "
-               "time" if tier3_drops and all(tier3_drops) else "")
+               "time" + (f" (it is disabled in {', '.join(no_geo)})" if no_geo else "")
+               if tier3_drops and all(tier3_drops) else "")
             + "." + hedge + " This does not support the claim that each agent "
             "adds value.\n"
         )
@@ -574,16 +666,18 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
             f"\nPeaks by region: {', '.join(peaks)}. The tier progression is "
             "not uniform across regions." + hedge + "\n"
         )
-    if not compared.empty:
-        tier_names = sorted(compared["method"].unique())
+    if not with_delta.empty:
+        tier_names = sorted(with_delta["method"].unique())
         lines.append("\n#### Paired ΔAUC against Tier 1 (Tier k - Tier 1)\n")
         lines.append("Bold: the paired interval excludes 0.\n")
         lines.append("| region | " + " | ".join(tier_names) + " |")
         lines.append("|---|" + "---|" * len(tier_names))
-        for region in sorted(compared["region"].unique()):
-            at = compared[compared.region == region].set_index("method")
+        for region in sorted(with_delta["region"].unique()):
+            at = with_delta[with_delta.region == region].set_index("method")
             lines.append(f"| {region} | " + " | ".join(
-                _delta_cell(at.loc[t]) if t in at.index else "—" for t in tier_names) + " |")
+                (_delta_cell(at.loc[t])
+                 + (f" (= Tier {_tier_k(t) - 1})" if (region, t) in repeats else ""))
+                if t in at.index else "—" for t in tier_names) + " |")
     if sensitivity is not None and not sensitivity.empty:
         lines += _sensitivity_section(sensitivity)
 
@@ -598,13 +692,13 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
             lines.append(
                 "Below 0.5 but indistinguishable from chance (the interval "
                 "includes 0.5): "
-                + ", ".join(f"{r['region']} {r['method']} ({_auc_cell(r)})"
+                + ", ".join(f"{r['region']} {_label(r, repeats)} ({_auc_cell(r)})"
                             for _, r in chance.iterrows()) + ".\n"
             )
     if not below.empty:
         lines.append("\n### Some multi-agent scores are anti-correlated with the label\n")
         for _, row in below.iterrows():
-            lines.append(f"- {row['region']} {row['method']}: AUC {_auc_cell(row)}")
+            lines.append(f"- {row['region']} {_label(row, repeats)}: AUC {_auc_cell(row)}")
         lines.append(
             "\nAn AUC below 0.5"
             + (" with its whole interval below 0.5" if _has_ci(results) else "")
@@ -634,14 +728,19 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
     # False positive harness.
     malacca = results[results.region == "malacca"].dropna(subset=["alert_rate"])
     if not malacca.empty:
-        tier_rate = malacca[malacca.family == "tier"]["alert_rate"].mean()
+        distinct = np.array([(r, m) not in repeats
+                             for r, m in zip(malacca["region"], malacca["method"])], dtype=bool)
+        tier_rate = malacca[(malacca.family == "tier") & distinct]["alert_rate"].mean()
         base_rate = _real_baselines(malacca)["alert_rate"].mean()
         lines.append("\n### False-positive harness (Malacca)\n")
         lines.append(
             f"Malacca has zero labelled disruptions in the evaluated data, so every "
             f"alert is a false alarm. Mean alert rate: **tiers {tier_rate:.0%}**, "
             f"**baselines {base_rate:.0%}** (detection methods only; the oracle "
-            "and controls are left out). "
+            "and controls are left out"
+            + ("; a tier that repeats the one before it counts once"
+               if any(r == "malacca" for r, _ in repeats) else "")
+            + "). "
             + ("The multi-agent tiers are the noisier of the two.\n"
                if tier_rate > base_rate else
                "The tiers are the quieter of the two.\n")
@@ -664,6 +763,7 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
            "- **One split, no confidence intervals.** Treat differences under "
            "roughly 0.05 AUC as noise.\n")
         + _alert_rule_note(results)
+        + _disabled_note(results)
         + _masked_note(results)
         + "- **Malacca cannot be evaluated for detection** — no positives at all.\n"
         "- **News features come from GDELT 1.0 event exports** (corridor box "

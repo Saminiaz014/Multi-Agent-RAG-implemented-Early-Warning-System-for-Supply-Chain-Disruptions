@@ -25,6 +25,12 @@ contains no market signal despite being labelled as containing one. Agents
 get the same history as the baselines: fitted on train only, scored on train
 plus test, test rows kept. Scoring the test window alone restarted their
 rolling windows at the split (eval/diagnostics/split_invariance.py).
+An agent its region disables (``agents.<name>.enabled: false``, set in
+config/regions/ on evidence grounds, as the orchestrator honours it) is not
+run and not fused: a tier fuses its enabled agents, with the weights
+renormalised over them, so a tier whose added agent is disabled equals the
+previous tier. ``eval/method_comparison_all_agents.csv`` re-scores every
+tier with every agent enabled, as an appendix sensitivity only.
 
 **Malacca is a false-positive harness, not a detection test.** It has zero
 labelled disruptions across 2019-2026, so AUC is undefined there. What it can
@@ -52,6 +58,7 @@ Usage::
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import sys
@@ -535,6 +542,26 @@ def _alert_rule(name: str) -> str:
 
 
 # ---------------------------------------------------------------- agents
+def _enabled(config: dict, domain: str) -> bool:
+    """Whether the region config enables ``domain``'s agent.
+
+    ``agents.<domain>.enabled``, default true: the flag the orchestrator
+    honours. Region YAMLs set it false where the evidence review found no
+    driver for that domain (config/regions/, src/core/regions.py).
+    """
+    return bool(((config.get("agents") or {}).get(domain) or {}).get("enabled", True))
+
+
+def _all_enabled(config: dict) -> dict:
+    """A copy of ``config`` with every tier agent enabled (appendix sensitivity)."""
+    out = copy.deepcopy(config)
+    agents = dict(out.get("agents") or {})
+    for domain in _TIER_ORDER:
+        agents[domain] = {**(agents.get(domain) or {}), "enabled": True}
+    out["agents"] = agents
+    return out
+
+
 def _agent_frame(frame: pd.DataFrame, domain: str) -> pd.DataFrame | None:
     """Strip the ``domain__`` prefix so an agent sees the columns it expects."""
     columns = [c for c in frame.columns if c.startswith(f"{domain}__")]
@@ -572,6 +599,11 @@ def _agent_scores(domain: str, config: dict, train, test,
     history day (``market_agent.py`` recent-baseline filter); with the current
     split dates that leaves well over its 30-day window before every split.
 
+    An agent the region config disables (:func:`_enabled`) is not built or
+    run: it returns ``None``, like an unavailable agent, for every caller
+    (tiers, single-agent runs, the diagnostics that score through here;
+    eval/diagnostics/market_diff.py builds MarketAgent itself on purpose).
+
     Args:
         history: Overrides the scoring history, e.g. the whole frame when the
             fitting window and the test window are not adjacent (diagnostics).
@@ -591,6 +623,9 @@ def _agent_scores(domain: str, config: dict, train, test,
         "geopolitical": GeopoliticalAgent, "natural_disaster": DisasterAgent,
         "news_sentiment": NewsAgent,
     }
+    if not _enabled(config, domain):
+        logger.info("  agent %s disabled in the region config", domain)
+        return None
     train_frame = _agent_frame(train, domain)
     test_frame = _agent_frame(test, domain)
     if train_frame is None or test_frame is None:
@@ -637,38 +672,74 @@ def _all_agent_scores(config: dict, train, test,
 
     Every tier is composed from these, so Tier k and Tier 1 share the exact
     same shipping-agent scores and their paired difference measures only
-    what the added agents change.
+    what the added agents change. A disabled agent's entry is ``None``.
     """
     return {domain: _agent_scores(domain, config, train, test) for domain in domains}
 
 
+def _raw_weights(tier: int, scores: dict[str, np.ndarray | None],
+                 config: dict) -> dict[str, float]:
+    """The config weight of each agent a tier fuses, in tier order.
+
+    A tier fuses the first ``tier`` agents of :data:`_TIER_ORDER` that the
+    region enables and that produced scores. A disabled agent is left out
+    even if ``scores`` holds its scores.
+    """
+    weights = config.get("weights", {}) or {}
+    return {domain: float(weights.get(domain, 0.1)) for domain in _TIER_ORDER[:tier]
+            if _enabled(config, domain) and scores.get(domain) is not None}
+
+
+def _mass(raw: dict[str, float]) -> float:
+    """The weights' total, added one at a time in tier order.
+
+    Not ``sum()``: since Python 3.12 it is compensated, and for four of these
+    weights it gives 0.8819999999999999 instead of 0.882, which would move a
+    tier whose agents did not change.
+    """
+    mass = 0.0
+    for weight in raw.values():
+        mass += weight
+    return mass
+
+
+def _fusion_weights(tier: int, scores: dict[str, np.ndarray | None],
+                    config: dict) -> dict[str, float]:
+    """Each fused agent's weight in a tier, renormalised to sum to 1."""
+    raw = _raw_weights(tier, scores, config)
+    mass = _mass(raw)
+    return {domain: w / mass for domain, w in raw.items()} if mass > 0 else {}
+
+
 def _compose(tier: int, scores: dict[str, np.ndarray | None],
              config: dict) -> tuple[np.ndarray | None, list[str]]:
-    """Composite for a tier: the weighted mean of its available agents' scores."""
-    weights = config.get("weights", {}) or {}
-    total, mass, used = None, 0.0, []
-    for domain in _TIER_ORDER[:tier]:
-        agent = scores.get(domain)
-        if agent is None:
-            continue
-        weight = float(weights.get(domain, 0.1))
-        total = weight * agent if total is None else total + weight * agent
-        mass += weight
-        used.append(domain)
+    """Composite for a tier: the weighted mean of its enabled agents' scores.
+
+    Equal to ``sum(_fusion_weights[d] * scores[d])``; computed as
+    ``sum(w * s) / sum(w)``, both added one at a time in tier order, so a tier
+    whose agents did not change keeps its exact earlier values.
+    """
+    raw = _raw_weights(tier, scores, config)
+    mass = _mass(raw)
     if mass <= 0:
         return None, []
-    return total / mass, used
+    total = None
+    for domain, weight in raw.items():
+        agent = scores[domain]
+        total = weight * agent if total is None else total + weight * agent
+    return total / mass, list(raw)
 
 
 def tier_scores(tier: int, config: dict, train, test) -> tuple[np.ndarray | None, list[str]]:
-    """Composite score for a tier: the weighted mean of its agents' scores.
+    """Composite score for a tier: the weighted mean of its enabled agents' scores.
 
     Args:
-        tier: How many agents from :data:`_TIER_ORDER` are enabled.
+        tier: The tier's agents are the first ``tier`` of :data:`_TIER_ORDER`,
+            less any the region config disables (:func:`_enabled`).
 
     Returns:
-        ``(scores, agents_used)``. ``scores`` is ``None`` if no agent in the
-        tier could be built.
+        ``(scores, agents_used)``. ``scores`` is ``None`` if no enabled agent
+        in the tier could be built.
     """
     return _compose(tier, _all_agent_scores(config, train, test, _TIER_ORDER[:tier]), config)
 
@@ -703,7 +774,7 @@ def _tier_rows(region: str, config: dict, train, test, keep, train_keep,
     for tier in tiers:
         scores, used = _compose(tier, on_test, config)
         if scores is None:
-            print(f"   Tier {tier:<19} no agents available")
+            print(f"   Tier {tier:<19} no enabled agent produced scores")
             continue
         train_scores, _ = _compose(tier, on_train, config)
         metrics = _evaluate(y, scores, train_scores if train_scores is not None else scores,
@@ -712,8 +783,13 @@ def _tier_rows(region: str, config: dict, train, test, keep, train_keep,
         delta = {}
         if tier1 is not None and tier != 1 and evaluable:
             delta = _delta(y, scores, tier1, keep=keep, **bootstrap)
+        disabled = [d for d in _TIER_ORDER[:tier] if not _enabled(config, d)]
         rows.append({"region": region, "method": f"Tier {tier}", "kind": "multi-agent",
                      "family": "tier", "agents": ",".join(used),
+                     "agents_disabled": ",".join(disabled),
+                     "fusion_weights": ",".join(
+                         f"{d}={w:.4f}"
+                         for d, w in _fusion_weights(tier, on_test, config).items()),
                      "circularity": _TIER_CIRCULARITY, "n_agents": len(used),
                      **metrics, **delta, **window})
         shown = (f" dAUC vs T1={delta['delta_auc']:+.3f} "
@@ -721,22 +797,32 @@ def _tier_rows(region: str, config: dict, train, test, keep, train_keep,
                  if delta else "")
         print(f"   Tier {tier} ({len(used)} agents){'':<7} AUC={metrics['auc']!s:<7.7} "
               f"F1={metrics['f1']!s:<6.6} alert_rate={metrics['alert_rate']:.2f}"
-              f"{shown} [{','.join(used)}]")
+              f"{shown} [{','.join(used)}]"
+              + (f" disabled: {','.join(disabled)}" if disabled else ""))
     return rows
 
 
-def run_region(region: str, frame: pd.DataFrame, manifest: dict, config: dict,
-               **bootstrap) -> list[dict]:
-    """Every baseline and every tier on the fixed split; masked days unscored."""
+def _main_split(frame: pd.DataFrame, manifest: dict):
+    """The fixed split and its scoring masks.
+
+    Returns ``(train, test, keep, train_keep, y_test, window)``; ``keep`` and
+    ``train_keep`` are False on masked days.
+    """
     masked = _masked_days(frame, manifest)
-    features = [c for c in frame.columns if "__" in c]
     train, test = _split(frame)
     mask_of = pd.Series(~masked, index=frame.index)
     train_keep = mask_of.loc[train.index].to_numpy()
     keep = mask_of.loc[test.index].to_numpy()
     y_test = test["y_true"].astype(int).to_numpy()
+    return train, test, keep, train_keep, y_test, _window(test, y_test, keep)
+
+
+def run_region(region: str, frame: pd.DataFrame, manifest: dict, config: dict,
+               **bootstrap) -> list[dict]:
+    """Every baseline and every tier on the fixed split; masked days unscored."""
+    features = [c for c in frame.columns if "__" in c]
+    train, test, keep, train_keep, y_test, window = _main_split(frame, manifest)
     evaluable = len(np.unique(y_test[keep])) > 1
-    window = _window(test, y_test, keep)
 
     print(f"\n[{region}] train={len(train)} test={len(test)} "
           f"[{window['test_start']} .. {window['test_end']}] "
@@ -792,6 +878,31 @@ def run_region(region: str, frame: pd.DataFrame, manifest: dict, config: dict,
     return rows
 
 
+#: ``agent_flags`` of the appendix run that ignores the region's flags.
+_ALL_AGENTS = "all agents enabled (sensitivity)"
+
+
+def all_agents_sensitivity(region: str, frame: pd.DataFrame, manifest: dict,
+                           config: dict, **bootstrap) -> list[dict]:
+    """Every tier with every agent enabled, the region's flags ignored.
+
+    For the appendix only: the main table honours ``agents.<name>.enabled``.
+    Same split, masked days, threshold rule and paired delta vs Tier 1 as
+    :func:`run_region`; only the flags differ.
+    """
+    train, test, keep, train_keep, _, window = _main_split(frame, manifest)
+    print(f"\n[{region}] {_ALL_AGENTS}")
+    rows = _tier_rows(region, _all_enabled(config), train, test, keep, train_keep,
+                      tuple(range(1, len(_TIER_ORDER) + 1)), window, **bootstrap)
+
+    def forced(method: str) -> str:
+        tier = int(method.split()[-1])
+        return ",".join(d for d in _TIER_ORDER[:tier] if not _enabled(config, d))
+
+    return [{**row, "alert_rule": _THRESHOLD_RULE, "agent_flags": _ALL_AGENTS,
+             "agents_forced_on": forced(row["method"])} for row in rows]
+
+
 #: Tiers re-scored in the split-date sensitivity table.
 _SENSITIVITY_TIERS: tuple[int, ...] = (1, 4)
 
@@ -829,11 +940,13 @@ def main() -> int:
     regions = [p.stem for p in sorted(_CACHE.glob("*.csv"))]
     rows: list[dict] = []
     sensitivity: list[dict] = []
+    all_agents: list[dict] = []
     for region in regions:
         frame, manifest = _load(region)
         config = load_config_for_region(region)
         rows += run_region(region, frame, manifest, config)
         sensitivity += split_sensitivity(region, frame, manifest, config)
+        all_agents += all_agents_sensitivity(region, frame, manifest, config)
 
     results = pd.DataFrame(rows)
     results.to_csv(_OUT / "method_comparison_results.csv", index=False)
@@ -841,6 +954,10 @@ def main() -> int:
     table = pd.DataFrame(sensitivity)
     table.to_csv(_OUT / "split_sensitivity.csv", index=False)
     print(f"Wrote {_OUT / 'split_sensitivity.csv'} ({len(table)} rows)")
+    every = pd.DataFrame(all_agents)
+    every.to_csv(_OUT / "method_comparison_all_agents.csv", index=False)
+    print(f"Wrote {_OUT / 'method_comparison_all_agents.csv'} ({len(every)} rows; "
+          "appendix sensitivity, not the main result)")
     return 0
 
 

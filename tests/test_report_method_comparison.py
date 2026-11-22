@@ -248,3 +248,100 @@ def test_alert_rule_note_without_always_alerting_rows(tmp_path, monkeypatch) -> 
     note = next(line for line in text.splitlines() if "Alert rule" in line)
     assert "every scored test day" not in note
     assert "directly" not in note                       # no alert_rule column: no controls
+
+
+def _tiers_with(region, agents_by_tier, disabled_by_tier):
+    return [_row(region, f"Tier {k}", 0.8 - 0.01 * k, agents=a, agents_disabled=d)
+            for k, (a, d) in enumerate(zip(agents_by_tier, disabled_by_tier), start=1)]
+
+
+def test_disabled_agents_and_the_tiers_they_repeat_are_named(tmp_path, monkeypatch) -> None:
+    panama = _tiers_with(
+        "panama",
+        ["shipping", "shipping,market", "shipping,market",
+         "shipping,market,natural_disaster", "shipping,market,natural_disaster,news_sentiment"],
+        ["", "", "geopolitical", "geopolitical", "geopolitical"])
+    hormuz = _tiers_with(
+        "hormuz",
+        ["shipping", "shipping,market", "shipping,market,geopolitical",
+         "shipping,market,geopolitical,natural_disaster",
+         "shipping,market,geopolitical,natural_disaster,news_sentiment"],
+        [""] * 5)
+    text = _report(tmp_path, monkeypatch, pd.DataFrame(panama + hormuz))
+    note = next(line for line in text.splitlines() if "disabled by the region config" in line)
+    assert "panama: geopolitical" in note
+    assert "panama Tier 3" in note and "Tier 4" not in note    # only exact repeats
+    assert "hormuz" not in note                                # nothing disabled there
+    assert "method_comparison_all_agents.csv" in note and "appendix" in note
+
+
+def test_no_disabled_note_without_disabled_agents(tmp_path, monkeypatch) -> None:
+    text = _report(tmp_path, monkeypatch, _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]}))
+    assert "disabled by the region config" not in text
+
+
+# ---------------------------------------- tiers that repeat the tier before
+_FULL = ["shipping", "shipping,market", "shipping,market,geopolitical",
+         "shipping,market,geopolitical,natural_disaster",
+         "shipping,market,geopolitical,natural_disaster,news_sentiment"]
+_NO_GEO = ["shipping", "shipping,market", "shipping,market",
+           "shipping,market,natural_disaster",
+           "shipping,market,natural_disaster,news_sentiment"]          # Panama
+
+
+def _repeat_results() -> pd.DataFrame:
+    """Region a adds geopolitical at Tier 3; region p repeats Tier 2 there."""
+    rows = []
+    for region, aucs, agents in (("a", [0.90, 0.80, 0.70, 0.71, 0.72], _FULL),
+                                 ("p", [0.90, 0.85, 0.85, 0.84, 0.86], _NO_GEO)):
+        for k, (auc, ag) in enumerate(zip(aucs, agents), start=1):
+            extra = {"agents": ag, "auc_ci_low": auc - 0.02, "auc_ci_high": auc + 0.02}
+            if k > 1:
+                d = auc - aucs[0]
+                extra.update(delta_auc=d, delta_auc_ci_low=d - 0.01, delta_auc_ci_high=d + 0.01)
+            rows.append(_row(region, f"Tier {k}", auc, **extra))
+        rows.append(_row(region, "B1 rolling z", 0.55, family="baseline",
+                         auc_ci_low=0.5, auc_ci_high=0.6))
+    # Malacca: market disabled, so Tier 2 repeats Tier 1.
+    mal = ["shipping", "shipping", "shipping,geopolitical",
+           "shipping,geopolitical,natural_disaster",
+           "shipping,geopolitical,natural_disaster,news_sentiment"]
+    for k, (rate, ag) in enumerate(zip([0.3, 0.3, 0.1, 0.1, 0.1], mal), start=1):
+        rows.append(_row("malacca", f"Tier {k}", np.nan, agents=ag, alert_rate=rate))
+    rows.append(_row("malacca", "B1 rolling z", np.nan, family="baseline", alert_rate=0.1))
+    return pd.DataFrame(rows)
+
+
+def test_a_repeated_tier_is_marked_and_not_counted(tmp_path, monkeypatch) -> None:
+    text = _report(tmp_path, monkeypatch, _repeat_results())
+    assert "| Tier 3 (= Tier 2) |" in text                    # p's table
+    assert "| Tier 3 |" in text                               # a's Tier 3 is its own
+    assert "0.850 -> 0.850 (=)" in text                       # progression line
+    # 8 deltas, one of them a copy: counted once, and said so.
+    assert "clearly below Tier 1 in 7 of 7 comparisons" in text
+    assert "1 tier that repeats the tier before it is not counted" in text
+    delta_table = text.split("Paired ΔAUC against Tier 1", 1)[1]
+    p_row = next(line for line in delta_table.splitlines() if line.startswith("| p |"))
+    a_row = next(line for line in delta_table.splitlines() if line.startswith("| a |"))
+    assert "(= Tier 2)" in p_row and "(=" not in a_row
+    # Malacca: each distinct tier once (0.3, 0.1, 0.1, 0.1), not Tier 1 twice.
+    assert "tiers 15%" in text
+
+
+def test_the_tier3_geopolitical_claim_skips_regions_that_disable_it(tmp_path, monkeypatch) -> None:
+    text = _report(tmp_path, monkeypatch, _repeat_results())
+    assert "adding the geopolitical agent at Tier 3 lowers AUC each time" in text
+    assert "it is disabled in p" in text
+
+
+def test_sensitivity_table_shows_a_tier_with_fewer_agents(tmp_path, monkeypatch) -> None:
+    base = _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]})
+    common = {"region": "panama", "split_date": "2023-07-01", "test_start": "2023-07-01",
+              "test_end": "2025-11-21", "n_test": 700, "test_positives": 140}
+    rows = [{**common, "method": "Tier 1", "auc": 0.9, "n_agents": 1},
+            {**common, "method": "Tier 4", "auc": 0.8, "n_agents": 3,
+             "delta_auc": -0.1, "delta_auc_ci_low": -0.14, "delta_auc_ci_high": -0.06}]
+    section = _report(tmp_path, monkeypatch, base, sensitivity=pd.DataFrame(rows)) \
+        .split("Split-date sensitivity", 1)[1]
+    assert "0.800 (3 agents)" in section
+    assert "0.900 (1 agents)" not in section                  # only when fewer than k

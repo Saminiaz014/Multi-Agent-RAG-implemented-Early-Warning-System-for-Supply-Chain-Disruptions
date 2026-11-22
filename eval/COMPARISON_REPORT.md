@@ -21,10 +21,10 @@ All figures are measured on a held-out window: 2023-07-01 to 2025-11-21, the sam
 | M2 never alert | control | 0.500 [0.500, 0.500] | 0.000 | 0.00 |
 | M1 always alert | control | 0.500 [0.500, 0.500] | 0.443 | 1.00 |
 | M0 random | control | 0.494 [0.444, 0.541] | 0.192 | 0.10 |
-| Tier 5 | multi-agent | 0.491 [0.372, 0.579] | 0.439 | 0.67 |
+| Tier 5 | multi-agent | 0.491 [0.372, 0.580] | 0.449 | 0.68 |
 | M8 matrix profile | unsupervised | 0.489 [0.426, 0.564] | 0.111 | 0.07 |
-| Tier 4 | multi-agent | 0.470 [0.353, 0.557] | 0.413 | 0.65 |
 | Tier 3 | multi-agent | 0.469 [0.353, 0.556] | 0.416 | 0.65 |
+| Tier 4 (= Tier 3) | multi-agent | 0.469 [0.353, 0.556] | 0.416 | 0.65 |
 | B6 CUSUM | unsupervised | 0.308 [0.113, 0.500] | 0.480 | 0.74 |
 | *ORACLE label t-1 (ceiling, not a method)* | oracle | 0.997 [0.991, 1.000] | 0.996 | 0.28 |
 
@@ -70,10 +70,10 @@ Best baseline B7 logistic regression (0.939 [0.877, 0.981]) vs best tier Tier 1 
 |---|---|---|---|---|
 | M3 persistence | unsupervised | 0.976 [0.941, 0.995] | 0.789 | 0.26 |
 | Tier 1 | multi-agent | 0.921 [0.872, 0.952] | 0.710 | 0.26 |
+| Tier 5 | multi-agent | 0.900 [0.850, 0.934] | 0.623 | 0.22 |
 | Tier 2 | multi-agent | 0.895 [0.845, 0.929] | 0.600 | 0.21 |
-| Tier 5 | multi-agent | 0.894 [0.842, 0.929] | 0.594 | 0.22 |
-| Tier 3 | multi-agent | 0.888 [0.835, 0.924] | 0.574 | 0.21 |
-| Tier 4 | multi-agent | 0.888 [0.835, 0.924] | 0.574 | 0.21 |
+| Tier 3 (= Tier 2) | multi-agent | 0.895 [0.845, 0.929] | 0.600 | 0.21 |
+| Tier 4 | multi-agent | 0.895 [0.845, 0.929] | 0.600 | 0.21 |
 | B3 isolation forest | unsupervised | 0.706 [0.598, 0.788] | 0.258 | 0.21 |
 | B2 MA crossover | unsupervised | 0.520 [0.352, 0.713] | 0.189 | 0.11 |
 | B5 AR residual | unsupervised | 0.508 [0.485, 0.528] | 0.069 | 0.10 |
@@ -97,11 +97,13 @@ Best baseline M3 persistence (0.976 [0.941, 0.995]) vs best tier Tier 1 (0.921 [
 
 ### Does adding agents improve AUC?
 
-- **bab_el_mandeb**: 0.747 -> 0.638 -> 0.469 -> 0.470 -> 0.491  (best: Tier 1)
+- **bab_el_mandeb**: 0.747 -> 0.638 -> 0.469 -> 0.469 (=) -> 0.491  (best: Tier 1)
 - **hormuz**: 0.574 -> 0.497 -> 0.439 -> 0.440 -> 0.431  (best: Tier 1)
-- **panama**: 0.921 -> 0.895 -> 0.888 -> 0.888 -> 0.894  (best: Tier 1)
+- **panama**: 0.921 -> 0.895 -> 0.895 (=) -> 0.895 -> 0.900  (best: Tier 1)
 
-In every region the peak is Tier 1 or Tier 2, and adding the geopolitical agent at Tier 3 lowers AUC each time. These are point estimates. Tested against Tier 1 with the paired difference on the same resampled blocks, a tier is clearly below Tier 1 in 12 of 12 comparisons, clearly above in 0 of 12, and inconclusive (interval includes 0) in 0 of 12. This does not support the claim that each agent adds value.
+(=): the tier repeats the one before it; the agent it would add is disabled in that region.
+
+In every region the peak is Tier 1 or Tier 2, and adding the geopolitical agent at Tier 3 lowers AUC each time (it is disabled in panama). These are point estimates. Tested against Tier 1 with the paired difference on the same resampled blocks, a tier is clearly below Tier 1 in 9 of 10 comparisons, clearly above in 0 of 10, and inconclusive (interval includes 0) in 1 of 10. (2 tiers that repeat the tier before them are not counted.) This does not support the claim that each agent adds value.
 
 
 #### Paired ΔAUC against Tier 1 (Tier k - Tier 1)
@@ -110,9 +112,9 @@ Bold: the paired interval excludes 0.
 
 | region | Tier 2 | Tier 3 | Tier 4 | Tier 5 |
 |---|---|---|---|---|
-| bab_el_mandeb | **-0.109 [-0.190, -0.044]** | **-0.278 [-0.394, -0.178]** | **-0.278 [-0.393, -0.178]** | **-0.256 [-0.376, -0.155]** |
+| bab_el_mandeb | **-0.109 [-0.190, -0.044]** | **-0.278 [-0.394, -0.178]** | **-0.278 [-0.394, -0.178]** (= Tier 3) | **-0.256 [-0.377, -0.156]** |
 | hormuz | **-0.078 [-0.161, -0.007]** | **-0.135 [-0.267, -0.041]** | **-0.134 [-0.265, -0.039]** | **-0.143 [-0.271, -0.049]** |
-| panama | **-0.027 [-0.053, -0.000]** | **-0.033 [-0.058, -0.008]** | **-0.033 [-0.058, -0.008]** | **-0.027 [-0.054, -0.002]** |
+| panama | **-0.027 [-0.053, -0.000]** | **-0.027 [-0.053, -0.000]** (= Tier 2) | **-0.027 [-0.053, -0.000]** | -0.021 [-0.047, +0.005] |
 
 ### Split-date sensitivity
 
@@ -120,25 +122,27 @@ Tier 1 and Tier 4 re-scored with the split moved; the end date, the masked days 
 
 | region | split | scored test days (positives) | Tier 1 AUC | Tier 4 AUC | Tier 4 - Tier 1 (paired) |
 |---|---|---|---|---|---|
-| bab_el_mandeb | 2023-01-01 | 1037 (244) | 0.732 [0.669, 0.782] | 0.463 [0.359, 0.550] | **-0.269 [-0.383, -0.161]** |
-| bab_el_mandeb | 2023-07-01 | 857 (244) | 0.747 [0.672, 0.802] | 0.470 [0.353, 0.557] | **-0.278 [-0.393, -0.178]** |
-| bab_el_mandeb | 2024-01-01 | 673 (244) | 0.682 [0.632, 0.736] | 0.413 [0.280, 0.510] | **-0.270 [-0.422, -0.167]** |
+| bab_el_mandeb | 2023-01-01 | 1037 (244) | 0.732 [0.669, 0.782] | 0.463 [0.357, 0.552] (3 agents) | **-0.269 [-0.384, -0.162]** |
+| bab_el_mandeb | 2023-07-01 | 857 (244) | 0.747 [0.672, 0.802] | 0.469 [0.353, 0.556] (3 agents) | **-0.278 [-0.394, -0.178]** |
+| bab_el_mandeb | 2024-01-01 | 673 (244) | 0.682 [0.632, 0.736] | 0.412 [0.280, 0.511] (3 agents) | **-0.270 [-0.421, -0.170]** |
 | hormuz | 2023-01-01 | 1037 (133) | 0.547 [0.475, 0.599] | 0.440 [0.307, 0.550] | **-0.106 [-0.225, -0.001]** |
 | hormuz | 2023-07-01 | 857 (133) | 0.574 [0.516, 0.633] | 0.440 [0.304, 0.555] | **-0.134 [-0.265, -0.039]** |
 | hormuz | 2024-01-01 | 673 (116) | 0.638 [0.583, 0.683] | 0.485 [0.323, 0.621] | **-0.153 [-0.308, -0.027]** |
 | malacca | 2023-01-01 | 1037 (0) | — | — | — |
 | malacca | 2023-07-01 | 857 (0) | — | — | — |
 | malacca | 2024-01-01 | 673 (0) | — | — | — |
-| panama | 2023-01-01 | 1036 (149) | 0.928 [0.884, 0.958] | 0.890 [0.838, 0.924] | **-0.038 [-0.065, -0.014]** |
-| panama | 2023-07-01 | 856 (149) | 0.921 [0.872, 0.952] | 0.888 [0.835, 0.924] | **-0.033 [-0.058, -0.008]** |
-| panama | 2024-01-01 | 672 (110) | 0.927 [0.868, 0.959] | 0.889 [0.803, 0.936] | **-0.038 [-0.081, -0.007]** |
+| panama | 2023-01-01 | 1036 (149) | 0.928 [0.884, 0.958] | 0.896 [0.844, 0.929] (3 agents) | **-0.032 [-0.060, -0.006]** |
+| panama | 2023-07-01 | 856 (149) | 0.921 [0.872, 0.952] | 0.895 [0.845, 0.929] (3 agents) | **-0.027 [-0.053, -0.000]** |
+| panama | 2024-01-01 | 672 (110) | 0.927 [0.868, 0.959] | 0.893 [0.805, 0.939] (3 agents) | **-0.034 [-0.079, -0.003]** |
 
 bab_el_mandeb: Tier 1 AUC ranges 0.682-0.747; hormuz: Tier 1 AUC ranges 0.547-0.638; panama: Tier 1 AUC ranges 0.921-0.928.
+
+A tier with fewer agents than its number (in brackets) is one whose region disables an agent it would add.
 
 
 ### Tiers scoring below 0.5
 
-Below 0.5 but indistinguishable from chance (the interval includes 0.5): bab_el_mandeb Tier 3 (0.469 [0.353, 0.556]), bab_el_mandeb Tier 4 (0.470 [0.353, 0.557]), bab_el_mandeb Tier 5 (0.491 [0.372, 0.579]), hormuz Tier 2 (0.497 [0.384, 0.594]), hormuz Tier 3 (0.439 [0.303, 0.554]), hormuz Tier 4 (0.440 [0.304, 0.555]), hormuz Tier 5 (0.431 [0.298, 0.544]).
+Below 0.5 but indistinguishable from chance (the interval includes 0.5): bab_el_mandeb Tier 3 (0.469 [0.353, 0.556]), bab_el_mandeb Tier 4 (= Tier 3) (0.469 [0.353, 0.556]), bab_el_mandeb Tier 5 (0.491 [0.372, 0.580]), hormuz Tier 2 (0.497 [0.384, 0.594]), hormuz Tier 3 (0.439 [0.303, 0.554]), hormuz Tier 4 (0.440 [0.304, 0.555]), hormuz Tier 5 (0.431 [0.298, 0.544]).
 
 
 ### Where simple baselines score above the ensemble
@@ -149,7 +153,7 @@ Below 0.5 but indistinguishable from chance (the interval includes 0.5): bab_el_
 
 ### False-positive harness (Malacca)
 
-Malacca has zero labelled disruptions in the evaluated data, so every alert is a false alarm. Mean alert rate: **tiers 29%**, **baselines 10%** (detection methods only; the oracle and controls are left out). The multi-agent tiers are the noisier of the two.
+Malacca has zero labelled disruptions in the evaluated data, so every alert is a false alarm. Mean alert rate: **tiers 34%**, **baselines 10%** (detection methods only; the oracle and controls are left out; a tier that repeats the one before it counts once). The multi-agent tiers are the noisier of the two.
 
 
 ## Limits of this evaluation
@@ -157,6 +161,7 @@ Malacca has zero labelled disruptions in the evaluated data, so every alert is a
 - **Supervised baselines are untrainable in 3 of 4 regions.** Most labelled disruptions are recent (Houthi 2024, Gatun drought 2023-24), so the temporal split leaves no positives in training there. Those rows are reported as not-applicable rather than as a 0.5 score, which would have read as 'no better than chance'.
 - **Intervals are 95% moving-block bootstrap CIs** (30-day blocks, 1,000 resamples) on the test window, with the training threshold (or a row's direct alerts) held fixed. Every method in a region gets the same resamples, so intervals are paired. Non-overlapping intervals show a clear difference; overlapping ones are inconclusive on their own. Tier differences use the paired interval of the difference (the same resampled blocks for both tiers); a paired interval that excludes 0 is a clear difference. AUC and F1 intervals use only resamples that contain both classes: at least 998 of 1,000 for every scored method. They cover test-sample uncertainty only, not the choice of split or label, and they are conditional on the few disruption episodes in each test window, so they do not measure skill on a new kind of disruption.
 - **Alert rule:** a day alerts when its score >= the method's 90th percentile of training scores (masked days left out). A score tied with that threshold counts as an alert. These rows define their alerts directly instead: M1 always alert (every day); M2 never alert (no day); ORACLE label t-1 (yesterday's label is 1).
+- **Agents disabled by the region config** (`agents.<name>.enabled: false`, on evidence grounds): bab_el_mandeb: natural_disaster; malacca: market; panama: geopolitical. A disabled agent is not run, and each tier fuses its enabled agents with the weights renormalised over them; these tiers therefore equal the tier before them: bab_el_mandeb Tier 4; malacca Tier 2; panama Tier 3. `eval/method_comparison_all_agents.csv` re-scores every tier with every agent enabled, as an appendix sensitivity, not the main result.
 - **Days GDELT never published are masked:** 18 test days in every region are left out of every method's score (point estimates and intervals) and out of every training threshold. They are not filled.
 - **Malacca cannot be evaluated for detection** — no positives at all.
 - **News features come from GDELT 1.0 event exports** (corridor box filter v2) in every region; volume is articles per 100k GDELT events that day. The news agent's tone means skip days without articles instead of counting them as neutral tone.
