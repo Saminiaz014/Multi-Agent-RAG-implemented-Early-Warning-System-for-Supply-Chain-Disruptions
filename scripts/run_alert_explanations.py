@@ -1,8 +1,9 @@
 """Explain every test-window alert in each region with :func:`explain_alert`.
 
 Alerts are the evaluation harness's own (``scripts/run_method_comparison.py``):
-the all-agent tier's composite above the 90th percentile of its training-window
-scores, on the evaluation's fixed test window (settings.yaml ``evaluation``:
+the all-agent tier's composite at or above the 90th percentile of its
+training-window scores (``harness._threshold``; issue 9), on the evaluation's
+fixed test window (settings.yaml ``evaluation``:
 from ``split_date`` to ``end_date``). Nothing about the model, label,
 thresholds or aggregation is changed.
 
@@ -85,8 +86,8 @@ def run_region(region: str, surrogate: str, out: Path) -> dict:
 
     scores, used = harness.tier_scores(_TIER, config, train, test)
     train_scores, _ = harness.tier_scores(_TIER, config, train, train)
-    threshold = float(np.quantile(np.nan_to_num(train_scores), 0.90))
-    alert_rows = [len(train) + int(i) for i in np.flatnonzero(np.nan_to_num(scores) > threshold)]
+    threshold = harness._threshold(scores, train_scores)
+    alert_rows = [len(train) + int(i) for i in np.flatnonzero(np.nan_to_num(scores) >= threshold)]
 
     features = _features(frame)
     if surrogate == "real":

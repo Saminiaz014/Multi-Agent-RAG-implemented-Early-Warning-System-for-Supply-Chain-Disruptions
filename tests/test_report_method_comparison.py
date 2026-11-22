@@ -214,3 +214,26 @@ def test_ranking_graph_keeps_the_ceiling_out_of_the_bars(tmp_path, monkeypatch) 
     monkeypatch.setattr(rep.plt.Axes, "set_yticklabels", spy)
     rep.graph_region_rankings(frame)
     assert drawn and all("ORACLE label t-1" not in labels for labels in drawn)
+
+
+def test_alert_rule_and_always_alerting_rows_are_explained(tmp_path, monkeypatch) -> None:
+    results = _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]})
+    extra = [_row("panama", "M1 always alert", 0.5, family="baseline", kind="control",
+                  alert_rate=1.0),
+             _row("panama", "M2 never alert", 0.5, family="baseline", kind="control",
+                  alert_rate=1.0),
+             _row("panama", "ORACLE label t-1", 0.99, family="ceiling", kind="oracle",
+                  alert_rate=1.0)]
+    text = _report(tmp_path, monkeypatch, pd.concat([results, pd.DataFrame(extra)]))
+    note = next(line for line in text.splitlines() if "Alert rule" in line)
+    assert "score >= " in note and "90th percentile" in note
+    for name in ("M1 always alert", "M2 never alert", "ORACLE label t-1"):
+        assert name in note
+    assert "Tier 1" not in note                         # only rows alerting every day
+    assert "bounds AUC only" in note
+
+
+def test_alert_rule_note_without_always_alerting_rows(tmp_path, monkeypatch) -> None:
+    text = _report(tmp_path, monkeypatch, _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]}))
+    note = next(line for line in text.splitlines() if "Alert rule" in line)
+    assert "every scored test day" not in note

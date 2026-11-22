@@ -185,3 +185,25 @@ def test_row_wise_baselines_are_not_fitted_on_masked_days(monkeypatch) -> None:
     rmc.run_region("x", frame, manifest, {}, n_resamples=10)
     n_train = int((ts < "2023-07-01").sum())
     assert seen == [n_train - 2]
+
+
+# ------------------------------------------------------------- alert rule
+def test_a_score_equal_to_the_threshold_alerts() -> None:
+    """Issue 9: the rule is score >= threshold (a tie counts as an alert)."""
+    y = np.array([0, 0, 1, 1, 0, 1])
+    s = np.array([0.1, 0.5, 0.5, 0.9, 0.2, 0.5])
+    m = rmc._score_metrics(y, s, threshold=0.5)
+    assert m["alert_rate"] == pytest.approx(4 / 6)              # 0.5, 0.5, 0.9, 0.5
+    assert m["f1"] == pytest.approx(2 * 3 / (2 * 3 + 1))         # tp 3, fp 1, fn 0
+
+
+def test_a_constant_score_alerts_every_day() -> None:
+    """A constant equals its own 90th percentile, so >= alerts on every day."""
+    y = np.array([0, 1, 0, 1])
+    m = rmc._score_metrics(y, np.ones(4), train_scores=np.ones(10))
+    assert m["alert_rate"] == 1.0
+    # The single-class branch (Malacca: no positives) uses the same rule.
+    quiet = rmc._score_metrics(np.zeros(4), np.ones(4), train_scores=np.ones(10))
+    assert np.isnan(quiet["auc"]) and quiet["alert_rate"] == 1.0
+    assert rmc._evaluate(y.repeat(50), np.ones(200), np.ones(100),
+                         n_resamples=20)["alert_rate_ci_low"] == 1.0

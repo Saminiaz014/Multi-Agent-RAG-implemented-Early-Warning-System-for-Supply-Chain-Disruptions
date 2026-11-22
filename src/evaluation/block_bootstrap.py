@@ -102,7 +102,8 @@ def block_bootstrap_ci(
     Args:
         y_true: Binary labels for the test window, in time order.
         scores: The method's scores for the same days.
-        threshold: Alert threshold, fixed from the training window.
+        threshold: Alert threshold, fixed from the training window; a day
+            alerts when its score is ``>=`` it.
         keep: True on days that are scored. ``None`` scores every day.
         block: Block length in days.
         n_resamples: Number of bootstrap resamples.
@@ -130,7 +131,7 @@ def block_bootstrap_ci(
     auc, f1, alert = [], [], []
     for idx in _resamples(mask, block, n_resamples, seed):
         yb, sb = y[idx], s[idx]
-        predicted = (sb > threshold).astype(int)
+        predicted = (sb >= threshold).astype(int)          # same rule as the point metrics
         alert.append(predicted.mean() if len(idx) else np.nan)
         if len(idx) and yb.min() != yb.max():
             auc.append(roc_auc_score(yb, sb))

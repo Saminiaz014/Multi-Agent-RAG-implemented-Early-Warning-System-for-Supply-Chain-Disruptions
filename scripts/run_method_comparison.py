@@ -136,7 +136,9 @@ def _threshold(scores: np.ndarray, train_scores: np.ndarray | None,
                train_keep: np.ndarray | None = None) -> float:
     """The alert threshold: the 90th percentile of the training-window scores.
 
-    ``train_keep`` drops masked training days from the reference.
+    A day alerts when its score is ``>=`` this threshold (see
+    :func:`_score_metrics`). ``train_keep`` drops masked training days from
+    the reference.
     """
     reference = (np.asarray(scores, dtype=float) if train_scores is None
                  else np.asarray(train_scores, dtype=float))
@@ -238,6 +240,13 @@ def _score_metrics(
     for every method by construction, which makes FPR uninformative and the
     false-positive harness meaningless.
 
+    A day alerts when ``score >= threshold`` (issue 9). With ``>``, a score
+    tied with its own 90th percentile could never alert: a constant control
+    never fired, and a score floored at 0 on at least 90% of training days had a
+    threshold of 0 that its zero days could not reach. With ``>=`` a tie
+    alerts, so such a method alerts on every tied day instead; that is
+    reported, not special-cased (eval/diagnostics/alert_rule.py).
+
     ``threshold`` passes in one already computed by :func:`_threshold`.
     """
     scores = np.nan_to_num(np.asarray(scores, dtype=float))
@@ -245,8 +254,8 @@ def _score_metrics(
         threshold = _threshold(scores, train_scores)
     if len(np.unique(y_true)) < 2:
         return {"auc": np.nan, "f1": np.nan, "fpr": np.nan,
-                "alert_rate": float((scores > threshold).mean())}
-    predicted = (scores > threshold).astype(int)
+                "alert_rate": float((scores >= threshold).mean())}
+    predicted = (scores >= threshold).astype(int)
     tn, fp, fn, tp = confusion_matrix(y_true, predicted, labels=[0, 1]).ravel()
     return {
         "auc": float(roc_auc_score(y_true, scores)),
@@ -374,7 +383,12 @@ def m1_always(train, test, features):
 
 
 def m2_never(train, test, features):
-    """Trivial control: constant 0. Alerts never."""
+    """Trivial control: constant 0.
+
+    Named for its intent. A constant equals its own training 90th percentile,
+    so under the ``>=`` alert rule it alerts on every day, like M1 (issue 9;
+    reported, not special-cased).
+    """
     return np.zeros(len(train) + len(test))
 
 

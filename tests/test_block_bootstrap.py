@@ -190,3 +190,11 @@ def test_delta_rejects_mismatched_lengths() -> None:
     y, a, b = _pair()
     with pytest.raises(ValueError):
         bb.paired_auc_delta_ci(y, a, b[:-1], block=30, n_resamples=10)
+
+
+def test_bootstrap_alert_rule_counts_ties_as_alerts() -> None:
+    y = _runs()
+    scores = np.where(y == 1, 0.5, 0.0)               # positives sit exactly on the threshold
+    out = block_bootstrap_ci(y, scores, threshold=0.5, block=30, n_resamples=50)
+    assert out["f1_ci_low"] == out["f1_ci_high"] == 1.0
+    assert out["alert_rate_ci_low"] > 0.0

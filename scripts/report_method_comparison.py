@@ -132,8 +132,10 @@ def graph_alert_rate(results: pd.DataFrame) -> None:
     if malacca.empty:
         return
     malacca = malacca.sort_values("alert_rate")
-    colors = ["#e53935" if f == "tier" else "#90a4ae" if f == "ceiling" else "#42a5f5"
-              for f in malacca["family"]]
+    # Controls and the ceiling are reference rows, not baselines: grey.
+    colors = ["#e53935" if f == "tier"
+              else "#90a4ae" if f == "ceiling" or k in _NOT_METHODS else "#42a5f5"
+              for f, k in zip(malacca["family"], malacca["kind"])]
 
     fig, ax = plt.subplots(figsize=(11, 6))
     ax.barh(range(len(malacca)), malacca["alert_rate"], color=colors, alpha=0.85)
@@ -146,7 +148,7 @@ def graph_alert_rate(results: pd.DataFrame) -> None:
     ax.grid(axis="x", alpha=0.3)
     handles = [plt.Rectangle((0, 0), 1, 1, color=c, alpha=0.85)
                for c in ("#42a5f5", "#e53935", "#90a4ae")]
-    ax.legend(handles, ["baseline", "multi-agent tier", "ceiling (oracle)"],
+    ax.legend(handles, ["baseline", "multi-agent tier", "control / ceiling (oracle)"],
               loc="lower right")
     fig.tight_layout()
     fig.savefig(_G_METHOD / "A2_false_positive_harness.png", dpi=200)
@@ -377,6 +379,33 @@ def _dating_note(results: pd.DataFrame) -> str:
         "publication lag is not modelled. A few scaling constants (the freight "
         "index's rebase, the trade-volume and conflict-intensity scales) are "
         "still taken over the whole sample.\n"
+    )
+
+
+def _alert_rule_note(results: pd.DataFrame) -> str:
+    """The alert rule, and which rows alert on every scored test day.
+
+    Under ``>=``, a constant score (or one at its floor on 90%+ of training
+    days) alerts every day, so its F1 and alert rate are always-alert
+    values. Listed from the CSV, not hard-coded; nothing is special-cased.
+    """
+    always = results[results["alert_rate"] >= 1.0]
+    listed = ""
+    if not always.empty:
+        names = []
+        for method, rows in always.groupby("method", sort=False):
+            where = sorted(rows["region"].unique())
+            span = ("all regions" if len(where) == results["region"].nunique()
+                    else ", ".join(where))
+            names.append(f"{method} ({span})")
+        listed = (" These rows alert on every scored test day, so their F1 and "
+                  "alert rate are always-alert values: " + "; ".join(names) + ".")
+    ceiling = (" The ceiling row bounds AUC only."
+               if _is_ceiling(results).any() else "")
+    return (
+        "- **Alert rule:** a day alerts when its score >= the method's 90th "
+        "percentile of training scores (masked days left out). A score tied "
+        "with that threshold counts as an alert." + listed + ceiling + "\n"
     )
 
 
@@ -624,6 +653,7 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
         + (_ci_note(results) if _has_ci(results) else
            "- **One split, no confidence intervals.** Treat differences under "
            "roughly 0.05 AUC as noise.\n")
+        + _alert_rule_note(results)
         + _masked_note(results)
         + "- **Malacca cannot be evaluated for detection** — no positives at all.\n"
         "- **News features come from GDELT 1.0 event exports** (corridor box "
