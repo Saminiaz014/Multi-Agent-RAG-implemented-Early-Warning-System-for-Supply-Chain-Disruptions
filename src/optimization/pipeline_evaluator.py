@@ -20,6 +20,24 @@ Three metrics are combined into the scalar objective:
 * **lead-time score** — how many days before each disruption the composite
   first crosses the MEDIUM alert line, normalised by a 5-day horizon.
 * **FPR** — false-positive rate of HIGH-risk alerts (penalised).
+
+**Why the comparison's equal-history fix does not apply here.**
+``scripts/run_method_comparison.py`` scores each agent on train + test
+history (commit 60454f0, issue 11), because there the test window directly
+follows the training days of one series. Here the fit and eval splits are
+separate synthetic years with *identical* dates (2025-01-01 .. 2025-12-31,
+seeds 42 / 43 / 44 from
+:class:`~src.optimization.data_split.DataSplitManager`). The eval year has
+no earlier days of its own. That fix's ``_history`` would return the eval
+split unchanged, and concatenating without de-duplication would put two
+noise paths on the same dates. Each year therefore starts cold: the
+shipping agent's duration score needs about 121 days of history (a 30-day
+lag plus ``min_periods`` 91) before it can score at all, so the first
+injected disruption (days 60-74) is scored without it. That is part of the
+synthetic data design, not a split restart. The tuned weights do not feed
+the method comparison either way: it reads the hand-tuned ``weights`` and
+``agents`` blocks of settings.yaml directly and never loads
+``config/optimized_weights.yaml``.
 """
 
 from __future__ import annotations

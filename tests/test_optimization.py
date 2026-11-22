@@ -232,8 +232,15 @@ def test_weight_mode_missing_file_falls_back(config: dict, tmp_path: Path) -> No
 # 5. End-to-end short optimization
 # ---------------------------------------------------------------------------
 def test_optimization_short(
-    config: dict, data_manager: DataSplitManager, tmp_path: Path
+    config: dict, data_manager: DataSplitManager, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Both outputs go to tmp_path. The real data/processed/
+    # optimization_results.json is meant to hold the 100-trial study; a
+    # smoke run written there is reported as the optimization result
+    # (tests/conftest.py fails the suite if it changes).
+    results_file = tmp_path / "optimization_results.json"
+    monkeypatch.setattr(_wo, "_RESULTS_PATH", results_file)
     opt_file = tmp_path / "optimized_weights.yaml"
     cfg = {
         **config,
@@ -246,7 +253,7 @@ def test_optimization_short(
     results = optimizer.optimize(n_trials=5, timeout=60)
 
     assert opt_file.exists(), "optimized_weights.yaml not written"
-    assert Path("data/processed/optimization_results.json").exists()
+    assert results_file.exists(), "optimization_results.json not written"
 
     # The written file round-trips into the resolver.
     written = load_optimized_weights(cfg)
