@@ -14,6 +14,9 @@ list and decision panel all evaluate that same day, and route selection is
 shared across the status list and the map (map clicks sync back via the
 ``?route=`` query param — see ``core.build_map_html``). Without the real
 series the page falls back to the synthetic evaluation year.
+
+Deep links: ``?region=<key>&date=YYYY-MM-DD&window=<label|days>`` open the
+page on a region and window; without them the defaults are unchanged.
 """
 
 from __future__ import annotations
@@ -126,6 +129,32 @@ def _apply_region_query_param() -> None:
         st.session_state["selected_region"] = requested
 
 
+def _window_query_params(first, last) -> tuple[str, object]:
+    """Initial window length and end date from ``?window=`` and ``?date=``.
+
+    ``?window=`` takes a label ("1 week") or its length in days ("7");
+    ``?date=YYYY-MM-DD`` is clamped to the series. They only seed the two
+    sliders' defaults, so the page is unchanged without them, and a slider the
+    user has moved keeps its position.
+
+    Returns:
+        ``(window_label, end_date)``.
+    """
+    label = "1 year"
+    requested = str(st.query_params.get("window") or "").strip()
+    for name, days in _WINDOWS.items():
+        if requested in (name, str(days)):
+            label = name
+    end = last
+    requested = str(st.query_params.get("date") or "").strip()
+    if requested:
+        try:
+            end = min(max(pd.Timestamp(requested).date(), first), last)
+        except ValueError:
+            pass   # malformed date: keep the latest day
+    return label, end
+
+
 def _render_region_selector() -> str:
     """Region picker as one button per chokepoint.
 
@@ -216,14 +245,15 @@ def render() -> None:
 
     # ---------------- Window controls (top) --------------------------------
     first, last = all_dates[0].date(), all_dates[-1].date()
+    initial_window, initial_end = _window_query_params(first, last)
     ctl_len, ctl_end = st.columns([1.1, 3.0], gap="medium")
     with ctl_len:
-        w_label = st.select_slider("Window length", list(_WINDOWS.keys()), value="1 year",
+        w_label = st.select_slider("Window length", list(_WINDOWS.keys()), value=initial_window,
                                    key="window_length")
     window = _WINDOWS[w_label]
     with ctl_end:
         end_date = st.slider(
-            "Slide the window (end date)", min_value=first, max_value=last, value=last,
+            "Slide the window (end date)", min_value=first, max_value=last, value=initial_end,
             step=timedelta(days=1), format="DD MMM YYYY", key=f"window_end_{region}",
         )
 
@@ -652,8 +682,12 @@ def _render_peak_explanation(ts, peak_day, word, region_label, drivers=None, dat
         features_df, _, explainer = get_shap_assets()
         drivers = explainer.explain(
             features_df.iloc[[min(peak_day - 1, len(features_df) - 1)]])["top_drivers"]
-    agreement = int(sum(1 for a in ALL_AGENTS if float(ts[a].iloc[peak_day - 1]) > 0.5))
-    text, source = generate_risk_narrative(json.dumps(drivers), agreement, word, region_label)
+    # "k of n": n is the agents that reported on that day (a disabled agent, or one
+    # whose source has ended, has no score), not a fixed count.
+    reporting = [a for a in ALL_AGENTS if a in ts.columns and pd.notna(ts[a].iloc[peak_day - 1])]
+    agreement = int(sum(1 for a in reporting if float(ts[a].iloc[peak_day - 1]) > 0.5))
+    text, source = generate_risk_narrative(json.dumps(drivers), agreement, word, region_label,
+                                           len(reporting))
     st.markdown(f"<div class='explain-box'>{text}</div>", unsafe_allow_html=True)
     src_note = "AI-generated summary" if source == "llm" else "generated summary"
     when = f"{pd.Timestamp(date):%d %b %Y}" if date is not None else f"day {peak_day}"

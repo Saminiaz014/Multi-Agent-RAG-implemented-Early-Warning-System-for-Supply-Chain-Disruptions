@@ -210,12 +210,15 @@ class TestRelativeAxisLabels:
         """Composite and agent charts must not drift apart in formatting."""
         import src.dashboard.decision_view as view
 
+        # Both charts now run on calendar dates through one builder, pinned to
+        # the same range; month ticks beyond two months, day ticks below.
         axis = timeline_dates(120)
-        config = view._relative_xaxis(axis)
+        config = view._date_xaxis(axis)
 
-        assert config["tickmode"] == "array"
-        assert config["ticktext"][-1] == "Today"
-        assert config["tickvals"][0] == axis[0]
+        assert config["type"] == "date"
+        assert config["range"] == [axis[0], axis[-1]]
+        assert config["tickformat"] == "%b '%y"
+        assert view._date_xaxis(timeline_dates(30))["tickformat"] == "%d %b"
 
 
 class TestRegionSelector:
@@ -254,7 +257,9 @@ class TestTextCleanup:
 
         ts = compute_timeseries("hand_tuned")
         axis = timeline_dates(len(ts))
-        view._render_agent_breakdown("panama", ts, axis, axis)
+        # The page passes in the data-source caption (synthetic or real).
+        view._render_agent_breakdown("panama", ts, axis, axis,
+                                     caption=view.TIMELINE_SYNTHETIC_CAPTION)
 
         assert captions, "the chart must still declare the synthetic timeline"
         caption = captions[0]

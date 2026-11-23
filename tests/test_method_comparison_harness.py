@@ -308,3 +308,26 @@ def test_alerts_and_a_threshold_are_not_both_accepted() -> None:
         rmc._score_metrics(y, s, threshold=1.0, alerts=s > 1)
     with pytest.raises(ValueError, match="not both"):
         rmc._score_metrics(y, s, train_scores=s, alerts=s > 1)
+
+
+# ------------------------------------------------ per-day alerts (shared by the figures)
+def test_alert_flags_are_the_rule_the_reported_alert_rate_uses() -> None:
+    y, s, train = _scored()
+    keep = np.ones(len(y), dtype=bool)
+    keep[200:218] = False                                   # a masked outage
+    train_keep = np.ones(len(train), dtype=bool)
+    train_keep[:5] = False
+    flags = rmc.alert_flags(s, train, train_keep=train_keep)
+    reported = rmc._evaluate(y, s, train, keep=keep, train_keep=train_keep, n_resamples=20)
+    assert flags.dtype == bool and len(flags) == len(s)
+    assert flags[keep].mean() == pytest.approx(reported["alert_rate"], abs=1e-12)
+
+
+def test_alert_flags_count_a_tie_with_the_threshold_as_an_alert() -> None:
+    assert rmc.alert_flags(np.ones(5), np.ones(20)).all()    # >= : a constant alerts every day
+
+
+def test_alert_flags_take_a_controls_alerts_as_given_and_nan_scores_as_zero() -> None:
+    given = np.array([True, False, True])
+    assert rmc.alert_flags(np.zeros(3), np.ones(10), direct=given).tolist() == [True, False, True]
+    assert not rmc.alert_flags(np.array([np.nan, 0.9]), np.linspace(0, 1, 50))[0]   # nan -> 0

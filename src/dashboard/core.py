@@ -49,12 +49,14 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from src.core.config_manager import load_config_for_region  # noqa: E402
 from src.core.regions import REGIONS as _REGIONS  # noqa: E402
+from src.core.regions import get_region  # noqa: E402
 from src.evaluation.decision_effectiveness import (  # noqa: E402
     ACTIONS,
     load_decision_labels,
     predict_action,
     scenario_correct_action,
 )
+from src.evaluation.window import eval_window  # noqa: E402
 
 try:  # same .env pattern as the extractors — never hardcode keys
     from dotenv import load_dotenv
@@ -76,7 +78,8 @@ __all__ = [
     "load_eval_results", "sustained_high_flags", "analysis_bundle",
     "get_routes", "route_risk_series", "get_vessels", "get_news",
     "generate_risk_narrative", "fig_to_jpeg", "export_button", "select_route",
-    "route_status_word", "DASH_CSS",
+    "route_status_word", "DASH_CSS", "split_date_text", "end_date_text", "fit_live_surrogate",
+    "FULL_CONFIG_LABEL",
     # Phase 12.5
     "get_region_map", "region_destinations", "timeline_dates",
     "detect_risk_spikes", "agent_contributions",
@@ -98,6 +101,9 @@ ALL_AGENTS: list[str] = [
     "shipping", "market", "geopolitical",
     "natural_disaster", "news_sentiment",
 ]
+#: Label of the full configuration in the agent-diversity views, computed from
+#: the agents the dashboard has (it said "6-agent" after the routing agent went).
+FULL_CONFIG_LABEL: str = f"{len(ALL_AGENTS)}-agent"
 
 AGENT_COLORS: dict[str, str] = {
     "shipping": "#1f77b4",
@@ -595,6 +601,98 @@ def live_top_drivers(ts: pd.DataFrame, features: pd.DataFrame, params: dict,
     return drivers
 
 
+def risk_tier(score: float, thresholds: dict) -> str:
+    """Four-tier label of a risk score: Low / Medium / High / Critical.
+
+    The engine itself emits three levels (``RiskEngine.classify_risk`` has no
+    critical branch); Critical here is the configured ``risk_critical`` cut-off
+    the Decision view colours, applied to the same score.
+    """
+    if score >= float(thresholds.get("risk_critical", 0.90)):
+        return "Critical"
+    if score >= float(thresholds.get("risk_high", 0.69)):
+        return "High"
+    if score >= float(thresholds.get("risk_medium", 0.51)):
+        return "Medium"
+    return "Low"
+
+
+def split_date_text() -> str:
+    """The evaluation's fixed split date (settings.yaml ``evaluation.split_date``), ``YYYY-MM-DD``."""
+    return f"{eval_window()['split_date']:%Y-%m-%d}"
+
+
+def end_date_text() -> str:
+    """The evaluation's fixed end date (settings.yaml ``evaluation.end_date``), ``YYYY-MM-DD``."""
+    return f"{eval_window()['end_date']:%Y-%m-%d}"
+
+
+def fit_live_surrogate(ts: pd.DataFrame, raw: pd.DataFrame, disabled_agents: set[str]) -> dict:
+    """Fit the real-data SHAP surrogate on one region's live series.
+
+    Same model as :mod:`src.explainability.real_surrogate`: a random forest on
+    the canonical features, fitted on the days before the evaluation's fixed
+    split date to reproduce the engine's ``risk_score``, with R² on the
+    evaluation window (the split date through the end date), like the thesis
+    table; live series run past it, and those later days are explained but
+    not scored. Features of agents the region disables are left out (NaN):
+    the composite it explains never used them.
+
+    Args:
+        ts: The series (``timestamp``, ``risk_score``).
+        raw: The feature frame, row-aligned with ``ts``.
+        disabled_agents: The region's disabled agents.
+
+    Returns:
+        ``{model, explainer, features, r2_test, n_train}``; ``features``
+        carries the canonical columns plus ``timestamp``, row-aligned with ``ts``.
+
+    Raises:
+        ValueError: If the series has no day before, or none from, the split date.
+    """
+    import shap
+    from sklearn.metrics import r2_score
+
+    from src.explainability.real_surrogate import canonical_features, fit_surrogate
+
+    X, _ = canonical_features(raw, disabled_agents)
+    y = ts["risk_score"].to_numpy(dtype=float)
+    window = eval_window()
+    days = pd.to_datetime(ts["timestamp"]).to_numpy()
+    train = days < window["split_date"].to_datetime64()
+    test = ~train & (days <= window["end_date"].to_datetime64())
+    if not train.any() or not test.any():
+        raise ValueError(f"the series has no days both before the split date {split_date_text()} "
+                         f"and from it to {end_date_text()} "
+                         f"({int(train.sum())} before, {int(test.sum())} in the window)")
+    model = fit_surrogate(X[train], y[train])
+    r2 = float(r2_score(y[test], model.predict(X[test].to_numpy(dtype=float))))
+    features = X.copy()
+    features.insert(0, "timestamp", ts["timestamp"].to_numpy())
+    return {"model": model, "explainer": shap.TreeExplainer(model),
+            "features": features, "r2_test": r2, "n_train": int(train.sum())}
+
+
+@st.cache_resource(show_spinner="Fitting the real-data explanation model …")
+def live_surrogate(region: str, mtime: float) -> dict:
+    """The SHAP surrogate fitted on ``region``'s real series (:func:`fit_live_surrogate`).
+
+    Fitted on the days before the evaluation's fixed split date, on the
+    features of the region's enabled agents only. ``mtime`` keys the cache to
+    the series file.
+    """
+    ts, raw = _read_live(region, mtime)
+    return fit_live_surrogate(ts, raw, set(get_region(region).passive_agents()))
+
+
+def live_shap_values(region: str, i: int) -> tuple[dict[str, float], dict]:
+    """SHAP value per canonical feature on row ``i`` of the real series."""
+    bundle = live_surrogate(region, live_series_path(region).stat().st_mtime)
+    X = bundle["features"].drop(columns="timestamp")
+    sv = bundle["explainer"].shap_values(X.iloc[[i]].to_numpy(dtype=float))[0]
+    return {name: float(v) for name, v in zip(X.columns, sv)}, bundle
+
+
 def relative_day_label(date, today=None, compact: bool = False) -> str:
     """Label one date by its distance from today.
 
@@ -986,9 +1084,20 @@ def select_route(route_key: str) -> None:
 _NUM_WORDS = ["zero", "one", "two", "three", "four", "five", "six"]
 
 
-def _compose_narrative(drivers: list[dict], agreement: int, word: str, region_label: str) -> str:
+def _count_word(n: int) -> str:
+    """``n`` as a word up to six, as digits beyond (so a larger roster is never misstated)."""
+    return _NUM_WORDS[n] if 0 <= n < len(_NUM_WORDS) else str(n)
+
+
+def _compose_narrative(drivers: list[dict], agreement: int, word: str, region_label: str,
+                       n_agents: int | None = None) -> str:
     """Generic compositional fallback — one algorithm over the live SHAP
-    drivers, not hardcoded per-feature-combination strings."""
+    drivers, not hardcoded per-feature-combination strings.
+
+    ``n_agents`` is how many agents reported (the "of N" in the text); by
+    default every dashboard agent.
+    """
+    total = len(ALL_AGENTS) if n_agents is None else n_agents
     phrases = []
     for d in drivers[:3]:
         feat = str(d.get("feature", "")).replace("_", " ")
@@ -999,16 +1108,17 @@ def _compose_narrative(drivers: list[dict], agreement: int, word: str, region_la
     if not phrases:
         return f"Risk in the {region_label} is currently {word.lower()}."
     joined = phrases[0] if len(phrases) == 1 else ", ".join(phrases[:-1]) + " combined with " + phrases[-1]
-    n_word = _NUM_WORDS[min(agreement, 6)]
     return (
         f"Risk in the {region_label} is {word.lower()} primarily due to {joined}; "
-        f"{n_word} of six detection agents currently agree on the disruption signal."
+        f"{_count_word(agreement)} of {_count_word(total)} detection agents currently agree on the "
+        "disruption signal."
     )
 
 
 @st.cache_data(show_spinner=False)
 def generate_risk_narrative(
-    drivers_json: str, agreement: int, word: str, region_label: str
+    drivers_json: str, agreement: int, word: str, region_label: str,
+    n_agents: int | None = None,
 ) -> tuple[str, str]:
     """Natural-language risk paragraph for the peak-explanation popup.
 
@@ -1035,14 +1145,16 @@ def generate_risk_narrative(
                         "logistics manager. Region: " + region_label + ". Status: " + word +
                         ". Top anomaly drivers from an explainability model: " +
                         json.dumps(drivers[:3]) +
-                        f". {agreement} of six detection agents agree. Write only the paragraph."
+                        f". {agreement} of {len(ALL_AGENTS) if n_agents is None else n_agents} "
+                        "detection agents agree. "
+                        "Write only the paragraph."
                     ),
                 }],
             )
             return msg.content[0].text.strip(), "llm"
         except Exception as exc:  # pragma: no cover - network/key dependent
             logger.warning("LLM narrative failed, using compositional fallback: %s", exc)
-    return _compose_narrative(drivers, agreement, word, region_label), "composed"
+    return _compose_narrative(drivers, agreement, word, region_label, n_agents), "composed"
 
 
 # ===========================================================================
@@ -1439,7 +1551,7 @@ def analysis_bundle(start: int, end: int) -> dict:
                     for i in range(start, end + 1)]
 
         diversity: dict[str, float] = {}
-        for cfg_name, active in (("6-agent", set(ALL_AGENTS)),
+        for cfg_name, active in ((FULL_CONFIG_LABEL, set(ALL_AGENTS)),
                                  ("2-agent", {"shipping", "market"}),
                                  ("1-agent", {"shipping"})):
             r_m = composite_series(ts, params, active).to_numpy()[start:end + 1] >= high_thr

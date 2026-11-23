@@ -279,3 +279,196 @@ def test_route_fetchers_tolerate_any_region():
     for region in ("red_sea", "suez", "atlantis", "", None):
         assert get_routes(region) == []
         assert isinstance(get_news(region), list)
+
+
+def test_decision_window_query_params():
+    """Without query params the window opens on the last year up to the latest
+    day; ``?date=`` and ``?window=`` only change those initial values."""
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(_DECISION_PAGE, default_timeout=900)
+    at.run()
+    assert not at.exception
+    defaults = {s.label: s.value for s in at.select_slider}
+    assert defaults.get("Window length") == "1 year"
+    end_default = next(s.value for s in at.slider if s.label.startswith("Slide the window"))
+
+    at = AppTest.from_file(_DECISION_PAGE, default_timeout=900)
+    at.query_params["date"] = "2024-10-01"
+    at.query_params["window"] = "7"
+    at.run()
+    assert not at.exception
+    assert {s.label: s.value for s in at.select_slider}["Window length"] == "1 week"
+    end = next(s.value for s in at.slider if s.label.startswith("Slide the window"))
+    if str(end_default) > "2024-10-01":       # only meaningful on the real series
+        assert str(end) == "2024-10-01"
+
+
+def test_analysis_case_explorer_deep_link():
+    """``?view=cases`` renders the real-data explorer alone, without errors."""
+    from streamlit.testing.v1 import AppTest
+
+    from src.dashboard.core import live_series_path
+
+    if not live_series_path("bab_el_mandeb").exists():
+        pytest.skip("real series not built (scripts/build_live_risk_series.py)")
+    at = AppTest.from_file(_ANALYSIS_PAGE, default_timeout=900)
+    at.query_params.update(view="cases", region="bab_el_mandeb",
+                           start="2023-06-01", end="2025-12-31", date="2024-01-15")
+    at.run()
+    assert not at.exception, [e.message for e in at.exception]
+    text = _page_text(at)
+    assert "10 · Real-data case explorer" in text
+    assert "1 · Detection performance" not in text
+
+
+# ------------------------------------------------ issue 16: split date, enabled agents, counts
+class _LazyCore:
+    """``src.dashboard.core`` imported on first use, as the other tests here do."""
+
+    def __getattr__(self, name):
+        import importlib
+
+        return getattr(importlib.import_module("src.dashboard.core"), name)
+
+
+core = _LazyCore()
+
+
+def test_the_split_date_text_is_the_fixed_evaluation_split_date() -> None:
+    from src.evaluation.window import eval_window
+
+    assert core.split_date_text() == f"{eval_window()['split_date']:%Y-%m-%d}"
+
+
+def _live_series(n: int = 1500, start: str = "2021-11-01"):
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.default_rng(4)
+    ts = pd.DataFrame({"timestamp": pd.date_range(start, periods=n, freq="D"),
+                       "risk_score": rng.uniform(0.1, 0.9, n)})
+    raw = pd.DataFrame({"timestamp": ts["timestamp"],
+                        "shipping__vessel_count": rng.integers(20, 90, n).astype(float),
+                        "market__brent_crude_usd": rng.normal(80, 5, n),
+                        "market__freight_rate_index": rng.normal(100, 5, n),
+                        "geopolitical__military_activity_index": rng.random(n)})
+    return ts, raw
+
+
+def test_the_live_surrogate_is_fitted_before_the_fixed_split_date_not_on_70_percent() -> None:
+    from src.evaluation.window import eval_window
+
+    ts, raw = _live_series()
+    bundle = core.fit_live_surrogate(ts, raw, disabled_agents=set())
+    split = eval_window()["split_date"]
+    expected = int((ts["timestamp"] < split).sum())
+    assert expected != int(len(ts) * 0.70)                   # the old cut would differ
+    assert bundle["n_train"] == expected
+    assert len(bundle["features"]) == len(ts)                # row-aligned with the series
+
+
+def test_the_live_surrogate_leaves_out_features_of_disabled_agents() -> None:
+    import numpy as np
+
+    ts, raw = _live_series()
+    bundle = core.fit_live_surrogate(ts, raw, disabled_agents={"market", "geopolitical"})
+    f = bundle["features"]
+    for name in ("brent_crude_usd", "freight_rate_index", "military_activity_index"):
+        assert f[name].isna().all(), name                   # present in the frame, not used
+    assert f["vessel_count"].notna().all()
+    kept = core.fit_live_surrogate(ts, raw, disabled_agents=set())["features"]
+    assert kept["brent_crude_usd"].notna().all()
+
+
+def test_the_narrative_counts_the_agents_that_reported_not_a_fixed_number() -> None:
+    drivers = [{"feature": "vessel_count", "agent": "shipping", "direction": "elevated"}]
+    four = core._compose_narrative(drivers, 2, "High", "Panama Canal", n_agents=4)
+    assert "two of four detection agents" in four
+    default = core._compose_narrative(drivers, 2, "High", "Panama Canal")
+    assert f"of {core._NUM_WORDS[len(core.ALL_AGENTS)]} detection agents" in default
+
+
+def test_the_dashboard_no_longer_states_a_fixed_agent_count_or_a_70_percent_cut() -> None:
+    from pathlib import Path
+
+    text = "\n".join(Path(core.__file__).with_name(n).read_text(encoding="utf-8")
+                     for n in ("analysis_view.py", "core.py", "decision_view.py"))
+    assert "first 70" not in text
+    assert "Six-agent" not in text and "Raw 6-agent" not in text
+    assert core.FULL_CONFIG_LABEL == f"{len(core.ALL_AGENTS)}-agent"
+    assert '("6-agent", set(ALL_AGENTS))' not in text      # the live full-config label is computed
+
+
+# ------------------------------------------------ issue 16 review: window, order, edge cases
+def test_the_live_surrogates_r2_window_stops_at_the_evaluation_end_date() -> None:
+    """Live series run past ``end_date`` (the 2026 crisis); R² is over the evaluation window only."""
+    from src.evaluation.window import eval_window
+
+    ts, raw = _live_series(n=1800)                           # runs to 2026-10, past end_date
+    end = eval_window()["end_date"]
+    assert ts["timestamp"].max() > end
+    base = core.fit_live_surrogate(ts, raw, disabled_agents=set())["r2_test"]
+    wild = ts.copy()
+    wild.loc[wild["timestamp"] > end, "risk_score"] += 100.0   # nothing past end_date may count
+    assert core.fit_live_surrogate(wild, raw, disabled_agents=set())["r2_test"] == base
+
+
+def test_the_live_surrogate_trains_on_days_before_the_split_whatever_the_row_order(
+        monkeypatch) -> None:
+    import pandas as pd
+
+    from src.evaluation.window import eval_window
+
+    seen = {}
+    real_fit = __import__("src.explainability.real_surrogate", fromlist=["x"]).fit_surrogate
+
+    def spy(X, y):
+        seen["rows"] = len(X)
+        seen["max_ts"] = timestamps.loc[X.index].max()
+        return real_fit(X, y)
+
+    ts, raw = _live_series()
+    order = ts.sample(frac=1.0, random_state=1).index          # shuffled rows, same data
+    ts, raw = ts.loc[order].reset_index(drop=True), raw.loc[order].reset_index(drop=True)
+    timestamps = ts["timestamp"]
+    monkeypatch.setattr("src.explainability.real_surrogate.fit_surrogate", spy)
+    bundle = core.fit_live_surrogate(ts, raw, disabled_agents=set())
+    split = eval_window()["split_date"]
+    assert seen["max_ts"] < split and seen["rows"] == bundle["n_train"] == int(
+        (ts["timestamp"] < split).sum())
+    assert pd.notna(bundle["r2_test"])
+
+
+@pytest.mark.parametrize("start, n", [("2021-11-01", 100),      # all before the split
+                                      ("2024-01-01", 300)])     # all after it
+def test_the_live_surrogate_names_the_split_when_one_side_is_empty(start, n) -> None:
+    ts, raw = _live_series(n=n, start=start)
+    with pytest.raises(ValueError, match="split date 20"):
+        core.fit_live_surrogate(ts, raw, disabled_agents=set())
+
+
+def test_the_narrative_prints_digits_beyond_six_agents() -> None:
+    drivers = [{"feature": "vessel_count", "agent": "shipping", "direction": "elevated"}]
+    text = core._compose_narrative(drivers, 8, "High", "Panama Canal", n_agents=9)
+    assert "8 of 9 detection agents" in text
+    six = core._compose_narrative(drivers, 6, "High", "Panama Canal", n_agents=6)
+    assert "six of six detection agents" in six
+
+
+def test_no_fixed_agent_count_survives_outside_the_stored_results_section() -> None:
+    """'6 vs 2 vs 1' / '6 → 2 → 1' belong only to the stored evaluation results (section 3)."""
+    import re
+    from pathlib import Path
+
+    stored = ("### 3 · Agent diversity", "Agent-diversity value: 6 vs 2 vs 1 agents")
+    path = Path(core.__file__).with_name("analysis_view.py")
+    stray = [(i, line.strip()) for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+             if re.search(r"\b6\s*(vs|→)", line) and not any(s in line for s in stored)]
+    assert not stray, stray
+
+
+def test_the_end_date_text_is_the_evaluation_end_date() -> None:
+    from src.evaluation.window import eval_window
+
+    assert core.end_date_text() == f"{eval_window()['end_date']:%Y-%m-%d}"

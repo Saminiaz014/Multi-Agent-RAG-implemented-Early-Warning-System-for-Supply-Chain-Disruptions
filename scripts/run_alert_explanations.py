@@ -43,6 +43,7 @@ from src.core.config_manager import load_config_for_region  # noqa: E402
 from src.explainability.alert_explainer import explain_alert, write_explanation  # noqa: E402
 from src.explainability.shap_explainer import (  # noqa: E402
     ALL_FEATURE_NAMES,
+    FEATURE_AGENT_MAP,
     SurrogateShapExplainer,
     build_shap_training_data,
 )
@@ -53,10 +54,17 @@ _REAL_METRICS = _OUTPUTS / "surrogate" / "real_surrogate_metrics.json"
 _TIER = len(harness._TIER_ORDER)
 
 
-def _features(frame: pd.DataFrame) -> pd.DataFrame:
-    """Strip ``domain__`` prefixes; keep the surrogate's features that exist."""
+def _features(frame: pd.DataFrame,
+              disabled_agents: frozenset[str] | set[str] = frozenset()) -> pd.DataFrame:
+    """Strip ``domain__`` prefixes; keep the surrogate's features that exist.
+
+    Features of agents the region disables are dropped on every path: the
+    real surrogate was fitted without them, and the synthetic one zero-fills
+    whatever is absent, so a disabled agent's column must not reach it.
+    """
     renamed = frame.rename(columns={c: c.split("__", 1)[1] for c in frame.columns if "__" in c})
-    keep = ["timestamp"] + [f for f in ALL_FEATURE_NAMES if f in renamed.columns]
+    keep = ["timestamp"] + [f for f in ALL_FEATURE_NAMES
+                            if f in renamed.columns and FEATURE_AGENT_MAP.get(f) not in disabled_agents]
     return renamed[keep].reset_index(drop=True)
 
 
@@ -105,7 +113,8 @@ def run_region(region: str, surrogate: str, out: Path) -> dict:
     threshold = harness._threshold(scores, train_scores)
     alert_rows = [len(train) + int(i) for i in np.flatnonzero(np.nan_to_num(scores) >= threshold)]
 
-    features = _features(frame)
+    disabled = {a for a in harness._TIER_ORDER if not harness._enabled(config, a)}
+    features = _features(frame, disabled)
     if surrogate == "real":
         shap_rows, fit = _real_shap(region, features, alert_rows)
     else:

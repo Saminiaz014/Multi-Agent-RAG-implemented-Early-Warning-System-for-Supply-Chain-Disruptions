@@ -294,7 +294,7 @@ def graph_f1_fpr(results: pd.DataFrame) -> None:
         ax.set_ylabel("FPR", fontweight="bold")
         ax.set_title(region, fontweight="bold")
         ax.grid(alpha=0.3)
-    fig.suptitle("Operating point: F1 vs false-positive rate (top-left is better)",
+    fig.suptitle("Operating point: F1 vs false-positive rate (bottom-right is better)",
                  fontweight="bold")
     fig.tight_layout()
     fig.savefig(_G_METHOD / "E_f1_vs_fpr.png", dpi=200)
@@ -759,18 +759,25 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
     (_EVAL / "COMPARISON_REPORT.md").write_text("\n".join(lines), encoding="utf-8")
 
 
-def main() -> int:
+#: Every report graph, each drawn from ``eval/method_comparison_results.csv``
+#: alone. ``make_graphs`` (and ``scripts/make_all_figures.py``) run exactly these.
+GRAPHS = (graph_method_auc, graph_region_rankings, graph_heatmap, graph_f1_fpr,
+          graph_alert_rate, graph_tiers)
+
+
+def make_graphs(results: pd.DataFrame) -> None:
+    """Draw every report graph into ``eval/graphs_*`` (the folders are created)."""
     _G_METHOD.mkdir(parents=True, exist_ok=True)
     _G_TIER.mkdir(parents=True, exist_ok=True)
+    for draw in GRAPHS:
+        draw(results)
+
+
+def main() -> int:
     results = _load()
     sensitivity_csv = _EVAL / "split_sensitivity.csv"
     sensitivity = pd.read_csv(sensitivity_csv) if sensitivity_csv.exists() else None
-    graph_method_auc(results)
-    graph_region_rankings(results)
-    graph_heatmap(results)
-    graph_f1_fpr(results)
-    graph_alert_rate(results)
-    graph_tiers(results)
+    make_graphs(results)
     write_report(results, sensitivity=sensitivity)
     print(f"graphs -> {_G_METHOD}, {_G_TIER}")
     print(f"report -> {_EVAL / 'COMPARISON_REPORT.md'}")

@@ -57,4 +57,10 @@ data/live/
 # Pre-migration knowledge-base snapshots
 data/knowledge_base/live_extracted_backup.pre_*.json
 
-docs/
+# docs/ is ignored, except the thesis brief, which is tracked. A file inside an
+# ignored directory cannot be re-included, so the rule is docs/* (the contents).
+docs/*
+!docs/THESIS_BRIEF.md
+
+# Conference paper drafts (local only) — never commit/push
+Paper/

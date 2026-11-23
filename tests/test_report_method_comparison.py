@@ -351,3 +351,26 @@ def test_sensitivity_table_shows_a_tier_with_fewer_agents(tmp_path, monkeypatch)
         .split("Split-date sensitivity", 1)[1]
     assert "0.800 (3 agents)" in section
     assert "0.900 (1 agents)" not in section                  # only when fewer than k
+
+
+# ------------------------------------------------ issue 16: graph E, shared graph entry point
+def test_graph_e_title_matches_its_axes(tmp_path, monkeypatch) -> None:
+    """F1 is on x and FPR on y, so the good corner is bottom-right (high F1, low FPR)."""
+    monkeypatch.setattr(rep, "_G_METHOD", tmp_path)
+    captured = []
+    real_close = rep.plt.close
+    monkeypatch.setattr(rep.plt, "close", lambda fig=None: (captured.append(fig), real_close(fig)))
+    rep.graph_f1_fpr(_results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]}))
+    fig = captured[0]
+    ax = fig.axes[0]
+    assert ax.get_xlabel() == "F1" and ax.get_ylabel() == "FPR"
+    assert not ax.xaxis_inverted() and not ax.yaxis_inverted()
+    title = fig._suptitle.get_text()
+    assert "bottom-right is better" in title and "top-left" not in title
+    assert (tmp_path / "E_f1_vs_fpr.png").exists()
+
+
+def test_make_graphs_is_the_one_place_that_lists_the_graphs() -> None:
+    names = [fn.__name__ for fn in rep.GRAPHS]
+    assert names == ["graph_method_auc", "graph_region_rankings", "graph_heatmap",
+                     "graph_f1_fpr", "graph_alert_rate", "graph_tiers"]

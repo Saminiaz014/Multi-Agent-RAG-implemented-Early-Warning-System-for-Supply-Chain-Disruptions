@@ -170,6 +170,23 @@ def _threshold(scores: np.ndarray, train_scores: np.ndarray | None,
     return float(np.quantile(np.nan_to_num(reference), 0.90))
 
 
+def alert_flags(scores: np.ndarray, train_scores: np.ndarray | None = None, *,
+                train_keep: np.ndarray | None = None,
+                direct: np.ndarray | None = None) -> np.ndarray:
+    """Per-day alerts under the harness's rule, for code that needs the days.
+
+    A day alerts when its score is ``>=`` the 90th percentile of the training
+    scores (:func:`_threshold`; NaN scores count as 0), or, for the controls
+    whose alerts are defined directly (:data:`_DIRECT_ALERTS`), as ``direct``
+    gives them. This is the rule behind every reported ``alert_rate`` (a test
+    keeps the two equal); callers must still leave masked days unscored.
+    """
+    if direct is not None:
+        return np.asarray(direct, dtype=bool)
+    s = np.nan_to_num(np.asarray(scores, dtype=float))
+    return s >= _threshold(s, train_scores, train_keep)
+
+
 def _evaluate(y_true: np.ndarray, scores: np.ndarray,
               train_scores: np.ndarray | None = None, *,
               keep: np.ndarray | None = None, train_keep: np.ndarray | None = None,

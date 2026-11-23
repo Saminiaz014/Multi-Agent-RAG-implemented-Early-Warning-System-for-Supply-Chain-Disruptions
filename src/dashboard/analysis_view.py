@@ -4,6 +4,9 @@ Audience: the thesis author. A scrollable research page exposing every metric
 the Phase 9a evaluation suite computes (all 8 metrics from
 ``evaluation_results.json``), raw per-agent scores, per-day SHAP values,
 hand-tuned vs optimized comparisons, and the interactive time-range explorer.
+Section 10 is the exception to the synthetic year: it reads the real per-day
+series from ``data/live/`` for any region and date range, and ``?view=cases``
+opens the page on that section alone.
 Every chart has an "Export as JPEG" button that flattens chart + title +
 caption into one print-ready image (white background) for the thesis document.
 """
@@ -24,18 +27,26 @@ from src.dashboard.core import (  # noqa: E402
     ACTIONS,
     AGENT_COLORS,
     ALL_AGENTS,
+    AVAILABLE_REGIONS,
     DASH_CSS,
+    FULL_CONFIG_LABEL,
     RANGE_PRESETS,
     SCENARIOS,
     TIMELINE_AXIS_NOTE,
     analysis_bundle,
     composite_series,
     compute_timeseries,
+    end_date_text,
     export_button,
+    get_news,
     get_shap_assets,
+    live_shap_values,
     load_eval_results,
+    load_live_timeseries,
     preset_to_range,
     resolve_mode_params,
+    risk_tier,
+    split_date_text,
     timeline_dates,
 )
 
@@ -76,6 +87,12 @@ def _bar_pair(categories, ht_vals, opt_vals, ytitle):
 
 def render() -> None:
     st.markdown(DASH_CSS, unsafe_allow_html=True)
+    if st.query_params.get("view") == "cases":
+        # Deep link to the real-data explorer alone, skipping the
+        # synthetic-year sections and their model fitting.
+        st.markdown("## Analysis view — real-data case explorer")
+        _section_10_cases()
+        return
     st.markdown("## Analysis view — thesis evaluation evidence")
     st.caption(
         "All numbers derive from `data/processed/evaluation_results.json` (Phase 9a suite) "
@@ -98,6 +115,7 @@ def render() -> None:
     _section_7_generalization(results)
     _section_8_decision(results)
     _section_9_explorer()
+    _section_10_cases()
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +224,7 @@ def _render_alert_explanation(features_df: pd.DataFrame, shap_values: dict, day:
 def _section_3_diversity(results: dict) -> None:
     st.markdown("### 3 · Agent diversity (6 vs 2 vs 1 agents)")
     m3 = results.get("metric_3_agent_diversity", {})
-    cfgs = ["6-agent", "2-agent", "1-agent"]
+    cfgs = ["6-agent", "2-agent", "1-agent"]      # keys of the stored evaluation results
     rows = []
     for mode in ("hand_tuned", "optimized"):
         for cfg in cfgs:
@@ -486,7 +504,7 @@ def _section_9_explorer() -> None:
     col_c, col_d = st.columns(2)
     with col_c:
         st.markdown("##### Agent diversity within range")
-        cfgs = ["6-agent", "2-agent", "1-agent"]
+        cfgs = [FULL_CONFIG_LABEL, "2-agent", "1-agent"]
         fig = go.Figure()
         for mode, res in modes.items():
             fig.add_trace(go.Bar(x=cfgs, y=[res["diversity"][c] for c in cfgs],
@@ -497,7 +515,7 @@ def _section_9_explorer() -> None:
         st.plotly_chart(fig, use_container_width=True)
         export_button(fig, f"exp_diversity_{a_start}_{a_end}",
                       f"Agent diversity — days {a_start + 1}–{a_end + 1}",
-                      "F1 within the selected range as the roster is ablated 6 → 2 → 1.")
+                      f"F1 within the selected range as the roster is ablated {len(ALL_AGENTS)} → 2 → 1.")
 
     with col_d:
         st.markdown("##### RAG similarity through the range")
@@ -517,7 +535,7 @@ def _section_9_explorer() -> None:
                       f"Sampled every {rag['stride']} day(s) against the static case base.")
 
     # Raw agent signal timeline (research view of the Page 1 trend).
-    with st.expander("Raw 6-agent signal timeline (full year)"):
+    with st.expander(f"Raw {len(ALL_AGENTS)}-agent signal timeline (full year)"):
         ts = compute_timeseries("hand_tuned")
         params = resolve_mode_params("hand_tuned")
         risk = composite_series(ts, params, set(ALL_AGENTS))
@@ -537,7 +555,8 @@ def _section_9_explorer() -> None:
                           hovermode="x unified",
                           legend=dict(orientation="h", y=1.12, font=dict(size=10)))
         st.plotly_chart(fig, use_container_width=True)
-        export_button(fig, "raw_timeline", "Six-agent anomaly signals and composite risk",
+        export_button(fig, "raw_timeline",
+                      f"{len(ALL_AGENTS)}-agent anomaly signals and composite risk",
                       "Per-agent anomaly scores and the agreement-amplified composite over "
                       "the 365-day test realisation; shaded bands are injected scenarios.")
 
@@ -561,3 +580,211 @@ def _section_9_explorer() -> None:
         file_name=f"evaluation_summary_days_{a_start + 1}_{a_end + 1}.csv",
         mime="text/csv",
     )
+
+
+# ---------------------------------------------------------------------------
+# Section 10 — real-data case explorer
+# ---------------------------------------------------------------------------
+
+#: Four-tier band colours for the real-data charts (low → critical).
+_TIER_BANDS = (("Low", "#1d4a30"), ("Medium", "#4a4410"), ("High", "#4a2f10"),
+               ("Critical", "#4a1d1d"))
+
+
+def _case_query_params(first, last) -> tuple[str, object, object, object]:
+    """Initial region, window and snapshot date from the query string.
+
+    ``?region=<key>&start=YYYY-MM-DD&end=YYYY-MM-DD&date=YYYY-MM-DD``. Each
+    is optional and clamped to the series; without them the explorer opens on
+    Hormuz, the last year and the latest day.
+    """
+    def _date(name, default):
+        raw = st.query_params.get(name)
+        if not raw:
+            return default
+        try:
+            value = pd.Timestamp(str(raw)).date()
+        except ValueError:
+            return default
+        return min(max(value, first), last)
+
+    region = str(st.query_params.get("region") or "hormuz").lower()
+    end = _date("end", last)
+    start = _date("start", max(first, (pd.Timestamp(end) - pd.Timedelta(days=364)).date()))
+    return region, start, end, _date("date", end)
+
+
+def _tier_shapes(fig, thresholds: dict) -> None:
+    """Shade the four risk tiers behind a 0–1 score axis."""
+    cuts = [0.0, float(thresholds["risk_medium"]), float(thresholds["risk_high"]),
+            float(thresholds["risk_critical"]), 1.02]
+    for (label, colour), lo, hi in zip(_TIER_BANDS, cuts[:-1], cuts[1:]):
+        fig.add_hrect(y0=lo, y1=hi, fillcolor=colour, opacity=0.45, line_width=0,
+                      annotation_text=label, annotation_position="top left",
+                      annotation_font=dict(size=10, color="#8d99a8"))
+
+
+def _label_spans(frame: pd.DataFrame) -> list[tuple]:
+    """Start/end dates of the traffic-drop label's runs inside ``frame``."""
+    spans, start, prev = [], None, None
+    for date, flag in zip(frame["timestamp"], frame["y_true"].astype(bool)):
+        if flag and start is None:
+            start = date
+        if not flag and start is not None:
+            spans.append((start, prev))
+            start = None
+        prev = date
+    if start is not None:
+        spans.append((start, prev))
+    return spans
+
+
+def _section_10_cases() -> None:
+    import plotly.graph_objects as go
+
+    from src.core.regions import get_region
+    from src.explainability.alert_explainer import explain_alert
+
+    st.markdown("### 10 · Real-data case explorer")
+    st.caption(
+        "The per-day series from `scripts/build_live_risk_series.py`: each agent fitted on "
+        f"the days before {split_date_text()} (the evaluation's fixed split date), and the "
+        "engine's composite risk score. Bands: Low below "
+        "risk_medium, Medium to risk_high, High to risk_critical, Critical above. Grey "
+        "columns mark the traffic-drop label (30-day mean transits at least 20 % below the "
+        "trailing 365-day median for 14 days or more); the dotted line is the snapshot day."
+    )
+    regions = list(AVAILABLE_REGIONS.values())
+    names = {key: name for name, key in AVAILABLE_REGIONS.items()}
+    probe = load_live_timeseries("hormuz")
+    if probe is None:
+        st.info("No real series yet — run `python scripts/build_live_risk_series.py`.")
+        return
+    first = probe[0]["timestamp"].iloc[0].date()
+    last = probe[0]["timestamp"].iloc[-1].date()
+    q_region, q_start, q_end, q_snap = _case_query_params(first, last)
+
+    c1, c2, c3, c4 = st.columns([1.3, 1, 1, 1])
+    region = c1.selectbox("Region", regions, format_func=lambda k: names.get(k, k),
+                          index=regions.index(q_region) if q_region in regions else 0,
+                          key="case_region")
+    start = c2.date_input("From", value=q_start, min_value=first, max_value=last,
+                          key="case_start")
+    end = c3.date_input("To", value=q_end, min_value=first, max_value=last, key="case_end")
+    snap = c4.date_input("Snapshot day", value=q_snap, min_value=first, max_value=last,
+                         key="case_date")
+
+    live = load_live_timeseries(region)
+    if live is None:
+        st.info(f"No real series for {names.get(region, region)}.")
+        return
+    ts, _ = live
+    thr = resolve_mode_params("hand_tuned")["thresholds"]
+    mask = (ts["timestamp"] >= pd.Timestamp(start)) & (ts["timestamp"] <= pd.Timestamp(end))
+    win = ts.loc[mask]
+    if win.empty:
+        st.info("The selected range holds no scored days.")
+        return
+    i = min(int(ts["timestamp"].searchsorted(pd.Timestamp(snap))), len(ts) - 1)
+    snap_ts = ts["timestamp"].iloc[i]
+    snap_risk = float(ts["risk_score"].iloc[i])
+    active = [a for a in ALL_AGENTS if a in get_region(region).active_agents()
+              and ts[a].notna().any()]
+    title = names.get(region, region)
+    span = f"{title}, {pd.Timestamp(start):%d %b %Y} – {pd.Timestamp(end):%d %b %Y}"
+
+    def _layout(fig, height, text):
+        fig.update_layout(height=height, template="plotly_dark", paper_bgcolor="#0b0e14",
+                          plot_bgcolor="#10151d", margin=dict(l=10, r=10, t=44, b=10),
+                          title=dict(text=text, font=dict(size=13)), hovermode="x unified",
+                          legend=dict(orientation="h", y=1.02, yanchor="bottom", x=1,
+                                      xanchor="right", font=dict(size=11)))
+        fig.update_xaxes(range=[win["timestamp"].iloc[0], win["timestamp"].iloc[-1]])
+
+    def _marks(fig):
+        for s0, s1 in _label_spans(win):
+            fig.add_vrect(x0=s0, x1=s1, fillcolor="#8d99a8", opacity=0.18, line_width=0)
+        if win["timestamp"].iloc[0] <= snap_ts <= win["timestamp"].iloc[-1]:
+            fig.add_vline(x=snap_ts, line=dict(color="#f2f2f2", width=1.2, dash="dot"))
+
+    # 10a — composite risk with the four tier bands
+    with st.container(key="case_risk"):
+        fig = go.Figure()
+        _tier_shapes(fig, thr)
+        _marks(fig)
+        fig.add_trace(go.Scatter(x=win["timestamp"], y=win["risk_score"],
+                                 name="composite risk", line=dict(color="#dfe6ee", width=1.8)))
+        _layout(fig, 360, f"Composite risk — {span}")
+        fig.update_yaxes(range=[0, 1.02], title="risk score")
+        st.plotly_chart(fig, use_container_width=True, key="case_risk_chart")
+        tiers = win["risk_score"].apply(lambda v: risk_tier(float(v), thr)).value_counts()
+        st.caption(
+            f"{len(win)} days · mean {win['risk_score'].mean():.2f} · max "
+            f"{win['risk_score'].max():.2f} · "
+            + " · ".join(f"{t} {int(tiers.get(t, 0))}" for t, _ in _TIER_BANDS)
+            + f" · label days {int(win['y_true'].astype(bool).sum())}. Snapshot "
+            f"{snap_ts:%d %b %Y}: {snap_risk:.2f} ({risk_tier(snap_risk, thr)})."
+        )
+
+    # 10b — per-agent scores
+    with st.container(key="case_agents"):
+        fig = go.Figure()
+        _marks(fig)
+        for a in active:
+            fig.add_trace(go.Scatter(x=win["timestamp"], y=win[a], name=a.replace("_", " "),
+                                     line=dict(color=AGENT_COLORS[a], width=1.3)))
+        _layout(fig, 340, f"Agent anomaly scores — {span}")
+        fig.update_yaxes(range=[0, 1.02], title="agent score")
+        st.plotly_chart(fig, use_container_width=True, key="case_agents_chart")
+        on_day = ", ".join(
+            f"{a.replace('_', ' ')} {ts[a].iloc[i]:.2f}" if pd.notna(ts[a].iloc[i])
+            else f"{a.replace('_', ' ')} no data" for a in active)
+        passive = ", ".join(p.replace("_", " ") for p in get_region(region).passive_agents())
+        st.caption(f"Snapshot {snap_ts:%d %b %Y}: {on_day}. Gaps are days without source "
+                   f"data. Not run in this region: {passive or 'none'}.")
+
+    # 10c — SHAP drivers on the snapshot day
+    with st.container(key="case_shap"):
+        shap_values, bundle = live_shap_values(region, i)
+        ordered = sorted(shap_values.items(), key=lambda kv: abs(kv[1]), reverse=True)[:10]
+        fig = go.Figure(go.Bar(
+            x=[v for _, v in ordered][::-1],
+            y=[k.replace("_", " ") for k, _ in ordered][::-1], orientation="h",
+            marker_color=["#d64545" if v > 0 else "#1f77b4" for _, v in ordered][::-1],
+        ))
+        fig.update_layout(height=330, template="plotly_dark", paper_bgcolor="#0b0e14",
+                          plot_bgcolor="#10151d", margin=dict(l=10, r=10, t=44, b=10),
+                          title=dict(text=f"SHAP drivers — {title}, {snap_ts:%d %b %Y}",
+                                     font=dict(size=13)),
+                          xaxis_title="SHAP value (contribution to the risk score)")
+        st.plotly_chart(fig, use_container_width=True, key="case_shap_chart")
+        explanation = explain_alert(bundle["features"], shap_values, i, region=region)
+        for sentence in explanation["sentences"][:3]:
+            st.markdown(f"- {sentence}")
+        st.caption(f"Random-forest surrogate on the canonical features of the region's "
+                   f"enabled agents, fitted on the days before {split_date_text()}; R² on the "
+                   f"days from then through {end_date_text()} {bundle['r2_test']:.2f}. Red raises the "
+                   "score, blue lowers it.")
+
+    # 10d — news signal
+    with st.container(key="case_news"):
+        if "news_sentiment" in active:
+            fig = go.Figure()
+            _marks(fig)
+            fig.add_trace(go.Scatter(x=win["timestamp"], y=win["news_sentiment"],
+                                     name="news sentiment",
+                                     line=dict(color=AGENT_COLORS["news_sentiment"],
+                                               width=1.4)))
+            _layout(fig, 280, f"News-sentiment agent — {span}")
+            fig.update_yaxes(range=[0, 1.02], title="agent score")
+            st.plotly_chart(fig, use_container_width=True, key="case_news_chart")
+            leads = int((win["top_agent"] == "news_sentiment").sum())
+            st.caption(f"Mean {win['news_sentiment'].mean():.2f}, max "
+                       f"{win['news_sentiment'].max():.2f}; dominant on {leads} of "
+                       f"{len(win)} days.")
+        else:
+            st.info(f"No news-sentiment series for {title}: the GDELT query was "
+                    "rate-limited (HTTP 429) when the series was built, so the composite "
+                    "renormalises over the other agents.")
+        for item in get_news(region, limit=4):
+            st.markdown(f"- {item['title'][:110]} ({item['date']})")
