@@ -12,7 +12,8 @@ It makes the thesis values traceable without committing the large artefacts:
     file, so ``git ls-tree <commit> <path>`` shows which commit holds exactly
     that code (and which files differed from HEAD when the outputs were made);
   - **inputs**: sha256 of the evaluation frames and their manifests
-    (``data/eval/``, git-ignored);
+    (``data/eval/``, git-ignored), and each region's ACLED fetch (row counts per
+    country-year, pages, a sha256 of the sorted event ids; ``acled_events``);
   - **artefacts**: size and sha256 of the git-ignored outputs -- the fitted
     surrogates (``outputs/surrogate/*.joblib``) and the per-alert explanation
     files (``outputs/explanations/``, digested as one tree);
@@ -58,7 +59,9 @@ PRODUCING_CODE: tuple[str, ...] = (
     "scripts/run_real_surrogate.py", "scripts/run_alert_explanations.py",
     "scripts/run_method_comparison.py", "scripts/explanation_manifest.py",
     "src/explainability/*.py", "src/evaluation/*.py", "src/aggregation/*.py",
-    "src/agents/*.py", "src/core/*.py", "config/settings.yaml", "config/regions/*.yaml",
+    "src/agents/*.py", "src/core/*.py", "src/ingestion/geopolitical_connector.py",
+    "src/extractors/acled_extractor.py", "scripts/build_eval_dataset.py",
+    "config/settings.yaml", "config/regions/*.yaml",
 )
 _LIBRARIES = ("numpy", "pandas", "scikit-learn", "shap", "joblib")
 
@@ -138,6 +141,38 @@ def input_provenance() -> list[dict]:
     return [file_entry(p) for p in sorted(data.glob("*.csv")) + sorted(data.glob("*.manifest.json"))]
 
 
+def acled_provenance(eval_dir: Path | None = None) -> dict:
+    """Each region's ACLED fetch: row counts per country-year and an event-id hash.
+
+    The hash is over the sorted event ids: it pins which events were fetched,
+    not their fields, which ACLED can revise under the same id.
+
+    From the frame manifests' ``geopolitical_source`` block (``data/eval/`` is
+    git-ignored, so the counts and hashes are recorded here, in the committed
+    manifest). A region whose frame has ACLED features but no block -- built
+    before the cursor fetch, when country-years over 5,000 events were cut --
+    is named, not skipped.
+    """
+    folder = eval_dir if eval_dir is not None else _PROJECT_ROOT / "data" / "eval"
+    out: dict = {}
+    for path in sorted(folder.glob("*.manifest.json")):
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        if "geopolitical" not in (manifest.get("domains_present") or {}):
+            continue
+        source = manifest.get("geopolitical_source")
+        if not source:
+            out[path.name.removesuffix(".manifest.json")] = {"geopolitical_source": None}
+            continue
+        out[path.name.removesuffix(".manifest.json")] = {
+            "frame_manifest_sha256": file_entry(path, root=folder)["sha256"],
+            "page_size": source["page_size"], "years": source.get("years"),
+            "events_total": source["events_total"], "events_sha256": source["events_sha256"],
+            "country_years": source["country_years"],
+            "round_cap_country_years": source["round_cap_country_years"],
+        }
+    return out
+
+
 def versions() -> dict:
     out = {"python": platform.python_version()}
     for lib in _LIBRARIES:
@@ -204,6 +239,7 @@ def manifest() -> dict:
                         "scripts/explanation_manifest.py"],
         "code": code_provenance(),
         "inputs": input_provenance(),
+        "acled_events": acled_provenance(),
         "versions": versions(),
         "git_ignored_artefacts": {
             "files": [file_entry(p) for p in sorted(_SURROGATE.glob("*.joblib"))],

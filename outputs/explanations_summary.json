@@ -4,9 +4,9 @@
   "top_feature_definition": "exact mean |SHAP| over every feature of every alert (coverage.json mean_abs_shap)",
   "regions": {
     "hormuz": {
-      "r2_test": 0.5284711012999596,
-      "r2_train": 0.9595158539848974,
-      "spearman_test": 0.7536654739887241,
+      "r2_test": 0.4956344709523913,
+      "r2_train": 0.9630651234806523,
+      "spearman_test": 0.7201042869233836,
       "test_dates": [
         "2023-07-01",
         "2025-11-21"
@@ -18,63 +18,63 @@
         "natural_disaster",
         "news_sentiment"
       ],
-      "alerts": 201,
-      "explanations_complete": 201,
+      "alerts": 214,
+      "explanations_complete": 214,
       "complete_share": 1.0,
       "top_shap_features": [
         {
           "feature": "diplomatic_incident_score",
-          "mean_abs_shap": 0.0687801236258392
+          "mean_abs_shap": 0.06204577090678028
         },
         {
           "feature": "vessel_count",
-          "mean_abs_shap": 0.047281604000568675
-        },
-        {
-          "feature": "avg_delay_hours",
-          "mean_abs_shap": 0.03819109086781151
+          "mean_abs_shap": 0.04548616665043911
         },
         {
           "feature": "military_activity_index",
-          "mean_abs_shap": 0.03329608857250858
+          "mean_abs_shap": 0.04200116965138874
+        },
+        {
+          "feature": "avg_delay_hours",
+          "mean_abs_shap": 0.03621887860585035
         },
         {
           "feature": "congestion_index",
-          "mean_abs_shap": 0.029440171139441612
+          "mean_abs_shap": 0.03606561104394876
         }
       ],
       "top5_from_alert_files": [
         {
           "feature": "diplomatic_incident_score",
-          "mean_abs_shap": 0.06848826368159207,
-          "top1_share": 0.472636815920398
+          "mean_abs_shap": 0.06177985981308412,
+          "top1_share": 0.3411214953271028
         },
         {
           "feature": "vessel_count",
-          "mean_abs_shap": 0.045765388059701505,
-          "top1_share": 0.25870646766169153
-        },
-        {
-          "feature": "avg_delay_hours",
-          "mean_abs_shap": 0.03791523383084578,
-          "top1_share": 0.14925373134328357
+          "mean_abs_shap": 0.04370709345794391,
+          "top1_share": 0.2897196261682243
         },
         {
           "feature": "military_activity_index",
-          "mean_abs_shap": 0.032848388059701486,
-          "top1_share": 0.11442786069651742
+          "mean_abs_shap": 0.04166202336448598,
+          "top1_share": 0.1542056074766355
+        },
+        {
+          "feature": "avg_delay_hours",
+          "mean_abs_shap": 0.03582025700934581,
+          "top1_share": 0.0
         },
         {
           "feature": "congestion_index",
-          "mean_abs_shap": 0.027653492537313425,
-          "top1_share": 0.0
+          "mean_abs_shap": 0.03488875233644859,
+          "top1_share": 0.205607476635514
         }
       ]
     },
     "bab_el_mandeb": {
-      "r2_test": -0.9563708069580812,
-      "r2_train": 0.9536514753823299,
-      "spearman_test": 0.4213022054522539,
+      "r2_test": -1.3762067756404197,
+      "r2_train": 0.9543650349341763,
+      "spearman_test": 0.31409961685480636,
       "test_dates": [
         "2023-07-01",
         "2025-11-21"
@@ -85,63 +85,63 @@
         "geopolitical",
         "news_sentiment"
       ],
-      "alerts": 602,
-      "explanations_complete": 602,
+      "alerts": 626,
+      "explanations_complete": 626,
       "complete_share": 1.0,
       "top_shap_features": [
         {
           "feature": "diplomatic_incident_score",
-          "mean_abs_shap": 0.0712641564695292
-        },
-        {
-          "feature": "avg_delay_hours",
-          "mean_abs_shap": 0.039287152576447944
+          "mean_abs_shap": 0.054786664390232345
         },
         {
           "feature": "congestion_index",
-          "mean_abs_shap": 0.027125921218287795
+          "mean_abs_shap": 0.03520524355488403
+        },
+        {
+          "feature": "avg_delay_hours",
+          "mean_abs_shap": 0.033087557236533324
         },
         {
           "feature": "military_activity_index",
-          "mean_abs_shap": 0.027016856274381728
+          "mean_abs_shap": 0.021125598459373566
         },
         {
           "feature": "vessel_count",
-          "mean_abs_shap": 0.019902017855357695
+          "mean_abs_shap": 0.01831618373540285
         }
       ],
       "top5_from_alert_files": [
         {
           "feature": "diplomatic_incident_score",
-          "mean_abs_shap": 0.0709623936877076,
-          "top1_share": 0.5913621262458472
-        },
-        {
-          "feature": "avg_delay_hours",
-          "mean_abs_shap": 0.03870512790697676,
-          "top1_share": 0.21262458471760798
+          "mean_abs_shap": 0.054074905750798714,
+          "top1_share": 0.4696485623003195
         },
         {
           "feature": "congestion_index",
-          "mean_abs_shap": 0.02636433222591363,
-          "top1_share": 0.0049833887043189366
+          "mean_abs_shap": 0.034552161341853016,
+          "top1_share": 0.21725239616613418
+        },
+        {
+          "feature": "avg_delay_hours",
+          "mean_abs_shap": 0.03277978913738015,
+          "top1_share": 0.07987220447284345
         },
         {
           "feature": "military_activity_index",
-          "mean_abs_shap": 0.026057890365448512,
-          "top1_share": 0.07475083056478406
+          "mean_abs_shap": 0.019991480830670927,
+          "top1_share": 0.06389776357827476
         },
         {
           "feature": "vessel_count",
-          "mean_abs_shap": 0.016766926910298997,
-          "top1_share": 0.0664451827242525
+          "mean_abs_shap": 0.01568998402555909,
+          "top1_share": 0.07028753993610223
         }
       ]
     },
     "panama": {
-      "r2_test": 0.6365174708391865,
-      "r2_train": 0.9392377677301831,
-      "spearman_test": 0.7925820789999577,
+      "r2_test": 0.6370620194789749,
+      "r2_train": 0.9373189534850817,
+      "spearman_test": 0.7910353662670219,
       "test_dates": [
         "2023-07-01",
         "2025-11-20"
@@ -158,57 +158,57 @@
       "top_shap_features": [
         {
           "feature": "vessel_count",
-          "mean_abs_shap": 0.10659317512366262
+          "mean_abs_shap": 0.10728013770220593
         },
         {
           "feature": "avg_delay_hours",
-          "mean_abs_shap": 0.051314800996492875
+          "mean_abs_shap": 0.05041436712268989
         },
         {
           "feature": "congestion_index",
-          "mean_abs_shap": 0.025925595628361563
+          "mean_abs_shap": 0.026395525484397275
         },
         {
           "feature": "article_volume",
-          "mean_abs_shap": 0.009770655222522665
+          "mean_abs_shap": 0.009729923871298703
         },
         {
           "feature": "sentiment_score",
-          "mean_abs_shap": 0.00882932904405483
+          "mean_abs_shap": 0.008584914578462352
         }
       ],
       "top5_from_alert_files": [
         {
           "feature": "vessel_count",
-          "mean_abs_shap": 0.106593170984456,
+          "mean_abs_shap": 0.10728012435233167,
           "top1_share": 0.6269430051813472
         },
         {
           "feature": "avg_delay_hours",
-          "mean_abs_shap": 0.050887145077720214,
+          "mean_abs_shap": 0.04994738860103629,
           "top1_share": 0.36787564766839376
         },
         {
           "feature": "congestion_index",
-          "mean_abs_shap": 0.025174145077720218,
+          "mean_abs_shap": 0.025881989637305695,
           "top1_share": 0.0
         },
         {
           "feature": "article_volume",
-          "mean_abs_shap": 0.008033932642487047,
+          "mean_abs_shap": 0.008053647668393778,
           "top1_share": 0.0
         },
         {
           "feature": "sentiment_score",
-          "mean_abs_shap": 0.006689772020725384,
+          "mean_abs_shap": 0.006405528497409326,
           "top1_share": 0.0051813471502590676
         }
       ]
     },
     "malacca": {
-      "r2_test": 0.48798899234459936,
-      "r2_train": 0.9758361779311624,
-      "spearman_test": 0.8421930347011064,
+      "r2_test": 0.5570482654576914,
+      "r2_train": 0.976823232039453,
+      "spearman_test": 0.8771732010192247,
       "test_dates": [
         "2023-07-01",
         "2025-11-21"
@@ -225,50 +225,50 @@
       "top_shap_features": [
         {
           "feature": "vessel_count",
-          "mean_abs_shap": 0.053281394029162134
+          "mean_abs_shap": 0.07770480247457595
         },
         {
           "feature": "diplomatic_incident_score",
-          "mean_abs_shap": 0.0520197287338446
+          "mean_abs_shap": 0.051266059720667494
         },
         {
           "feature": "military_activity_index",
-          "mean_abs_shap": 0.04553060733764985
+          "mean_abs_shap": 0.045131146747271166
         },
         {
           "feature": "avg_delay_hours",
-          "mean_abs_shap": 0.028685925930554357
+          "mean_abs_shap": 0.02681740166089915
         },
         {
           "feature": "congestion_index",
-          "mean_abs_shap": 0.016282493649913243
+          "mean_abs_shap": 0.019208269984906396
         }
       ],
       "top5_from_alert_files": [
         {
           "feature": "vessel_count",
-          "mean_abs_shap": 0.05189683279742768,
-          "top1_share": 0.3215434083601286
+          "mean_abs_shap": 0.07725517363344045,
+          "top1_share": 0.47266881028938906
         },
         {
           "feature": "diplomatic_incident_score",
-          "mean_abs_shap": 0.05148378778135046,
-          "top1_share": 0.34726688102893893
+          "mean_abs_shap": 0.051225453376205786,
+          "top1_share": 0.2090032154340836
         },
         {
           "feature": "military_activity_index",
-          "mean_abs_shap": 0.04355526688102892,
-          "top1_share": 0.2347266881028939
+          "mean_abs_shap": 0.04495572668810291,
+          "top1_share": 0.2090032154340836
         },
         {
           "feature": "avg_delay_hours",
-          "mean_abs_shap": 0.026633974276527337,
-          "top1_share": 0.08038585209003216
+          "mean_abs_shap": 0.026487318327974282,
+          "top1_share": 0.0
         },
         {
-          "feature": "freight_rate_index",
-          "mean_abs_shap": 0.011970675241157561,
-          "top1_share": 0.0
+          "feature": "congestion_index",
+          "mean_abs_shap": 0.015030942122186489,
+          "top1_share": 0.09967845659163987
         }
       ]
     }

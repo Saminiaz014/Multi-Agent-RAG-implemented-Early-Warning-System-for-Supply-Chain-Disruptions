@@ -19,6 +19,8 @@ output is best interpreted as a *severity envelope* with a free-text
 
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
 import json
 import logging
 from dataclasses import dataclass
@@ -143,6 +145,36 @@ _API_COMPOSITE_WEIGHTS: dict[str, float] = {
 _ACLED_RATE_LIMIT: int = 20
 
 
+def round_cap_country_years(country_years: list[dict], page_size: int) -> list[dict]:
+    """Country-years whose event count is a positive multiple of the page size.
+
+    The old fetch read one page, so a capped country-year came back as exactly
+    ``page_size`` events. With the cursor followed, such a count is only
+    plausible by chance; it is flagged (``round_cap_country_years`` in the
+    frame's source block, checked by the harness and the tests) instead of
+    trusted.
+    """
+    return [{"country": c["country"], "year": c["year"], "events": c["events"]}
+            for c in country_years if c["events"] > 0 and c["events"] % page_size == 0]
+
+
+def _events_digest(events: list[dict]) -> str:
+    """sha256 over the fetched events, independent of their order.
+
+    Of ACLED's event ids when every event carries one, else of the fields the
+    connector aggregates. An id hash pins which events were fetched, not their
+    fields: ACLED can revise ``event_date`` / ``event_type`` / ``fatalities``
+    under the same id, and that is not detected.
+    """
+    ids = [str(e["event_id_cnty"]) for e in events if e.get("event_id_cnty")]
+    if len(ids) == len(events):
+        lines = sorted(ids)
+    else:
+        lines = sorted(f"{e.get('event_date')}|{e.get('event_type')}|{e.get('fatalities')}"
+                       for e in events)
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
 class GeopoliticalConnector(BaseConnector):
     """Daily geopolitical-risk signal generator for the Hormuz corridor.
 
@@ -192,9 +224,10 @@ class GeopoliticalConnector(BaseConnector):
         api_cfg: dict = self.config.get("api", {}) or {}
         self.api_start_year: int = int(api_cfg.get("start_year", 2018))
         self.api_end_year: int = int(api_cfg.get("end_year", 2026))
-        #: Per country-year cap. Hitting it means that year is truncated, so
-        #: it is logged rather than passed off as a complete year.
-        self.api_events_per_year: int = int(api_cfg.get("events_per_year", 5000))
+        #: Events per request. Not a cap: every country-year is fetched in
+        #: full by following the API's cursor (``events_per_year`` is the old
+        #: name of this setting, when it was one).
+        self.api_page_size: int = int(api_cfg.get("page_size", api_cfg.get("events_per_year", 5000)))
         self.api_disruption_threshold: float = float(
             api_cfg.get("disruption_threshold", 0.5)
         )
@@ -342,6 +375,8 @@ class GeopoliticalConnector(BaseConnector):
             Daily-frequency frame over the configured historical range.
 
         Raises:
+            ACLEDFetchError: If a country-year request fails or comes back
+                inconsistent (no partial country-year is ever used).
             ValueError: If the region has no ``acled_countries`` configured,
                 or ACLED returns nothing for all of them — an empty result
                 means a credential or country-name problem, not a peaceful
@@ -360,19 +395,17 @@ class GeopoliticalConnector(BaseConnector):
         # token exchange here would be a second thing to keep working.
         extractor = ACLEDExtractor(self._acled_config())
         events: list[dict] = []
+        country_years: list[dict] = []
         for country in self.acled_countries:
             for year in range(self.api_start_year, self.api_end_year + 1):
-                batch = extractor._fetch_events(
-                    country, year, limit=self.api_events_per_year
+                # Follows the cursor to the last page; raises rather than
+                # returning part of a country-year.
+                batch, pages = extractor.fetch_all_events(
+                    country, year, page_size=self.api_page_size
                 )
-                if len(batch) >= self.api_events_per_year:
-                    # Same silent-truncation trap as the extractors: a capped
-                    # page is indistinguishable from a complete one.
-                    logger.warning(
-                        "[GeopoliticalConnector] %s/%d hit the %d-event cap — "
-                        "that year is incomplete; raise events_per_year.",
-                        country, year, self.api_events_per_year,
-                    )
+                country_years.append(
+                    {"country": country, "year": year, "events": len(batch), "pages": pages}
+                )
                 events.extend(batch)
 
         if not events:
@@ -435,6 +468,26 @@ class GeopoliticalConnector(BaseConnector):
             df["composite_geopolitical_risk"] >= self.api_disruption_threshold
         )
 
+        suspect = round_cap_country_years(country_years, self.api_page_size)
+        if suspect:
+            logger.warning(
+                "[GeopoliticalConnector] country-years with exactly a multiple of the "
+                "%d-event page size (a cap, unless by chance): %s",
+                self.api_page_size, suspect,
+            )
+        # Provenance travels with the frame; build_eval_dataset copies it into
+        # the manifest, as it does for the market source.
+        df.attrs["geopolitical_source"] = {
+            "fetched_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+            "api": "ACLED /acled/read, one request per page, cursor pagination",
+            "page_size": self.api_page_size,
+            "countries": list(self.acled_countries),
+            "years": [self.api_start_year, self.api_end_year],
+            "country_years": country_years,
+            "events_total": len(events),
+            "events_sha256": _events_digest(events),
+            "round_cap_country_years": suspect,
+        }
         logger.info(
             "[GeopoliticalConnector/ACLED] %d events over %s -> %d days "
             "[%s .. %s] disruption_days=%d (no sanctions_severity: ACLED "

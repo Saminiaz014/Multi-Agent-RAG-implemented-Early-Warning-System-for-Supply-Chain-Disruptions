@@ -2003,3 +2003,16 @@ Three design decisions carry most of the weight:
 Reads `eval/method_comparison_results.csv` and emits the graphs and written findings. Nothing is asserted that the CSV does not contain, and the findings are written from what the numbers show rather than from what the architecture predicts.
 
 ---
+
+### Addendum, 2026-11-23: ACLED events were cut at one page
+
+The geopolitical connector requested `limit=5000` per country-year and read the first page only, so any
+country-year over 5,000 events lost the rest silently (the table above describes it as a warning on the cap).
+The API paginates with a cursor: `next_cursor` in the response, passed back as `cursor` (`page` is rejected with
+HTTP 400, `count` / `total_count` are null). 17 country-years were cut: Bab el-Mandeb Yemen 2018-2025, Sudan
+2023-24, Somalia 2025; Hormuz Iraq 2020-2025. `ACLEDExtractor.fetch_all_events` now follows the cursor and raises
+rather than return a partial result; each frame manifest carries `geopolitical_source` (row counts per
+country-year, a sha256 of the sorted event ids, which does not detect ACLED revising fields under the same id),
+and the comparison, surrogate and explanation scripts refuse a frame without it. Only the geopolitical columns of
+the Bab el-Mandeb and Hormuz frames changed. The setting `agents.geopolitical.api.events_per_year` is now
+`page_size` (the old name is still read).

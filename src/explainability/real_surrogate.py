@@ -34,19 +34,26 @@ from src.explainability.shap_explainer import ALL_FEATURE_NAMES, FEATURE_AGENT_M
 logger = logging.getLogger(__name__)
 
 
-def canonical_features(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+def canonical_features(
+    frame: pd.DataFrame, disabled_agents: frozenset[str] | set[str] = frozenset(),
+) -> tuple[pd.DataFrame, list[str]]:
     """The 17 canonical features from a ``domain__feature`` frame.
+
+    Args:
+        disabled_agents: Agents the region disables. Their features are
+            treated as absent even when the frame carries the columns: the
+            composite the surrogate explains never used them.
 
     Returns:
         ``(features, missing)``: one column per :data:`ALL_FEATURE_NAMES`
-        entry, NaN throughout for a feature the frame does not contain, and
-        the names of those missing features.
+        entry, NaN throughout for a feature the frame does not contain or a
+        disabled agent owns, and the names of those missing features.
     """
     by_name = {c.split("__", 1)[1]: c for c in frame.columns if "__" in c}
     out = pd.DataFrame(index=frame.index)
     missing: list[str] = []
     for name in ALL_FEATURE_NAMES:
-        if name in by_name:
+        if name in by_name and FEATURE_AGENT_MAP.get(name) not in disabled_agents:
             out[name] = pd.to_numeric(frame[by_name[name]], errors="coerce")
         else:
             out[name] = np.nan

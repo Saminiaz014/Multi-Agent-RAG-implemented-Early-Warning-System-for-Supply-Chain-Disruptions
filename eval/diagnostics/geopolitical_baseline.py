@@ -21,9 +21,12 @@ mean necessarily catches up with a sustained level within about two weeks;
 the score does not adapt because it never compares against it. The plotted
 rolling mean of the score shows what such a baseline would do.
 
-ACLED truncation. The connector caps each country-year at
-``api_events_per_year`` events (``GeopoliticalConnector``), and the agent's
-frame was fetched with the same cap. A capped country-year whose last returned
+ACLED truncation. Until commit 13 the connector read one page of
+``api_events_per_year`` (5,000) events per country-year, so every country-year
+over that was cut (11 in Bab el-Mandeb, 6 in Hormuz); it now follows the API's
+cursor and fetches each in full. This script still flags any country-year
+whose count is a round multiple of the page size, which is what a cap looks
+like. Such a country-year whose last returned
 event falls well before 31 December is missing its tail: those days are
 hatched and left out of the "complete days" means. A capped year with events
 through December is incomplete somewhere unknown; it is marked lighter and
@@ -79,7 +82,8 @@ def fetch_events(connector: GeopoliticalConnector, years: range,
     """Raw ACLED events and the fetch log (events returned per country-year)."""
     events_path = OUT / f"acled_{REGION}_events.csv"
     log_path = OUT / f"acled_{REGION}_fetch_log.csv"
-    if events_path.exists() and log_path.exists() and not refresh:
+    fresh_log = log_path.exists() and "pages" in pd.read_csv(log_path, nrows=1).columns
+    if events_path.exists() and fresh_log and not refresh:       # older caches were one-page
         return (pd.read_csv(events_path, parse_dates=["event_date"]),
                 pd.read_csv(log_path))
     from src.extractors.acled_extractor import ACLEDExtractor
@@ -91,9 +95,10 @@ def fetch_events(connector: GeopoliticalConnector, years: range,
     rows, log = [], []
     for country in connector.acled_countries:
         for year in years:
-            batch = extractor._fetch_events(country, year, limit=connector.api_events_per_year)
+            batch, pages = extractor.fetch_all_events(country, year,
+                                                      page_size=connector.api_page_size)
             log.append({"country": country, "year": year, "returned": len(batch),
-                        "cap": connector.api_events_per_year})
+                        "pages": pages, "cap": connector.api_page_size})
             rows += [{"event_date": e.get("event_date"), "country": country,
                       "event_type": e.get("event_type"),
                       "fatalities": pd.to_numeric(e.get("fatalities"), errors="coerce")}
@@ -116,7 +121,7 @@ def capped_years(events: pd.DataFrame, log: pd.DataFrame) -> pd.DataFrame:
     ``tail_missing`` is True when the last event returned is more than
     ``_TAIL_SLACK_DAYS`` before 31 December: the days after it are missing.
     """
-    capped = log[log["returned"] >= log["cap"]].copy()
+    capped = log[(log["returned"] > 0) & (log["returned"] % log["cap"] == 0)].copy()
     last = events.groupby([events["country"], events["event_date"].dt.year.rename("year")])[
         "event_date"].max().rename("last").reset_index()
     capped = capped.merge(last, on=["country", "year"], how="left")
@@ -270,7 +275,7 @@ def main() -> int:
     s.to_csv(OUT / f"geopolitical_{REGION}.csv", index=False)
     report(s, capped)
     cap = int(GeopoliticalConnector(load_config_for_region(REGION)["agents"]["geopolitical"])
-              .api_events_per_year)
+              .api_page_size)
     print("wrote", plot(s, capped, cap))
     return 0
 

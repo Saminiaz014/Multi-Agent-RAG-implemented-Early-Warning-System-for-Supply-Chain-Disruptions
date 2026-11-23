@@ -10,16 +10,16 @@
       "metrics": {
         "n_train": 1642,
         "n_test": 875,
-        "r2_train": 0.9595158539848974,
-        "r2_test": 0.5284711012999596,
-        "mae_test": 0.06797127658570765,
-        "spearman_test": 0.7536654739887241,
-        "share_test_medium_or_above": 0.28685714285714287,
-        "n_test_medium_or_above": 251,
-        "mae_test_medium_or_above": 0.11029734290669185,
-        "bias_test_medium_or_above": -0.08823439801827408,
-        "top1_agent_agreement": 0.7250996015936255,
-        "top3_agent_agreement": 0.9561752988047809
+        "r2_train": 0.9630651234806523,
+        "r2_test": 0.4956344709523913,
+        "mae_test": 0.06971730728249068,
+        "spearman_test": 0.7201042869233836,
+        "share_test_medium_or_above": 0.328,
+        "n_test_medium_or_above": 287,
+        "mae_test_medium_or_above": 0.10574295876656518,
+        "bias_test_medium_or_above": -0.08573411016447502,
+        "top1_agent_agreement": 0.8013937282229965,
+        "top3_agent_agreement": 0.9686411149825784
       },
       "features_used": [
         "vessel_count",
@@ -64,16 +64,16 @@
       "metrics": {
         "n_train": 1642,
         "n_test": 875,
-        "r2_train": 0.9536514753823299,
-        "r2_test": -0.9563708069580812,
-        "mae_test": 0.16196305748377804,
-        "spearman_test": 0.4213022054522539,
-        "share_test_medium_or_above": 0.9142857142857143,
-        "n_test_medium_or_above": 800,
-        "mae_test_medium_or_above": 0.1702004942523613,
-        "bias_test_medium_or_above": -0.157080316092896,
-        "top1_agent_agreement": 0.3675,
-        "top3_agent_agreement": 0.9
+        "r2_train": 0.9543650349341763,
+        "r2_test": -1.3762067756404197,
+        "mae_test": 0.17053022188756234,
+        "spearman_test": 0.31409961685480636,
+        "share_test_medium_or_above": 0.9108571428571428,
+        "n_test_medium_or_above": 797,
+        "mae_test_medium_or_above": 0.18044481769031437,
+        "bias_test_medium_or_above": -0.17163216502967044,
+        "top1_agent_agreement": 0.4090338770388959,
+        "top3_agent_agreement": 0.9372647427854455
       },
       "features_used": [
         "vessel_count",
@@ -85,15 +85,15 @@
         "military_activity_index",
         "diplomatic_incident_score",
         "regime_stability_index",
-        "earthquake_severity",
-        "tsunami_risk",
-        "cyclone_severity",
-        "severe_weather_index",
         "sentiment_score",
         "article_volume"
       ],
       "features_dropped": [
         "sanctions_severity",
+        "earthquake_severity",
+        "tsunami_risk",
+        "cyclone_severity",
+        "severe_weather_index",
         "source_consensus"
       ],
       "agents_in_target": [
@@ -117,14 +117,14 @@
       "metrics": {
         "n_train": 1642,
         "n_test": 874,
-        "r2_train": 0.9392377677301831,
-        "r2_test": 0.6365174708391865,
-        "mae_test": 0.0692032497019632,
-        "spearman_test": 0.7925820789999577,
+        "r2_train": 0.9373189534850817,
+        "r2_test": 0.6370620194789749,
+        "mae_test": 0.06913417230929873,
+        "spearman_test": 0.7910353662670219,
         "share_test_medium_or_above": 0.2620137299771167,
         "n_test_medium_or_above": 229,
-        "mae_test_medium_or_above": 0.08414849406276811,
-        "bias_test_medium_or_above": -0.06952750583946457,
+        "mae_test_medium_or_above": 0.08409913207284711,
+        "bias_test_medium_or_above": -0.06941777053495853,
         "top1_agent_agreement": 0.982532751091703,
         "top3_agent_agreement": 0.9868995633187773
       },
@@ -135,9 +135,6 @@
         "brent_crude_usd",
         "trade_volume_index",
         "freight_rate_index",
-        "military_activity_index",
-        "diplomatic_incident_score",
-        "regime_stability_index",
         "earthquake_severity",
         "tsunami_risk",
         "cyclone_severity",
@@ -147,6 +144,9 @@
       ],
       "features_dropped": [
         "sanctions_severity",
+        "military_activity_index",
+        "diplomatic_incident_score",
+        "regime_stability_index",
         "source_consensus"
       ],
       "agents_in_target": [
@@ -170,24 +170,21 @@
       "metrics": {
         "n_train": 1642,
         "n_test": 875,
-        "r2_train": 0.9758361779311624,
-        "r2_test": 0.48798899234459936,
-        "mae_test": 0.05639865752620192,
-        "spearman_test": 0.8421930347011064,
+        "r2_train": 0.976823232039453,
+        "r2_test": 0.5570482654576914,
+        "mae_test": 0.05164876377576013,
+        "spearman_test": 0.8771732010192247,
         "share_test_medium_or_above": 0.14057142857142857,
         "n_test_medium_or_above": 123,
-        "mae_test_medium_or_above": 0.13822058781811625,
-        "bias_test_medium_or_above": -0.13822058781811625,
-        "top1_agent_agreement": 0.43089430894308944,
-        "top3_agent_agreement": 0.9186991869918699
+        "mae_test_medium_or_above": 0.13232773135812012,
+        "bias_test_medium_or_above": -0.13232773135812012,
+        "top1_agent_agreement": 0.6178861788617886,
+        "top3_agent_agreement": 0.983739837398374
       },
       "features_used": [
         "vessel_count",
         "avg_delay_hours",
         "congestion_index",
-        "brent_crude_usd",
-        "trade_volume_index",
-        "freight_rate_index",
         "military_activity_index",
         "diplomatic_incident_score",
         "regime_stability_index",
@@ -199,6 +196,9 @@
         "article_volume"
       ],
       "features_dropped": [
+        "brent_crude_usd",
+        "trade_volume_index",
+        "freight_rate_index",
         "sanctions_severity",
         "source_consensus"
       ],
@@ -223,16 +223,16 @@
       "metrics": {
         "n_train": 6568,
         "n_test": 3499,
-        "r2_train": 0.9654922556967005,
-        "r2_test": 0.598193348804088,
-        "mae_test": 0.0830782142316525,
-        "spearman_test": 0.8163640099455551,
-        "share_test_medium_or_above": 0.4009717062017719,
-        "n_test_medium_or_above": 1403,
-        "mae_test_medium_or_above": 0.11958771084137644,
-        "bias_test_medium_or_above": -0.10192709172828976,
-        "top1_agent_agreement": 0.5288667141838916,
-        "top3_agent_agreement": 0.9394155381325731
+        "r2_train": 0.9669182212552082,
+        "r2_test": 0.5748408949143051,
+        "mae_test": 0.08371118442798199,
+        "spearman_test": 0.817379016317719,
+        "share_test_medium_or_above": 0.41040297227779365,
+        "n_test_medium_or_above": 1436,
+        "mae_test_medium_or_above": 0.12381854123847959,
+        "bias_test_medium_or_above": -0.11064420054034983,
+        "top1_agent_agreement": 0.5438718662952646,
+        "top3_agent_agreement": 0.9777158774373259
       },
       "features_used": [
         "vessel_count",
@@ -257,9 +257,22 @@
       ],
       "features_nan_in": {
         "hormuz": [],
-        "bab_el_mandeb": [],
-        "panama": [],
-        "malacca": []
+        "bab_el_mandeb": [
+          "earthquake_severity",
+          "tsunami_risk",
+          "cyclone_severity",
+          "severe_weather_index"
+        ],
+        "panama": [
+          "military_activity_index",
+          "diplomatic_incident_score",
+          "regime_stability_index"
+        ],
+        "malacca": [
+          "brent_crude_usd",
+          "trade_volume_index",
+          "freight_rate_index"
+        ]
       },
       "train_max_date": "2023-06-30",
       "test_min_date": "2023-07-01"

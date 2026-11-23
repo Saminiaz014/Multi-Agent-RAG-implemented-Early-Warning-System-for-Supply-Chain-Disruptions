@@ -70,9 +70,21 @@ MISSING_POLICY = (
 
 
 def load_region_frame(region: str) -> tuple[pd.DataFrame, str]:
-    """Real frame from cache; the connector pipeline only when no cache exists."""
+    """Real frame from cache; the connector pipeline only when no cache exists.
+
+    Raises:
+        ValueError: If a cached frame has no manifest beside it, or its ACLED
+            events may be cut at a page (``harness.require_complete_acled``).
+    """
     for path in (_EVAL_CACHE / f"{region}.csv", _FALLBACK_CACHE / f"{region}.csv"):
         if path.exists():
+            manifest_path = path.with_name(f"{region}.manifest.json")
+            if not manifest_path.exists():
+                raise ValueError(f"{path.name}: no manifest beside the frame, so its ACLED "
+                                 "completeness cannot be checked; rebuild it with "
+                                 "scripts/build_eval_dataset.py --force.")
+            harness.require_complete_acled(
+                json.loads(manifest_path.read_text(encoding="utf-8")), region)
             return pd.read_csv(path, parse_dates=["timestamp"]), str(path.relative_to(_PROJECT_ROOT))
     import build_eval_dataset
 
@@ -107,7 +119,10 @@ def prepare_region(region: str) -> dict:
 
     scores = agent_scores(config, train, test)
     target = composite_from_agent_scores(scores, config)
-    features, missing = canonical_features(frame)
+    # Only the enabled agents' features: the target composite never used a
+    # disabled agent's, so they would explain nothing it computed.
+    disabled = {a for a in harness._TIER_ORDER if not harness._enabled(config, a)}
+    features, missing = canonical_features(frame, disabled)
     flagged = (target["risk_level"] != "low").to_numpy()
 
     n_train = len(train)

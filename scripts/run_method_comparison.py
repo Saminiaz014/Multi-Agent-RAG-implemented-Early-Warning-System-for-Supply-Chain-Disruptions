@@ -213,6 +213,45 @@ def _delta(y_true: np.ndarray, scores: np.ndarray, reference: np.ndarray, *,
     return paired_auc_delta_ci(y_true, scores, reference, keep=keep, **cfg)
 
 
+def require_complete_acled(manifest: dict, region: str | None = None) -> None:
+    """Refuse a frame whose ACLED events may be cut at a page.
+
+    The connector once read one page per country-year, cutting every
+    country-year over 5,000 events; a full (cursor) fetch records its row
+    counts in the manifest's ``geopolitical_source``. Used by every consumer of
+    the frames (this harness, the surrogate and explanation scripts). The round
+    counts are recomputed from the recorded country-years, not taken from the
+    recorded flag list.
+
+    Raises:
+        ValueError: If the frame has geopolitical features but no source block,
+            or a country-year count is a positive multiple of the page size.
+    """
+    if "geopolitical" not in (manifest.get("domains_present") or {}):
+        return
+    region = region or manifest.get("region")
+    acled = manifest.get("geopolitical_source") or {}
+    if not acled:
+        raise ValueError(
+            f"{region}: the manifest records no geopolitical_source, so this frame's "
+            "ACLED events may be cut at one page (5,000 per country-year); rebuild "
+            "with scripts/build_eval_dataset.py --force."
+        )
+    size = int(acled.get("page_size") or 5000)
+    counted = [f"{c['country']} {c['year']}: {c['events']}"
+               for c in acled.get("country_years") or []
+               if c["events"] > 0 and c["events"] % size == 0]
+    capped = counted or acled.get("round_cap_country_years") or []
+    if capped:
+        raise ValueError(
+            f"{region}: ACLED country-years with exactly a multiple of the page size "
+            f"{size} (treated as capped): {capped[:3]}. Rebuild with "
+            "scripts/build_eval_dataset.py --force; if the count is genuine, a rebuild "
+            "with agents.geopolitical.api.page_size set to another value (say 4999) "
+            "gives the same count, while a capped year changes."
+        )
+
+
 def _masked_days(frame: pd.DataFrame, manifest: dict) -> np.ndarray:
     """True on the frame's days whose news GDELT never published.
 
@@ -246,6 +285,7 @@ def _masked_days(frame: pd.DataFrame, manifest: dict) -> np.ndarray:
                 "(manifest market_source); rebuild with "
                 "scripts/build_eval_dataset.py --force."
             )
+    require_complete_acled(manifest, region)
     days = set(source.get("days_masked") or [])
     stamps = pd.to_datetime(frame["timestamp"]).dt.strftime("%Y-%m-%d")
     return stamps.isin(days).to_numpy()

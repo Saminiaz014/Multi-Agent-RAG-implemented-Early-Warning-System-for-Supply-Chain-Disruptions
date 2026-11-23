@@ -95,7 +95,8 @@ def mean_abs_shap(shap_rows: list[dict]) -> dict[str, float]:
 
 
 def run_region(region: str, surrogate: str, out: Path) -> dict:
-    frame, _ = harness._load(region)
+    frame, manifest = harness._load(region)
+    harness.require_complete_acled(manifest, region)
     config = load_config_for_region(region)
     train, test = harness._split(frame)
 

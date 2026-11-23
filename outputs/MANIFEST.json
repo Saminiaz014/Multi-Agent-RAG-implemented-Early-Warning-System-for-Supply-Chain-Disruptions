@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-11-23T16:50:31+00:00",
+  "generated_utc": "2026-11-23T18:51:55+00:00",
   "hashing": "sha256 and git blob ids over LF-normalised text (binary files as is)",
   "produced_by": [
     "scripts/run_real_surrogate.py",
@@ -7,11 +7,16 @@
     "scripts/explanation_manifest.py"
   ],
   "code": {
-    "head_when_generated": "4de92378a45b5cfb6c21eec58be5712843e10b54",
+    "head_when_generated": "883fba4fb3a2a736f23ed98dae67deb95423616f",
     "differs_from_head": [
+      "scripts/build_eval_dataset.py",
       "scripts/explanation_manifest.py",
       "scripts/run_alert_explanations.py",
-      "scripts/run_real_surrogate.py"
+      "scripts/run_method_comparison.py",
+      "scripts/run_real_surrogate.py",
+      "src/explainability/real_surrogate.py",
+      "src/extractors/acled_extractor.py",
+      "src/ingestion/geopolitical_connector.py"
     ],
     "files": [
       {
@@ -35,20 +40,24 @@
         "git_blob": "acd0b0664e69dbf889c28331ddc2b09c63878512"
       },
       {
+        "path": "scripts/build_eval_dataset.py",
+        "git_blob": "6e608fdd1f867ac8af072fdaf8b6088772742caa"
+      },
+      {
         "path": "scripts/explanation_manifest.py",
-        "git_blob": "643c983299210221d9a57a37a71146e4d45173a0"
+        "git_blob": "78c12d412a0ce67877d8f0236a0be1931b299cc6"
       },
       {
         "path": "scripts/run_alert_explanations.py",
-        "git_blob": "2a1fab69a059783f6988cd555706261918bb8401"
+        "git_blob": "dd522031d43358c6c27201258b3d657bf99cca4e"
       },
       {
         "path": "scripts/run_method_comparison.py",
-        "git_blob": "80d1a1b989c8a91dbafe2a5ae82cb3d6179f8164"
+        "git_blob": "b6d768815e218b81ab42b07ea55da7a8506c247f"
       },
       {
         "path": "scripts/run_real_surrogate.py",
-        "git_blob": "ab703e05109d45634d97e3d34066813d7af5c419"
+        "git_blob": "ad8ee76327e9bed7ecebe1d1e8b276e3ce3ed0f4"
       },
       {
         "path": "src/agents/__init__.py",
@@ -124,11 +133,19 @@
       },
       {
         "path": "src/explainability/real_surrogate.py",
-        "git_blob": "31557c2b8922ac499d3906af716d63e015d9a0e0"
+        "git_blob": "04efcdf04f1bfd3984807eaccbec576c801eb309"
       },
       {
         "path": "src/explainability/shap_explainer.py",
         "git_blob": "e961e3196b66d59163fe8d932db8e85c64355b6c"
+      },
+      {
+        "path": "src/extractors/acled_extractor.py",
+        "git_blob": "2fffe04dbd9de7d714d9f1d4ba3fe5a2d50ba772"
+      },
+      {
+        "path": "src/ingestion/geopolitical_connector.py",
+        "git_blob": "2593e0be158dc668a73e2da1be9eaa8350c70231"
       }
     ],
     "verify": "git ls-tree <commit> -- <path> shows the same blob id in the commit that holds this code"
@@ -136,21 +153,21 @@
   "inputs": [
     {
       "path": "data/eval/bab_el_mandeb.csv",
-      "bytes": 489216,
-      "sha256": "97f8b2a66d1d2cd771c85bb5e3f1a1086ac191b13cf12a2f3617bfde00277803",
-      "git_blob": "8812a1c53800e90741a0ab024e8ad9acd854c103"
+      "bytes": 526366,
+      "sha256": "4f750579a8a1f78dd3bf382ee9a46e1914529695720d8f5b362de0b341bacefa",
+      "git_blob": "7819d4452a4260399bb7f4d740659fafb2572367"
     },
     {
       "path": "data/eval/hormuz.csv",
-      "bytes": 535118,
-      "sha256": "505414cf5b898f3b5907de9fad158d120bb626974bcb26b32110eb052b11c6f5",
-      "git_blob": "c6b908cab0b82cc5e5853ad050e344a6b1c67993"
+      "bytes": 509252,
+      "sha256": "c052cc578f7fd6b6e8cdaae5447240dddf698395ee54d50f644e490dd3a56b6b",
+      "git_blob": "c0b589118f12610659446e9b2d66265463d3b2f6"
     },
     {
       "path": "data/eval/malacca.csv",
-      "bytes": 532365,
-      "sha256": "991134a34d8b06e7b3a544ac384d45c4190a98078cac7b3a16c0d929a424d802",
-      "git_blob": "254c3e3aa2e38b38d75f0dbf3b08555983111c83"
+      "bytes": 532539,
+      "sha256": "27482ad75758c18ab48f8f22f0becb9ee107ab54e312d3d24b157e4462b67ec2",
+      "git_blob": "b046f141f0f0b0283c3c67b5b07187d66b97cc0a"
     },
     {
       "path": "data/eval/panama.csv",
@@ -160,29 +177,1109 @@
     },
     {
       "path": "data/eval/bab_el_mandeb.manifest.json",
-      "bytes": 4226,
-      "sha256": "e628dfd95240adfd303df0f411688945d66e342f4f485aa40ba8928675344243",
-      "git_blob": "3199c78d3fa533723ee1236a9547cb46a3c41850"
+      "bytes": 11749,
+      "sha256": "99175e37618b5f285f4767d7a5e6a0e4868d180a969d2e96cf7bb7c2dbd280f5",
+      "git_blob": "fe534ad535ffbbc3878ef0e88613580d89744c2f"
     },
     {
       "path": "data/eval/hormuz.manifest.json",
-      "bytes": 4219,
-      "sha256": "1f809593e785264c5f67d4dd5c60c1e12fcfa36cd880b52111011d3a7084bdf8",
-      "git_blob": "a18d20f46327d5cf0c7c8f09080946163fc96cef"
+      "bytes": 12777,
+      "sha256": "e5f839709ca3ea420c9882b4ebc5ae98e41c5b56be4ba12d69ed4b32ed6ad73e",
+      "git_blob": "fb04736fe5d3062a339d69c1b18756fe4a67ef01"
     },
     {
       "path": "data/eval/malacca.manifest.json",
-      "bytes": 4215,
-      "sha256": "2de5200ed5e2aaa9aea1ae5e20b0d2e68a964156a98cd731a603950df8082882",
-      "git_blob": "cc2525d975aac86630c39aef358d3c1e84247646"
+      "bytes": 7725,
+      "sha256": "fb0456b6cf23fa3784da47db5f57364b7318e6e9831882c8f292f2af22447fef",
+      "git_blob": "5f613a55af3669f14142b62fdcf8aca38de10811"
     },
     {
       "path": "data/eval/panama.manifest.json",
-      "bytes": 4218,
-      "sha256": "0bd481aca4813f5ea0614c8b7037bafaa3fabc00eac2219d1d0cdcad771e2958",
-      "git_blob": "f43ebc8f2e0256c244a3104650d7f3523d6fbca8"
+      "bytes": 5647,
+      "sha256": "a191949c9f94f473fb23f988aeeef08b117d244a1a63aabded47215b5c8288a1",
+      "git_blob": "ab6781591e15baba358ef46c071b717992a2c0aa"
     }
   ],
+  "acled_events": {
+    "bab_el_mandeb": {
+      "frame_manifest_sha256": "99175e37618b5f285f4767d7a5e6a0e4868d180a969d2e96cf7bb7c2dbd280f5",
+      "page_size": 5000,
+      "years": [
+        2018,
+        2026
+      ],
+      "events_total": 144652,
+      "events_sha256": "481f716a86ff018573299c5a744ec34567f129619f92cdc7871e6b8561e2ac2c",
+      "country_years": [
+        {
+          "country": "Yemen",
+          "year": 2018,
+          "events": 11473,
+          "pages": 3
+        },
+        {
+          "country": "Yemen",
+          "year": 2019,
+          "events": 11849,
+          "pages": 3
+        },
+        {
+          "country": "Yemen",
+          "year": 2020,
+          "events": 11887,
+          "pages": 3
+        },
+        {
+          "country": "Yemen",
+          "year": 2021,
+          "events": 8839,
+          "pages": 2
+        },
+        {
+          "country": "Yemen",
+          "year": 2022,
+          "events": 8089,
+          "pages": 2
+        },
+        {
+          "country": "Yemen",
+          "year": 2023,
+          "events": 7627,
+          "pages": 2
+        },
+        {
+          "country": "Yemen",
+          "year": 2024,
+          "events": 12504,
+          "pages": 3
+        },
+        {
+          "country": "Yemen",
+          "year": 2025,
+          "events": 11849,
+          "pages": 3
+        },
+        {
+          "country": "Yemen",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2018,
+          "events": 862,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2019,
+          "events": 295,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2020,
+          "events": 121,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2021,
+          "events": 240,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2022,
+          "events": 63,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2023,
+          "events": 22,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2024,
+          "events": 5,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2025,
+          "events": 19,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Egypt",
+          "year": 2018,
+          "events": 497,
+          "pages": 1
+        },
+        {
+          "country": "Egypt",
+          "year": 2019,
+          "events": 705,
+          "pages": 1
+        },
+        {
+          "country": "Egypt",
+          "year": 2020,
+          "events": 644,
+          "pages": 1
+        },
+        {
+          "country": "Egypt",
+          "year": 2021,
+          "events": 313,
+          "pages": 1
+        },
+        {
+          "country": "Egypt",
+          "year": 2022,
+          "events": 248,
+          "pages": 1
+        },
+        {
+          "country": "Egypt",
+          "year": 2023,
+          "events": 207,
+          "pages": 1
+        },
+        {
+          "country": "Egypt",
+          "year": 2024,
+          "events": 130,
+          "pages": 1
+        },
+        {
+          "country": "Egypt",
+          "year": 2025,
+          "events": 275,
+          "pages": 1
+        },
+        {
+          "country": "Egypt",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Eritrea",
+          "year": 2018,
+          "events": 6,
+          "pages": 1
+        },
+        {
+          "country": "Eritrea",
+          "year": 2019,
+          "events": 4,
+          "pages": 1
+        },
+        {
+          "country": "Eritrea",
+          "year": 2020,
+          "events": 9,
+          "pages": 1
+        },
+        {
+          "country": "Eritrea",
+          "year": 2021,
+          "events": 4,
+          "pages": 1
+        },
+        {
+          "country": "Eritrea",
+          "year": 2022,
+          "events": 14,
+          "pages": 1
+        },
+        {
+          "country": "Eritrea",
+          "year": 2023,
+          "events": 6,
+          "pages": 1
+        },
+        {
+          "country": "Eritrea",
+          "year": 2024,
+          "events": 15,
+          "pages": 1
+        },
+        {
+          "country": "Eritrea",
+          "year": 2025,
+          "events": 13,
+          "pages": 1
+        },
+        {
+          "country": "Eritrea",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Djibouti",
+          "year": 2018,
+          "events": 3,
+          "pages": 1
+        },
+        {
+          "country": "Djibouti",
+          "year": 2019,
+          "events": 18,
+          "pages": 1
+        },
+        {
+          "country": "Djibouti",
+          "year": 2020,
+          "events": 35,
+          "pages": 1
+        },
+        {
+          "country": "Djibouti",
+          "year": 2021,
+          "events": 30,
+          "pages": 1
+        },
+        {
+          "country": "Djibouti",
+          "year": 2022,
+          "events": 8,
+          "pages": 1
+        },
+        {
+          "country": "Djibouti",
+          "year": 2023,
+          "events": 16,
+          "pages": 1
+        },
+        {
+          "country": "Djibouti",
+          "year": 2024,
+          "events": 8,
+          "pages": 1
+        },
+        {
+          "country": "Djibouti",
+          "year": 2025,
+          "events": 1,
+          "pages": 1
+        },
+        {
+          "country": "Djibouti",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Sudan",
+          "year": 2018,
+          "events": 749,
+          "pages": 1
+        },
+        {
+          "country": "Sudan",
+          "year": 2019,
+          "events": 1584,
+          "pages": 1
+        },
+        {
+          "country": "Sudan",
+          "year": 2020,
+          "events": 1022,
+          "pages": 1
+        },
+        {
+          "country": "Sudan",
+          "year": 2021,
+          "events": 1596,
+          "pages": 1
+        },
+        {
+          "country": "Sudan",
+          "year": 2022,
+          "events": 2728,
+          "pages": 1
+        },
+        {
+          "country": "Sudan",
+          "year": 2023,
+          "events": 6708,
+          "pages": 2
+        },
+        {
+          "country": "Sudan",
+          "year": 2024,
+          "events": 7693,
+          "pages": 2
+        },
+        {
+          "country": "Sudan",
+          "year": 2025,
+          "events": 4991,
+          "pages": 1
+        },
+        {
+          "country": "Sudan",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Somalia",
+          "year": 2018,
+          "events": 3238,
+          "pages": 1
+        },
+        {
+          "country": "Somalia",
+          "year": 2019,
+          "events": 3135,
+          "pages": 1
+        },
+        {
+          "country": "Somalia",
+          "year": 2020,
+          "events": 3025,
+          "pages": 1
+        },
+        {
+          "country": "Somalia",
+          "year": 2021,
+          "events": 3202,
+          "pages": 1
+        },
+        {
+          "country": "Somalia",
+          "year": 2022,
+          "events": 3521,
+          "pages": 1
+        },
+        {
+          "country": "Somalia",
+          "year": 2023,
+          "events": 3793,
+          "pages": 1
+        },
+        {
+          "country": "Somalia",
+          "year": 2024,
+          "events": 3448,
+          "pages": 1
+        },
+        {
+          "country": "Somalia",
+          "year": 2025,
+          "events": 5266,
+          "pages": 2
+        },
+        {
+          "country": "Somalia",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        }
+      ],
+      "round_cap_country_years": []
+    },
+    "hormuz": {
+      "frame_manifest_sha256": "e5f839709ca3ea420c9882b4ebc5ae98e41c5b56be4ba12d69ed4b32ed6ad73e",
+      "page_size": 5000,
+      "years": [
+        2018,
+        2026
+      ],
+      "events_total": 88819,
+      "events_sha256": "0ab679c54e5c904e01e3e92aab23dbb879518226e3141e059f86a7e7239512b4",
+      "country_years": [
+        {
+          "country": "Iran",
+          "year": 2018,
+          "events": 3161,
+          "pages": 1
+        },
+        {
+          "country": "Iran",
+          "year": 2019,
+          "events": 2577,
+          "pages": 1
+        },
+        {
+          "country": "Iran",
+          "year": 2020,
+          "events": 2401,
+          "pages": 1
+        },
+        {
+          "country": "Iran",
+          "year": 2021,
+          "events": 4434,
+          "pages": 1
+        },
+        {
+          "country": "Iran",
+          "year": 2022,
+          "events": 4747,
+          "pages": 1
+        },
+        {
+          "country": "Iran",
+          "year": 2023,
+          "events": 4258,
+          "pages": 1
+        },
+        {
+          "country": "Iran",
+          "year": 2024,
+          "events": 4085,
+          "pages": 1
+        },
+        {
+          "country": "Iran",
+          "year": 2025,
+          "events": 4104,
+          "pages": 1
+        },
+        {
+          "country": "Iran",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Oman",
+          "year": 2018,
+          "events": 3,
+          "pages": 1
+        },
+        {
+          "country": "Oman",
+          "year": 2019,
+          "events": 3,
+          "pages": 1
+        },
+        {
+          "country": "Oman",
+          "year": 2020,
+          "events": 5,
+          "pages": 1
+        },
+        {
+          "country": "Oman",
+          "year": 2021,
+          "events": 21,
+          "pages": 1
+        },
+        {
+          "country": "Oman",
+          "year": 2022,
+          "events": 2,
+          "pages": 1
+        },
+        {
+          "country": "Oman",
+          "year": 2023,
+          "events": 7,
+          "pages": 1
+        },
+        {
+          "country": "Oman",
+          "year": 2024,
+          "events": 6,
+          "pages": 1
+        },
+        {
+          "country": "Oman",
+          "year": 2025,
+          "events": 1,
+          "pages": 1
+        },
+        {
+          "country": "Oman",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "United Arab Emirates",
+          "year": 2018,
+          "events": 2,
+          "pages": 1
+        },
+        {
+          "country": "United Arab Emirates",
+          "year": 2019,
+          "events": 2,
+          "pages": 1
+        },
+        {
+          "country": "United Arab Emirates",
+          "year": 2020,
+          "events": 4,
+          "pages": 1
+        },
+        {
+          "country": "United Arab Emirates",
+          "year": 2021,
+          "events": 4,
+          "pages": 1
+        },
+        {
+          "country": "United Arab Emirates",
+          "year": 2022,
+          "events": 25,
+          "pages": 1
+        },
+        {
+          "country": "United Arab Emirates",
+          "year": 2023,
+          "events": 4,
+          "pages": 1
+        },
+        {
+          "country": "United Arab Emirates",
+          "year": 2024,
+          "events": 2,
+          "pages": 1
+        },
+        {
+          "country": "United Arab Emirates",
+          "year": 2025,
+          "events": 4,
+          "pages": 1
+        },
+        {
+          "country": "United Arab Emirates",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2018,
+          "events": 862,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2019,
+          "events": 295,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2020,
+          "events": 121,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2021,
+          "events": 240,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2022,
+          "events": 63,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2023,
+          "events": 22,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2024,
+          "events": 5,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2025,
+          "events": 19,
+          "pages": 1
+        },
+        {
+          "country": "Saudi Arabia",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Qatar",
+          "year": 2018,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Qatar",
+          "year": 2019,
+          "events": 4,
+          "pages": 1
+        },
+        {
+          "country": "Qatar",
+          "year": 2020,
+          "events": 6,
+          "pages": 1
+        },
+        {
+          "country": "Qatar",
+          "year": 2021,
+          "events": 19,
+          "pages": 1
+        },
+        {
+          "country": "Qatar",
+          "year": 2022,
+          "events": 10,
+          "pages": 1
+        },
+        {
+          "country": "Qatar",
+          "year": 2023,
+          "events": 19,
+          "pages": 1
+        },
+        {
+          "country": "Qatar",
+          "year": 2024,
+          "events": 1,
+          "pages": 1
+        },
+        {
+          "country": "Qatar",
+          "year": 2025,
+          "events": 7,
+          "pages": 1
+        },
+        {
+          "country": "Qatar",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Bahrain",
+          "year": 2018,
+          "events": 1634,
+          "pages": 1
+        },
+        {
+          "country": "Bahrain",
+          "year": 2019,
+          "events": 717,
+          "pages": 1
+        },
+        {
+          "country": "Bahrain",
+          "year": 2020,
+          "events": 308,
+          "pages": 1
+        },
+        {
+          "country": "Bahrain",
+          "year": 2021,
+          "events": 1174,
+          "pages": 1
+        },
+        {
+          "country": "Bahrain",
+          "year": 2022,
+          "events": 718,
+          "pages": 1
+        },
+        {
+          "country": "Bahrain",
+          "year": 2023,
+          "events": 824,
+          "pages": 1
+        },
+        {
+          "country": "Bahrain",
+          "year": 2024,
+          "events": 827,
+          "pages": 1
+        },
+        {
+          "country": "Bahrain",
+          "year": 2025,
+          "events": 637,
+          "pages": 1
+        },
+        {
+          "country": "Bahrain",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Kuwait",
+          "year": 2018,
+          "events": 5,
+          "pages": 1
+        },
+        {
+          "country": "Kuwait",
+          "year": 2019,
+          "events": 22,
+          "pages": 1
+        },
+        {
+          "country": "Kuwait",
+          "year": 2020,
+          "events": 21,
+          "pages": 1
+        },
+        {
+          "country": "Kuwait",
+          "year": 2021,
+          "events": 13,
+          "pages": 1
+        },
+        {
+          "country": "Kuwait",
+          "year": 2022,
+          "events": 22,
+          "pages": 1
+        },
+        {
+          "country": "Kuwait",
+          "year": 2023,
+          "events": 18,
+          "pages": 1
+        },
+        {
+          "country": "Kuwait",
+          "year": 2024,
+          "events": 11,
+          "pages": 1
+        },
+        {
+          "country": "Kuwait",
+          "year": 2025,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Kuwait",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Iraq",
+          "year": 2018,
+          "events": 3678,
+          "pages": 1
+        },
+        {
+          "country": "Iraq",
+          "year": 2019,
+          "events": 3712,
+          "pages": 1
+        },
+        {
+          "country": "Iraq",
+          "year": 2020,
+          "events": 6307,
+          "pages": 2
+        },
+        {
+          "country": "Iraq",
+          "year": 2021,
+          "events": 7613,
+          "pages": 2
+        },
+        {
+          "country": "Iraq",
+          "year": 2022,
+          "events": 7747,
+          "pages": 2
+        },
+        {
+          "country": "Iraq",
+          "year": 2023,
+          "events": 6535,
+          "pages": 2
+        },
+        {
+          "country": "Iraq",
+          "year": 2024,
+          "events": 9626,
+          "pages": 2
+        },
+        {
+          "country": "Iraq",
+          "year": 2025,
+          "events": 5095,
+          "pages": 2
+        },
+        {
+          "country": "Iraq",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        }
+      ],
+      "round_cap_country_years": []
+    },
+    "malacca": {
+      "frame_manifest_sha256": "fb0456b6cf23fa3784da47db5f57364b7318e6e9831882c8f292f2af22447fef",
+      "page_size": 5000,
+      "years": [
+        2018,
+        2026
+      ],
+      "events_total": 24356,
+      "events_sha256": "72e2cad429177a4dca2606bda3a06f7e3e3d8755186cc137f758ea0158900f80",
+      "country_years": [
+        {
+          "country": "Malaysia",
+          "year": 2018,
+          "events": 197,
+          "pages": 1
+        },
+        {
+          "country": "Malaysia",
+          "year": 2019,
+          "events": 224,
+          "pages": 1
+        },
+        {
+          "country": "Malaysia",
+          "year": 2020,
+          "events": 87,
+          "pages": 1
+        },
+        {
+          "country": "Malaysia",
+          "year": 2021,
+          "events": 146,
+          "pages": 1
+        },
+        {
+          "country": "Malaysia",
+          "year": 2022,
+          "events": 159,
+          "pages": 1
+        },
+        {
+          "country": "Malaysia",
+          "year": 2023,
+          "events": 156,
+          "pages": 1
+        },
+        {
+          "country": "Malaysia",
+          "year": 2024,
+          "events": 251,
+          "pages": 1
+        },
+        {
+          "country": "Malaysia",
+          "year": 2025,
+          "events": 361,
+          "pages": 1
+        },
+        {
+          "country": "Malaysia",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Indonesia",
+          "year": 2018,
+          "events": 1093,
+          "pages": 1
+        },
+        {
+          "country": "Indonesia",
+          "year": 2019,
+          "events": 1632,
+          "pages": 1
+        },
+        {
+          "country": "Indonesia",
+          "year": 2020,
+          "events": 2012,
+          "pages": 1
+        },
+        {
+          "country": "Indonesia",
+          "year": 2021,
+          "events": 2257,
+          "pages": 1
+        },
+        {
+          "country": "Indonesia",
+          "year": 2022,
+          "events": 3459,
+          "pages": 1
+        },
+        {
+          "country": "Indonesia",
+          "year": 2023,
+          "events": 3588,
+          "pages": 1
+        },
+        {
+          "country": "Indonesia",
+          "year": 2024,
+          "events": 4062,
+          "pages": 1
+        },
+        {
+          "country": "Indonesia",
+          "year": 2025,
+          "events": 4630,
+          "pages": 1
+        },
+        {
+          "country": "Indonesia",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Singapore",
+          "year": 2018,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Singapore",
+          "year": 2019,
+          "events": 0,
+          "pages": 1
+        },
+        {
+          "country": "Singapore",
+          "year": 2020,
+          "events": 10,
+          "pages": 1
+        },
+        {
+          "country": "Singapore",
+          "year": 2021,
+          "events": 4,
+          "pages": 1
+        },
+        {
+          "country": "Singapore",
+          "year": 2022,
+          "events": 10,
+          "pages": 1
+        },
+        {
+          "country": "Singapore",
+          "year": 2023,
+          "events": 4,
+          "pages": 1
+        },
+        {
+          "country": "Singapore",
+          "year": 2024,
+          "events": 9,
+          "pages": 1
+        },
+        {
+          "country": "Singapore",
+          "year": 2025,
+          "events": 5,
+          "pages": 1
+        },
+        {
+          "country": "Singapore",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        }
+      ],
+      "round_cap_country_years": []
+    },
+    "panama": {
+      "frame_manifest_sha256": "a191949c9f94f473fb23f988aeeef08b117d244a1a63aabded47215b5c8288a1",
+      "page_size": 5000,
+      "years": [
+        2018,
+        2026
+      ],
+      "events_total": 3906,
+      "events_sha256": "9c0278c51815ed6d8d267bb7cd851cac8a45a572732de0171bd9561afac4baf1",
+      "country_years": [
+        {
+          "country": "Panama",
+          "year": 2018,
+          "events": 530,
+          "pages": 1
+        },
+        {
+          "country": "Panama",
+          "year": 2019,
+          "events": 384,
+          "pages": 1
+        },
+        {
+          "country": "Panama",
+          "year": 2020,
+          "events": 377,
+          "pages": 1
+        },
+        {
+          "country": "Panama",
+          "year": 2021,
+          "events": 508,
+          "pages": 1
+        },
+        {
+          "country": "Panama",
+          "year": 2022,
+          "events": 636,
+          "pages": 1
+        },
+        {
+          "country": "Panama",
+          "year": 2023,
+          "events": 764,
+          "pages": 1
+        },
+        {
+          "country": "Panama",
+          "year": 2024,
+          "events": 294,
+          "pages": 1
+        },
+        {
+          "country": "Panama",
+          "year": 2025,
+          "events": 413,
+          "pages": 1
+        },
+        {
+          "country": "Panama",
+          "year": 2026,
+          "events": 0,
+          "pages": 1
+        }
+      ],
+      "round_cap_country_years": []
+    }
+  },
   "versions": {
     "python": "3.13.2",
     "numpy": "2.4.4",
@@ -195,9 +1292,9 @@
     "files": [
       {
         "path": "outputs/surrogate/real_rf.joblib",
-        "bytes": 33634669,
-        "sha256": "b07b43c614ca790cc86bdf5ac5553e087d1ce28ed08f5143143511140c693d82",
-        "git_blob": "a0b4449dd39a9a92a078266805dbb4b9d2b99e35"
+        "bytes": 33544920,
+        "sha256": "effbd6f0d1d2b723df4e164794e8ed79b2cabf7e27767269d7d1d92f492b9497",
+        "git_blob": "5a61fa85bfd88196fcbfece74d6cc1c2122752af"
       },
       {
         "path": "outputs/surrogate/synthetic_rf.joblib",
@@ -208,9 +1305,9 @@
     ],
     "trees": {
       "outputs/explanations/": {
-        "files": 1311,
-        "bytes": 4478400,
-        "sha256": "01b9e66475da0863c2aa75c813af2e67916fa30ca25f92eee8069d987a6f8ae3"
+        "files": 1348,
+        "bytes": 4607997,
+        "sha256": "923cc6368b3df0477738b36ef857c1a98093d2d0b005a6188a8ef5b2e97a707d"
       }
     }
   },
@@ -218,38 +1315,38 @@
     {
       "path": "outputs/surrogate/real_surrogate_metrics.md",
       "bytes": 1901,
-      "sha256": "e49424e85368b2ff520001e752727c25d2cd83b3bde244beaca8aa1ff79ca523",
-      "git_blob": "6532423f13ab69314569f2201fcac1474381965a"
+      "sha256": "756a8a74293e8ed29e97fd243c3caa605961cf6a2951ac4c7cc6acdc72611493",
+      "git_blob": "f7542977ffee039f97bcc6e90c40110376c04dd8"
     },
     {
       "path": "outputs/surrogate/real_surrogate_metrics.json",
-      "bytes": 8247,
-      "sha256": "8a3e4cfb37ea08e82cfcbe6d2bced730aa369f5cdbb79fadb4f9e1d6754721ff",
-      "git_blob": "ec017d9f0d516923e95d21fbca7421ec403d5f38"
+      "bytes": 8615,
+      "sha256": "e5d68928d959d3fbe94c02d45a01625d9ff36452eeac9305da30339a3ecef50b",
+      "git_blob": "b8b59c4c60855a77b1d1dd604ee79da3577f238f"
     },
     {
       "path": "outputs/surrogate/synthetic_surrogate_metrics.json",
-      "bytes": 5515,
-      "sha256": "4af677e883a774f26967223ed4608fefcfad30e4f2b20505d6d3a5316a9df00d",
-      "git_blob": "a6d5657edb0b691779eb03b2f4f447b4e99fe177"
+      "bytes": 5522,
+      "sha256": "fb241ca7cb1410c8c5af654c6a7d2540670e879e7aa9dd77fd37549e340bc3e6",
+      "git_blob": "1ef423766e02239227878675a7d48a7a199da952"
     },
     {
       "path": "outputs/explanations/coverage.json",
-      "bytes": 4449,
-      "sha256": "0e68ffbd4e3bbc96aaa026405dbe7cf24197b5a8f7401fd79ac04839fd988ce7",
-      "git_blob": "7216b61f4bfd0276381097b6a12359cad000d57f"
+      "bytes": 3988,
+      "sha256": "10b13d93ffac65222ccbfac933149c74d2330042653c74ac96e6eb4523cb1ab8",
+      "git_blob": "7e159ac37c97e625b9a8d5522fc571d9b46b559f"
     },
     {
       "path": "outputs/explanations_summary.md",
       "bytes": 1757,
-      "sha256": "ae72058158f0e03f8ad4719bad2de99b718b97e81de4136a70b6f71c355a126b",
-      "git_blob": "09a0d7f4a61142450cae8778f480f252a9c48f39"
+      "sha256": "ac6c4e0f2049b79788432bc7e7a5697586acb3ff3822ba83ae9b6dce26e5685f",
+      "git_blob": "b87a9c74bcd474184bf29d66c68e86a660bc6cbe"
     },
     {
       "path": "outputs/explanations_summary.json",
-      "bytes": 7650,
-      "sha256": "388047857660cf56b40f697e9997517a3c765c947b6ad1d782659d1bfedf0b64",
-      "git_blob": "eb04592e7e77f140aa9ebe7541a2c9dae6368cff"
+      "bytes": 7644,
+      "sha256": "9925e39a06b826917af115d6e7fc8e474bd0722cb077c91e8ac1f2e30ffc54b6",
+      "git_blob": "2d25c05daec0c362b17b2c9573b50639880cc68b"
     }
   ]
 }

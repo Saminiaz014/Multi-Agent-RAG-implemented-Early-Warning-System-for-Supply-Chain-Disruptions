@@ -5,7 +5,9 @@ https://acleddata.com/register/. ACLED retired the legacy email+API-key
 query-param scheme in favour of OAuth (username/password token exchange,
 24h access token + 14-day refresh token); this extractor uses the
 ``acled`` PyPI client (>=1.0.0), which auto-selects OAuth and handles the
-token lifecycle internally — no raw HTTP/auth code needed here.
+token lifecycle internally — no raw HTTP/auth code needed here, with one
+exception: :meth:`ACLEDExtractor.fetch_all_events` calls the client's private
+transport to follow the API's pagination cursor (``get_data`` returns one page).
 """
 
 from __future__ import annotations
@@ -29,6 +31,15 @@ HISTORICAL_SCENARIOS: list[dict] = [
     {"name": "houthi_red_sea_2024", "country": "Yemen", "year": 2024, "region": "bab_el_mandeb"},
     {"name": "somali_piracy_2011", "country": "Somalia", "year": 2011, "region": "bab_el_mandeb"},
 ]
+
+
+class ACLEDFetchError(RuntimeError):
+    """An ACLED request failed or came back inconsistent.
+
+    Raised instead of returning what was fetched so far: a partial country-year
+    is indistinguishable from a complete one. Messages never contain the
+    credentials (:meth:`ACLEDExtractor._mask`).
+    """
 
 
 class ACLEDExtractor(BaseExtractor):
@@ -76,6 +87,104 @@ class ACLEDExtractor(BaseExtractor):
         except Exception as exc:
             logger.error("ACLED fetch failed for %s/%s: %s", country, year, exc)
             return []
+
+    def _mask(self, text: str) -> str:
+        """``text`` with the username and password replaced by ``***``."""
+        for secret in (self.username, self.password):
+            if secret:
+                text = text.replace(secret, "***")
+        return text
+
+    def fetch_all_events(
+        self, country: str, year: int, page_size: int = 5000, max_pages: int = 200,
+    ) -> tuple[list[dict], int]:
+        """Every event for one country-year, following the API's cursor.
+
+        ``AcledClient.get_data`` returns a single page and drops the response's
+        ``next_cursor``, so a country-year with more than ``page_size`` events
+        was silently cut at the first page (Yemen 2023: 5,000 of 7,627). The
+        API paginates with that cursor, passed back as ``cursor``; ``page`` is
+        rejected with HTTP 400 and ``offset`` is ignored, and ``count`` /
+        ``total_count`` come back null. So the last page is the one without a
+        ``next_cursor``. This calls the client's own transport
+        (``_get`` / ``_parse_event`` / ``endpoint`` of its data client), as
+        ``get_data`` does, and names the problem if a future ``acled`` release
+        no longer provides them.
+
+        Args:
+            page_size: Events per request (the API's limit parameter).
+            max_pages: Refuse to follow more pages than this.
+
+        Returns:
+            ``(events, pages)``: the parsed events, in order, and the number of
+            requests made.
+
+        Raises:
+            ACLEDFetchError: On missing credentials, any failed request, an API
+                error response, a repeated cursor, more than ``max_pages``
+                pages, or duplicate event ids across pages. Never returns a
+                partial result.
+        """
+        where = f"{country}/{year}"
+
+        def fail(message: str) -> ACLEDFetchError:
+            return ACLEDFetchError(self._mask(f"ACLED {where}: {message}"))
+
+        if not self.username or not self.password:
+            raise fail("credentials not configured (api_keys.acled_username / acled_password)")
+        try:
+            data_client = self._get_client()._acled_data_client
+            transport, parse, endpoint = (
+                data_client._get, data_client._parse_event, data_client.endpoint)
+        except AttributeError:
+            raise fail("the installed acled client does not expose the data client's "
+                       "transport (_get / _parse_event / endpoint); pagination needs it") from None
+        except Exception as exc:
+            raise fail(f"client setup failed: {type(exc).__name__}: {exc}") from None
+
+        events: list[dict] = []
+        seen: set = set()
+        seen_ids: set = set()
+        cursor = None
+        pages = 0
+        page = 1
+        try:
+            while True:
+                page = pages + 1
+                if pages >= max_pages:
+                    raise fail(f"more than {max_pages} pages; refusing to continue")
+                self._rate_limit_wait()
+                params: dict[str, Any] = {"country": country, "year": year, "limit": page_size}
+                if cursor is not None:
+                    params["cursor"] = cursor
+                response = transport(endpoint, params=params)
+                pages += 1
+                if not response.get("success"):
+                    errors = response.get("error") or [{}]
+                    raise fail(f"API error on page {page}: "
+                               f"{(errors[0] or {}).get('message', 'unknown')}")
+                batch = [parse(row) for row in (response.get("data") or [])]
+                for event in batch:
+                    # Checked per page, so overlapping pages stop at the first repeat.
+                    event_id = event.get("event_id_cnty")
+                    if event_id:
+                        if event_id in seen_ids:
+                            raise fail(f"duplicate event id {event_id} on page {page} "
+                                       "(pages overlap)")
+                        seen_ids.add(event_id)
+                events.extend(batch)
+                cursor = response.get("next_cursor")
+                if not cursor:
+                    break
+                if cursor in seen:
+                    raise fail(f"cursor {cursor} repeated on page {page}")
+                seen.add(cursor)
+        except ACLEDFetchError:
+            raise
+        except Exception as exc:
+            raise fail(f"request for page {page} failed: "
+                       f"{type(exc).__name__}: {exc}") from None
+        return events, pages
 
     @staticmethod
     def _compute_risk_profile(events: list[dict]) -> dict:

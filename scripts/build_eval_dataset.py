@@ -385,6 +385,10 @@ def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFram
         manifest["news_source"] = news_source
     if "market" in frames and frames["market"].attrs.get("market_source"):
         manifest["market_source"] = frames["market"].attrs["market_source"]
+    # ACLED events fetched in full (cursor pagination): row counts per
+    # country-year and a content hash, so a one-page cap is visible.
+    if "geopolitical" in frames and frames["geopolitical"].attrs.get("geopolitical_source"):
+        manifest["geopolitical_source"] = frames["geopolitical"].attrs["geopolitical_source"]
     return merged, manifest
 
 

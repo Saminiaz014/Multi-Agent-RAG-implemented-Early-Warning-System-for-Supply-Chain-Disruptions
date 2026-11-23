@@ -115,8 +115,8 @@ class TestGeopoliticalConnector:
         class _Stub:
             def __init__(self, _cfg) -> None: ...
 
-            def _fetch_events(self, country, year, limit=0):
-                return events
+            def fetch_all_events(self, country, year, page_size=0, max_pages=0):
+                return events, 1
 
         monkeypatch.setattr(
             "src.extractors.acled_extractor.ACLEDExtractor", _Stub

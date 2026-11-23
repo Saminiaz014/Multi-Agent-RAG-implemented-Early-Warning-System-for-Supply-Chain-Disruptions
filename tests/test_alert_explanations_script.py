@@ -26,3 +26,13 @@ def test_mean_abs_shap_uses_every_feature_of_every_alert() -> None:
 
 def test_mean_abs_shap_without_alerts_is_empty() -> None:
     assert rae.mean_abs_shap([]) == {}
+
+
+def test_alert_explanations_refuse_a_frame_with_capped_acled_events(monkeypatch) -> None:
+    import pandas as pd
+
+    frame = pd.DataFrame({"timestamp": pd.date_range("2025-01-01", periods=3), "y_true": 0})
+    stale = {"region": "x", "domains_present": {"geopolitical": ["military_activity_index"]}}
+    monkeypatch.setattr(rae.harness, "_load", lambda region: (frame, stale))
+    with pytest.raises(ValueError, match="geopolitical_source"):
+        rae.run_region("x", "real", Path("unused"))

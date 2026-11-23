@@ -14,17 +14,17 @@ All figures are measured on a held-out window: 2023-07-01 to 2025-11-21, the sam
 | Tier 1 | multi-agent | 0.747 [0.672, 0.802] | 0.517 | 0.79 |
 | Tier 2 | multi-agent | 0.638 [0.526, 0.715] | 0.477 | 0.57 |
 | B2 MA crossover | unsupervised | 0.595 [0.499, 0.715] | 0.380 | 0.20 |
-| B3 isolation forest | unsupervised | 0.554 [0.450, 0.638] | 0.426 | 0.49 |
+| B3 isolation forest | unsupervised | 0.560 [0.454, 0.645] | 0.408 | 0.49 |
 | B4 EWMA deviation | unsupervised | 0.544 [0.505, 0.594] | 0.258 | 0.19 |
 | B1 rolling z | unsupervised | 0.525 [0.494, 0.557] | 0.133 | 0.10 |
+| Tier 5 | multi-agent | 0.513 [0.399, 0.594] | 0.450 | 0.71 |
 | B5 AR residual | unsupervised | 0.509 [0.491, 0.521] | 0.066 | 0.07 |
-| M2 never alert | control | 0.500 [0.500, 0.500] | 0.000 | 0.00 |
 | M1 always alert | control | 0.500 [0.500, 0.500] | 0.443 | 1.00 |
+| M2 never alert | control | 0.500 [0.500, 0.500] | 0.000 | 0.00 |
 | M0 random | control | 0.494 [0.444, 0.541] | 0.192 | 0.10 |
-| Tier 5 | multi-agent | 0.491 [0.372, 0.580] | 0.449 | 0.68 |
+| Tier 4 (= Tier 3) | multi-agent | 0.492 [0.384, 0.567] | 0.422 | 0.70 |
+| Tier 3 | multi-agent | 0.492 [0.384, 0.567] | 0.422 | 0.70 |
 | M8 matrix profile | unsupervised | 0.489 [0.426, 0.564] | 0.111 | 0.07 |
-| Tier 3 | multi-agent | 0.469 [0.353, 0.556] | 0.416 | 0.65 |
-| Tier 4 (= Tier 3) | multi-agent | 0.469 [0.353, 0.556] | 0.416 | 0.65 |
 | B6 CUSUM | unsupervised | 0.308 [0.113, 0.500] | 0.480 | 0.74 |
 | *ORACLE label t-1 (ceiling, not a method)* | oracle | 0.997 [0.991, 1.000] | 0.996 | 0.28 |
 
@@ -38,10 +38,10 @@ Best baseline M3 persistence (0.966 [0.920, 0.996]) vs best tier Tier 1 (0.747 [
 
 | method | kind | AUC [95% CI] | F1 | alert rate |
 |---|---|---|---|---|
-| B7 logistic regression | supervised | 0.939 [0.877, 0.981] | 0.072 | 0.01 |
+| B7 logistic regression | supervised | 0.939 [0.877, 0.981] | 0.044 | 0.00 |
 | B6 CUSUM | unsupervised | 0.935 [0.865, 0.982] | 0.000 | 0.00 |
 | M3 persistence | unsupervised | 0.848 [0.785, 0.902] | 0.465 | 0.20 |
-| B8 random forest | supervised | 0.648 [0.534, 0.780] | 0.260 | 0.13 |
+| B8 random forest | supervised | 0.644 [0.540, 0.756] | 0.285 | 0.14 |
 | M8 matrix profile | unsupervised | 0.600 [0.509, 0.696] | 0.223 | 0.11 |
 | Tier 1 | multi-agent | 0.574 [0.516, 0.633] | 0.028 | 0.17 |
 | M0 random | control | 0.517 [0.462, 0.571] | 0.153 | 0.10 |
@@ -51,11 +51,11 @@ Best baseline M3 persistence (0.966 [0.920, 0.996]) vs best tier Tier 1 (0.747 [
 | B5 AR residual | unsupervised | 0.492 [0.471, 0.513] | 0.077 | 0.12 |
 | B4 EWMA deviation | unsupervised | 0.490 [0.450, 0.533] | 0.090 | 0.13 |
 | B1 rolling z | unsupervised | 0.478 [0.435, 0.518] | 0.104 | 0.11 |
+| Tier 4 | multi-agent | 0.466 [0.350, 0.550] | 0.129 | 0.24 |
+| Tier 3 | multi-agent | 0.465 [0.350, 0.549] | 0.129 | 0.24 |
 | B2 MA crossover | unsupervised | 0.465 [0.374, 0.558] | 0.008 | 0.15 |
-| B3 isolation forest | unsupervised | 0.462 [0.333, 0.575] | 0.112 | 0.18 |
-| Tier 4 | multi-agent | 0.440 [0.304, 0.555] | 0.161 | 0.24 |
-| Tier 3 | multi-agent | 0.439 [0.303, 0.554] | 0.160 | 0.24 |
-| Tier 5 | multi-agent | 0.431 [0.298, 0.544] | 0.143 | 0.22 |
+| Tier 5 | multi-agent | 0.456 [0.344, 0.537] | 0.137 | 0.24 |
+| B3 isolation forest | unsupervised | 0.455 [0.359, 0.540] | 0.119 | 0.18 |
 | *ORACLE label t-1 (ceiling, not a method)* | oracle | 0.987 [0.969, 0.997] | 0.977 | 0.16 |
 
 Ceiling: ORACLE label t-1 (0.987 [0.969, 0.997]) reads yesterday's true label, which no detector has at inference. It bounds what one-day-lagged knowledge of the answer would score.
@@ -97,8 +97,8 @@ Best baseline M3 persistence (0.976 [0.941, 0.995]) vs best tier Tier 1 (0.921 [
 
 ### Does adding agents improve AUC?
 
-- **bab_el_mandeb**: 0.747 -> 0.638 -> 0.469 -> 0.469 (=) -> 0.491  (best: Tier 1)
-- **hormuz**: 0.574 -> 0.497 -> 0.439 -> 0.440 -> 0.431  (best: Tier 1)
+- **bab_el_mandeb**: 0.747 -> 0.638 -> 0.492 -> 0.492 (=) -> 0.513  (best: Tier 1)
+- **hormuz**: 0.574 -> 0.497 -> 0.465 -> 0.466 -> 0.456  (best: Tier 1)
 - **panama**: 0.921 -> 0.895 -> 0.895 (=) -> 0.895 -> 0.900  (best: Tier 1)
 
 (=): the tier repeats the one before it; the agent it would add is disabled in that region.
@@ -112,8 +112,8 @@ Bold: the paired interval excludes 0.
 
 | region | Tier 2 | Tier 3 | Tier 4 | Tier 5 |
 |---|---|---|---|---|
-| bab_el_mandeb | **-0.109 [-0.190, -0.044]** | **-0.278 [-0.394, -0.178]** | **-0.278 [-0.394, -0.178]** (= Tier 3) | **-0.256 [-0.377, -0.156]** |
-| hormuz | **-0.078 [-0.161, -0.007]** | **-0.135 [-0.267, -0.041]** | **-0.134 [-0.265, -0.039]** | **-0.143 [-0.271, -0.049]** |
+| bab_el_mandeb | **-0.109 [-0.190, -0.044]** | **-0.255 [-0.349, -0.175]** | **-0.255 [-0.349, -0.175]** (= Tier 3) | **-0.234 [-0.333, -0.152]** |
+| hormuz | **-0.078 [-0.161, -0.007]** | **-0.109 [-0.207, -0.034]** | **-0.108 [-0.206, -0.033]** | **-0.118 [-0.217, -0.045]** |
 | panama | **-0.027 [-0.053, -0.000]** | **-0.027 [-0.053, -0.000]** (= Tier 2) | **-0.027 [-0.053, -0.000]** | -0.021 [-0.047, +0.005] |
 
 ### Split-date sensitivity
@@ -122,12 +122,12 @@ Tier 1 and Tier 4 re-scored with the split moved; the end date, the masked days 
 
 | region | split | scored test days (positives) | Tier 1 AUC | Tier 4 AUC | Tier 4 - Tier 1 (paired) |
 |---|---|---|---|---|---|
-| bab_el_mandeb | 2023-01-01 | 1037 (244) | 0.732 [0.669, 0.782] | 0.463 [0.357, 0.552] (3 agents) | **-0.269 [-0.384, -0.162]** |
-| bab_el_mandeb | 2023-07-01 | 857 (244) | 0.747 [0.672, 0.802] | 0.469 [0.353, 0.556] (3 agents) | **-0.278 [-0.394, -0.178]** |
-| bab_el_mandeb | 2024-01-01 | 673 (244) | 0.682 [0.632, 0.736] | 0.412 [0.280, 0.511] (3 agents) | **-0.270 [-0.421, -0.170]** |
-| hormuz | 2023-01-01 | 1037 (133) | 0.547 [0.475, 0.599] | 0.440 [0.307, 0.550] | **-0.106 [-0.225, -0.001]** |
-| hormuz | 2023-07-01 | 857 (133) | 0.574 [0.516, 0.633] | 0.440 [0.304, 0.555] | **-0.134 [-0.265, -0.039]** |
-| hormuz | 2024-01-01 | 673 (116) | 0.638 [0.583, 0.683] | 0.485 [0.323, 0.621] | **-0.153 [-0.308, -0.027]** |
+| bab_el_mandeb | 2023-01-01 | 1037 (244) | 0.732 [0.669, 0.782] | 0.505 [0.404, 0.584] (3 agents) | **-0.227 [-0.329, -0.135]** |
+| bab_el_mandeb | 2023-07-01 | 857 (244) | 0.747 [0.672, 0.802] | 0.492 [0.384, 0.567] (3 agents) | **-0.255 [-0.349, -0.175]** |
+| bab_el_mandeb | 2024-01-01 | 673 (244) | 0.682 [0.632, 0.736] | 0.412 [0.308, 0.483] (3 agents) | **-0.271 [-0.386, -0.196]** |
+| hormuz | 2023-01-01 | 1037 (133) | 0.547 [0.475, 0.599] | 0.479 [0.372, 0.562] | -0.068 [-0.153, +0.005] |
+| hormuz | 2023-07-01 | 857 (133) | 0.574 [0.516, 0.633] | 0.466 [0.350, 0.550] | **-0.108 [-0.206, -0.033]** |
+| hormuz | 2024-01-01 | 673 (116) | 0.638 [0.583, 0.683] | 0.501 [0.381, 0.614] | **-0.137 [-0.241, -0.043]** |
 | malacca | 2023-01-01 | 1037 (0) | — | — | — |
 | malacca | 2023-07-01 | 857 (0) | — | — | — |
 | malacca | 2024-01-01 | 673 (0) | — | — | — |
@@ -142,7 +142,7 @@ A tier with fewer agents than its number (in brackets) is one whose region disab
 
 ### Tiers scoring below 0.5
 
-Below 0.5 but indistinguishable from chance (the interval includes 0.5): bab_el_mandeb Tier 3 (0.469 [0.353, 0.556]), bab_el_mandeb Tier 4 (= Tier 3) (0.469 [0.353, 0.556]), bab_el_mandeb Tier 5 (0.491 [0.372, 0.580]), hormuz Tier 2 (0.497 [0.384, 0.594]), hormuz Tier 3 (0.439 [0.303, 0.554]), hormuz Tier 4 (0.440 [0.304, 0.555]), hormuz Tier 5 (0.431 [0.298, 0.544]).
+Below 0.5 but indistinguishable from chance (the interval includes 0.5): bab_el_mandeb Tier 3 (0.492 [0.384, 0.567]), bab_el_mandeb Tier 4 (= Tier 3) (0.492 [0.384, 0.567]), hormuz Tier 2 (0.497 [0.384, 0.594]), hormuz Tier 3 (0.465 [0.350, 0.549]), hormuz Tier 4 (0.466 [0.350, 0.550]), hormuz Tier 5 (0.456 [0.344, 0.537]).
 
 
 ### Where simple baselines score above the ensemble

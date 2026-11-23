@@ -8,30 +8,26 @@
       "geopolitical",
       "news_sentiment"
     ],
-    "alerts": 602,
-    "complete": 602,
+    "alerts": 626,
+    "complete": 626,
     "coverage": 1.0,
     "surrogate_fit": {
-      "r2_test": -0.9563708069580812,
-      "spearman_test": 0.4213022054522539,
-      "r2_train": 0.9536514753823299
+      "r2_test": -1.3762067756404197,
+      "spearman_test": 0.31409961685480636,
+      "r2_train": 0.9543650349341763
     },
     "mean_abs_shap": {
-      "diplomatic_incident_score": 0.0712641564695292,
-      "avg_delay_hours": 0.039287152576447944,
-      "congestion_index": 0.027125921218287795,
-      "military_activity_index": 0.027016856274381728,
-      "vessel_count": 0.019902017855357695,
-      "regime_stability_index": 0.016055006237847246,
-      "sentiment_score": 0.0048952865157629675,
-      "freight_rate_index": 0.004471549530549223,
-      "article_volume": 0.004180613760524262,
-      "brent_crude_usd": 0.002532139006578174,
-      "trade_volume_index": 0.0020151030774050557,
-      "earthquake_severity": 0.00015340547039674552,
-      "severe_weather_index": 8.279053064875647e-06,
-      "cyclone_severity": 4.711757498817464e-06,
-      "tsunami_risk": 0.0
+      "diplomatic_incident_score": 0.054786664390232345,
+      "congestion_index": 0.03520524355488403,
+      "avg_delay_hours": 0.033087557236533324,
+      "military_activity_index": 0.021125598459373566,
+      "vessel_count": 0.01831618373540285,
+      "regime_stability_index": 0.015398247289493823,
+      "sentiment_score": 0.00705961379697745,
+      "freight_rate_index": 0.004987351103586666,
+      "article_volume": 0.0033859316773716705,
+      "trade_volume_index": 0.0024885437697082123,
+      "brent_crude_usd": 0.0023271201540385803
     }
   },
   {
@@ -44,30 +40,30 @@
       "natural_disaster",
       "news_sentiment"
     ],
-    "alerts": 201,
-    "complete": 201,
+    "alerts": 214,
+    "complete": 214,
     "coverage": 1.0,
     "surrogate_fit": {
-      "r2_test": 0.5284711012999596,
-      "spearman_test": 0.7536654739887241,
-      "r2_train": 0.9595158539848974
+      "r2_test": 0.4956344709523913,
+      "spearman_test": 0.7201042869233836,
+      "r2_train": 0.9630651234806523
     },
     "mean_abs_shap": {
-      "diplomatic_incident_score": 0.0687801236258392,
-      "vessel_count": 0.047281604000568675,
-      "avg_delay_hours": 0.03819109086781151,
-      "military_activity_index": 0.03329608857250858,
-      "congestion_index": 0.029440171139441612,
-      "regime_stability_index": 0.0117688306678889,
-      "article_volume": 0.003361219174493182,
-      "sentiment_score": 0.0027327337664976915,
-      "trade_volume_index": 0.0022772399721188706,
-      "brent_crude_usd": 0.0022031206218183644,
-      "freight_rate_index": 0.0012969746545103264,
-      "earthquake_severity": 0.0003198010314719033,
-      "cyclone_severity": 7.431675174574204e-07,
-      "tsunami_risk": 0.0,
-      "severe_weather_index": 0.0
+      "diplomatic_incident_score": 0.06204577090678028,
+      "vessel_count": 0.04548616665043911,
+      "military_activity_index": 0.04200116965138874,
+      "avg_delay_hours": 0.03621887860585035,
+      "congestion_index": 0.03606561104394876,
+      "regime_stability_index": 0.01269001652512689,
+      "article_volume": 0.0030635844014559126,
+      "freight_rate_index": 0.002470785538676606,
+      "brent_crude_usd": 0.0023856562446396084,
+      "sentiment_score": 0.002356860367021928,
+      "trade_volume_index": 0.0022859353564052996,
+      "earthquake_severity": 0.0003136854459931896,
+      "cyclone_severity": 1.919522313347553e-06,
+      "severe_weather_index": 0.0,
+      "tsunami_risk": 0.0
     }
   },
   {
@@ -83,24 +79,21 @@
     "complete": 311,
     "coverage": 1.0,
     "surrogate_fit": {
-      "r2_test": 0.48798899234459936,
-      "spearman_test": 0.8421930347011064,
-      "r2_train": 0.9758361779311624
+      "r2_test": 0.5570482654576914,
+      "spearman_test": 0.8771732010192247,
+      "r2_train": 0.976823232039453
     },
     "mean_abs_shap": {
-      "vessel_count": 0.053281394029162134,
-      "diplomatic_incident_score": 0.0520197287338446,
-      "military_activity_index": 0.04553060733764985,
-      "avg_delay_hours": 0.028685925930554357,
-      "congestion_index": 0.016282493649913243,
-      "freight_rate_index": 0.015591590593628805,
-      "regime_stability_index": 0.014455814741316565,
-      "brent_crude_usd": 0.011034200283710662,
-      "sentiment_score": 0.00339599777627221,
-      "article_volume": 0.002051969023185958,
-      "trade_volume_index": 0.0013657243375424335,
-      "earthquake_severity": 0.00033422246635623993,
-      "severe_weather_index": 4.562274895124911e-05,
+      "vessel_count": 0.07770480247457595,
+      "diplomatic_incident_score": 0.051266059720667494,
+      "military_activity_index": 0.045131146747271166,
+      "avg_delay_hours": 0.02681740166089915,
+      "congestion_index": 0.019208269984906396,
+      "regime_stability_index": 0.016490306035291204,
+      "sentiment_score": 0.0037514674664871437,
+      "article_volume": 0.0029965450270283273,
+      "earthquake_severity": 0.0004390046712218636,
+      "severe_weather_index": 5.8824948098998125e-05,
       "cyclone_severity": 0.0,
       "tsunami_risk": 0.0
     }
@@ -118,24 +111,21 @@
     "complete": 193,
     "coverage": 1.0,
     "surrogate_fit": {
-      "r2_test": 0.6365174708391865,
-      "spearman_test": 0.7925820789999577,
-      "r2_train": 0.9392377677301831
+      "r2_test": 0.6370620194789749,
+      "spearman_test": 0.7910353662670219,
+      "r2_train": 0.9373189534850817
     },
     "mean_abs_shap": {
-      "vessel_count": 0.10659317512366262,
-      "avg_delay_hours": 0.051314800996492875,
-      "congestion_index": 0.025925595628361563,
-      "article_volume": 0.009770655222522665,
-      "sentiment_score": 0.00882932904405483,
-      "freight_rate_index": 0.006319505684833589,
-      "brent_crude_usd": 0.005442376159852222,
-      "trade_volume_index": 0.0036241306778860864,
-      "regime_stability_index": 0.0008217357538576037,
-      "severe_weather_index": 4.895580636988505e-05,
-      "earthquake_severity": 7.656754906952129e-07,
-      "military_activity_index": 0.0,
-      "diplomatic_incident_score": 0.0,
+      "vessel_count": 0.10728013770220593,
+      "avg_delay_hours": 0.05041436712268989,
+      "congestion_index": 0.026395525484397275,
+      "article_volume": 0.009729923871298703,
+      "sentiment_score": 0.008584914578462352,
+      "freight_rate_index": 0.006716013630622847,
+      "brent_crude_usd": 0.005603003434007536,
+      "trade_volume_index": 0.0037312555827073873,
+      "severe_weather_index": 4.756151195153504e-05,
+      "earthquake_severity": 9.512463517111587e-07,
       "cyclone_severity": 0.0,
       "tsunami_risk": 0.0
     }

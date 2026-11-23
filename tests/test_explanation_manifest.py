@@ -75,3 +75,35 @@ def test_outputs_gitignore_ignores_artefacts_but_not_coverage() -> None:
     rules = (_ROOT / "outputs" / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "*.joblib" in rules
     assert "explanations/*" in rules and "!explanations/coverage.json" in rules
+
+
+def _frame_manifest(path: Path, region: str, counts: list[int], page_size: int = 5000) -> None:
+    rows = [{"country": "Yemen", "year": 2023 + i, "events": n, "pages": max(1, -(-n // page_size))}
+            for i, n in enumerate(counts)]
+    source = {"page_size": page_size, "country_years": rows, "events_total": sum(counts),
+              "events_sha256": hashlib.sha256(region.encode()).hexdigest(),
+              "round_cap_country_years": []}
+    path.joinpath(f"{region}.manifest.json").write_text(
+        json.dumps({"region": region, "domains_present": {"geopolitical": ["x"]},
+                    "geopolitical_source": source}), encoding="utf-8")
+    path.joinpath("noacled.manifest.json").write_text(
+        json.dumps({"region": "noacled", "domains_present": {"shipping": ["x"]}}), encoding="utf-8")
+
+
+def test_the_manifest_records_each_regions_acled_row_counts_and_hash(tmp_path) -> None:
+    _frame_manifest(tmp_path, "bab", [7627, 40])
+    got = em.acled_provenance(tmp_path)
+    assert list(got) == ["bab"]                                    # regions without ACLED left out
+    assert got["bab"]["events_total"] == 7667
+    assert got["bab"]["events_sha256"] == hashlib.sha256(b"bab").hexdigest()
+    assert got["bab"]["country_years"][0] == {"country": "Yemen", "year": 2023, "events": 7627,
+                                              "pages": 2}
+    assert got["bab"]["round_cap_country_years"] == []
+    assert got["bab"]["frame_manifest_sha256"] == em.file_entry(
+        tmp_path / "bab.manifest.json", root=tmp_path)["sha256"]
+
+
+def test_a_manifest_without_the_source_block_is_named_not_skipped(tmp_path) -> None:
+    (tmp_path / "old.manifest.json").write_text(
+        json.dumps({"region": "old", "domains_present": {"geopolitical": ["x"]}}), encoding="utf-8")
+    assert em.acled_provenance(tmp_path)["old"] == {"geopolitical_source": None}
