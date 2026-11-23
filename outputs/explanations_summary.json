@@ -1,0 +1,276 @@
+{
+  "split": "temporal per region: settings.yaml evaluation.split_date / end_date (same as the method comparison); no shuffling",
+  "target": "RiskEngine.compute_risk risk_score (weighted mean over active agents, agreement-amplified)",
+  "top_feature_definition": "exact mean |SHAP| over every feature of every alert (coverage.json mean_abs_shap)",
+  "regions": {
+    "hormuz": {
+      "r2_test": 0.5284711012999596,
+      "r2_train": 0.9595158539848974,
+      "spearman_test": 0.7536654739887241,
+      "test_dates": [
+        "2023-07-01",
+        "2025-11-21"
+      ],
+      "agents": [
+        "shipping",
+        "market",
+        "geopolitical",
+        "natural_disaster",
+        "news_sentiment"
+      ],
+      "alerts": 201,
+      "explanations_complete": 201,
+      "complete_share": 1.0,
+      "top_shap_features": [
+        {
+          "feature": "diplomatic_incident_score",
+          "mean_abs_shap": 0.0687801236258392
+        },
+        {
+          "feature": "vessel_count",
+          "mean_abs_shap": 0.047281604000568675
+        },
+        {
+          "feature": "avg_delay_hours",
+          "mean_abs_shap": 0.03819109086781151
+        },
+        {
+          "feature": "military_activity_index",
+          "mean_abs_shap": 0.03329608857250858
+        },
+        {
+          "feature": "congestion_index",
+          "mean_abs_shap": 0.029440171139441612
+        }
+      ],
+      "top5_from_alert_files": [
+        {
+          "feature": "diplomatic_incident_score",
+          "mean_abs_shap": 0.06848826368159207,
+          "top1_share": 0.472636815920398
+        },
+        {
+          "feature": "vessel_count",
+          "mean_abs_shap": 0.045765388059701505,
+          "top1_share": 0.25870646766169153
+        },
+        {
+          "feature": "avg_delay_hours",
+          "mean_abs_shap": 0.03791523383084578,
+          "top1_share": 0.14925373134328357
+        },
+        {
+          "feature": "military_activity_index",
+          "mean_abs_shap": 0.032848388059701486,
+          "top1_share": 0.11442786069651742
+        },
+        {
+          "feature": "congestion_index",
+          "mean_abs_shap": 0.027653492537313425,
+          "top1_share": 0.0
+        }
+      ]
+    },
+    "bab_el_mandeb": {
+      "r2_test": -0.9563708069580812,
+      "r2_train": 0.9536514753823299,
+      "spearman_test": 0.4213022054522539,
+      "test_dates": [
+        "2023-07-01",
+        "2025-11-21"
+      ],
+      "agents": [
+        "shipping",
+        "market",
+        "geopolitical",
+        "news_sentiment"
+      ],
+      "alerts": 602,
+      "explanations_complete": 602,
+      "complete_share": 1.0,
+      "top_shap_features": [
+        {
+          "feature": "diplomatic_incident_score",
+          "mean_abs_shap": 0.0712641564695292
+        },
+        {
+          "feature": "avg_delay_hours",
+          "mean_abs_shap": 0.039287152576447944
+        },
+        {
+          "feature": "congestion_index",
+          "mean_abs_shap": 0.027125921218287795
+        },
+        {
+          "feature": "military_activity_index",
+          "mean_abs_shap": 0.027016856274381728
+        },
+        {
+          "feature": "vessel_count",
+          "mean_abs_shap": 0.019902017855357695
+        }
+      ],
+      "top5_from_alert_files": [
+        {
+          "feature": "diplomatic_incident_score",
+          "mean_abs_shap": 0.0709623936877076,
+          "top1_share": 0.5913621262458472
+        },
+        {
+          "feature": "avg_delay_hours",
+          "mean_abs_shap": 0.03870512790697676,
+          "top1_share": 0.21262458471760798
+        },
+        {
+          "feature": "congestion_index",
+          "mean_abs_shap": 0.02636433222591363,
+          "top1_share": 0.0049833887043189366
+        },
+        {
+          "feature": "military_activity_index",
+          "mean_abs_shap": 0.026057890365448512,
+          "top1_share": 0.07475083056478406
+        },
+        {
+          "feature": "vessel_count",
+          "mean_abs_shap": 0.016766926910298997,
+          "top1_share": 0.0664451827242525
+        }
+      ]
+    },
+    "panama": {
+      "r2_test": 0.6365174708391865,
+      "r2_train": 0.9392377677301831,
+      "spearman_test": 0.7925820789999577,
+      "test_dates": [
+        "2023-07-01",
+        "2025-11-20"
+      ],
+      "agents": [
+        "shipping",
+        "market",
+        "natural_disaster",
+        "news_sentiment"
+      ],
+      "alerts": 193,
+      "explanations_complete": 193,
+      "complete_share": 1.0,
+      "top_shap_features": [
+        {
+          "feature": "vessel_count",
+          "mean_abs_shap": 0.10659317512366262
+        },
+        {
+          "feature": "avg_delay_hours",
+          "mean_abs_shap": 0.051314800996492875
+        },
+        {
+          "feature": "congestion_index",
+          "mean_abs_shap": 0.025925595628361563
+        },
+        {
+          "feature": "article_volume",
+          "mean_abs_shap": 0.009770655222522665
+        },
+        {
+          "feature": "sentiment_score",
+          "mean_abs_shap": 0.00882932904405483
+        }
+      ],
+      "top5_from_alert_files": [
+        {
+          "feature": "vessel_count",
+          "mean_abs_shap": 0.106593170984456,
+          "top1_share": 0.6269430051813472
+        },
+        {
+          "feature": "avg_delay_hours",
+          "mean_abs_shap": 0.050887145077720214,
+          "top1_share": 0.36787564766839376
+        },
+        {
+          "feature": "congestion_index",
+          "mean_abs_shap": 0.025174145077720218,
+          "top1_share": 0.0
+        },
+        {
+          "feature": "article_volume",
+          "mean_abs_shap": 0.008033932642487047,
+          "top1_share": 0.0
+        },
+        {
+          "feature": "sentiment_score",
+          "mean_abs_shap": 0.006689772020725384,
+          "top1_share": 0.0051813471502590676
+        }
+      ]
+    },
+    "malacca": {
+      "r2_test": 0.48798899234459936,
+      "r2_train": 0.9758361779311624,
+      "spearman_test": 0.8421930347011064,
+      "test_dates": [
+        "2023-07-01",
+        "2025-11-21"
+      ],
+      "agents": [
+        "shipping",
+        "geopolitical",
+        "natural_disaster",
+        "news_sentiment"
+      ],
+      "alerts": 311,
+      "explanations_complete": 311,
+      "complete_share": 1.0,
+      "top_shap_features": [
+        {
+          "feature": "vessel_count",
+          "mean_abs_shap": 0.053281394029162134
+        },
+        {
+          "feature": "diplomatic_incident_score",
+          "mean_abs_shap": 0.0520197287338446
+        },
+        {
+          "feature": "military_activity_index",
+          "mean_abs_shap": 0.04553060733764985
+        },
+        {
+          "feature": "avg_delay_hours",
+          "mean_abs_shap": 0.028685925930554357
+        },
+        {
+          "feature": "congestion_index",
+          "mean_abs_shap": 0.016282493649913243
+        }
+      ],
+      "top5_from_alert_files": [
+        {
+          "feature": "vessel_count",
+          "mean_abs_shap": 0.05189683279742768,
+          "top1_share": 0.3215434083601286
+        },
+        {
+          "feature": "diplomatic_incident_score",
+          "mean_abs_shap": 0.05148378778135046,
+          "top1_share": 0.34726688102893893
+        },
+        {
+          "feature": "military_activity_index",
+          "mean_abs_shap": 0.04355526688102892,
+          "top1_share": 0.2347266881028939
+        },
+        {
+          "feature": "avg_delay_hours",
+          "mean_abs_shap": 0.026633974276527337,
+          "top1_share": 0.08038585209003216
+        },
+        {
+          "feature": "freight_rate_index",
+          "mean_abs_shap": 0.011970675241157561,
+          "top1_share": 0.0
+        }
+      ]
+    }
+  }
+}

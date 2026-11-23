@@ -1,0 +1,7 @@
+# Large or per-item generated artefacts. Not committed: their sizes and sha256
+# are in outputs/MANIFEST.json (scripts/explanation_manifest.py). The metrics
+# and summaries next to them are committed so the thesis values are traceable.
+*.joblib
+explanations/*
+!explanations/coverage.json
+explanations_synthetic/

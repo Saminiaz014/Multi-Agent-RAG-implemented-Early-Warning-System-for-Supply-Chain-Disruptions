@@ -35,3 +35,34 @@ def test_missing_sources_are_nan_not_zero() -> None:
     for name in missing:
         assert features[name].isna().all(), name
         assert not (features[name] == 0).any(), name
+
+
+def test_prepare_region_uses_only_the_evaluated_days(monkeypatch) -> None:
+    """A frame running past evaluation.end_date: features must match the target.
+
+    The fixed split keeps test days up to end_date; three cached frames run a
+    day past it. Features built from the whole frame were one row longer than
+    the target, and the surrogate fit crashed (875 vs 876).
+    """
+    import importlib.util
+    from pathlib import Path
+
+    from src.evaluation.window import eval_window
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "run_real_surrogate", root / "scripts" / "run_real_surrogate.py")
+    rrs = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rrs)
+
+    end = eval_window()["end_date"]
+    frame = _frame(n=1500, start="2021-11-01").sort_values("timestamp").reset_index(drop=True)
+    frame["y_true"] = 0
+    assert frame["timestamp"].max() > end                      # runs past end_date
+    monkeypatch.setattr(rrs, "load_region_frame", lambda region: (frame, "test"))
+    monkeypatch.setattr(rrs, "agent_scores", lambda config, train, test: {
+        "shipping": np.linspace(0, 1, len(train) + len(test))})
+    d = rrs.prepare_region("hormuz")
+    assert len(d["features"]) == len(d["y"]) == len(d["timestamps"])
+    assert d["test_dates"][1] == str(end.date())
+    assert d["timestamps"].max() == end

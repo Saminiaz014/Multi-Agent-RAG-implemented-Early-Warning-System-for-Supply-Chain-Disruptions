@@ -1,0 +1,268 @@
+{
+  "target": "RiskEngine.compute_risk risk_score (weighted mean over active agents, agreement-amplified)",
+  "model": "RandomForestRegressor(n_estimators=100, random_state=42)",
+  "split": "temporal per region: settings.yaml evaluation.split_date / end_date (same as the method comparison); no shuffling",
+  "missing_feature_policy": "per-region: features the region does not supply are dropped; pooled: features present in at least one region are kept and left NaN where absent (RandomForest native NaN handling); features absent from every region are dropped. No zero-filling, no scaler, no imputer.",
+  "flagged_definition": "test days with RiskEngine.classify_risk >= medium (risk_score >= risk_medium)",
+  "fidelity_mapping": "FEATURE_AGENT_MAP (thesis Table 12): top-1 / any of top-3 |SHAP| features' agent == agent with the largest pre-amplification contribution",
+  "results": {
+    "hormuz": {
+      "metrics": {
+        "n_train": 1642,
+        "n_test": 875,
+        "r2_train": 0.9595158539848974,
+        "r2_test": 0.5284711012999596,
+        "mae_test": 0.06797127658570765,
+        "spearman_test": 0.7536654739887241,
+        "share_test_medium_or_above": 0.28685714285714287,
+        "n_test_medium_or_above": 251,
+        "mae_test_medium_or_above": 0.11029734290669185,
+        "bias_test_medium_or_above": -0.08823439801827408,
+        "top1_agent_agreement": 0.7250996015936255,
+        "top3_agent_agreement": 0.9561752988047809
+      },
+      "features_used": [
+        "vessel_count",
+        "avg_delay_hours",
+        "congestion_index",
+        "brent_crude_usd",
+        "trade_volume_index",
+        "freight_rate_index",
+        "military_activity_index",
+        "diplomatic_incident_score",
+        "regime_stability_index",
+        "earthquake_severity",
+        "tsunami_risk",
+        "cyclone_severity",
+        "severe_weather_index",
+        "sentiment_score",
+        "article_volume"
+      ],
+      "features_dropped": [
+        "sanctions_severity",
+        "source_consensus"
+      ],
+      "agents_in_target": [
+        "shipping",
+        "market",
+        "geopolitical",
+        "natural_disaster",
+        "news_sentiment"
+      ],
+      "source": "data\\eval\\hormuz.csv",
+      "train_dates": [
+        "2019-01-01",
+        "2023-06-30"
+      ],
+      "test_dates": [
+        "2023-07-01",
+        "2025-11-21"
+      ],
+      "medium_threshold": 0.51
+    },
+    "bab_el_mandeb": {
+      "metrics": {
+        "n_train": 1642,
+        "n_test": 875,
+        "r2_train": 0.9536514753823299,
+        "r2_test": -0.9563708069580812,
+        "mae_test": 0.16196305748377804,
+        "spearman_test": 0.4213022054522539,
+        "share_test_medium_or_above": 0.9142857142857143,
+        "n_test_medium_or_above": 800,
+        "mae_test_medium_or_above": 0.1702004942523613,
+        "bias_test_medium_or_above": -0.157080316092896,
+        "top1_agent_agreement": 0.3675,
+        "top3_agent_agreement": 0.9
+      },
+      "features_used": [
+        "vessel_count",
+        "avg_delay_hours",
+        "congestion_index",
+        "brent_crude_usd",
+        "trade_volume_index",
+        "freight_rate_index",
+        "military_activity_index",
+        "diplomatic_incident_score",
+        "regime_stability_index",
+        "earthquake_severity",
+        "tsunami_risk",
+        "cyclone_severity",
+        "severe_weather_index",
+        "sentiment_score",
+        "article_volume"
+      ],
+      "features_dropped": [
+        "sanctions_severity",
+        "source_consensus"
+      ],
+      "agents_in_target": [
+        "shipping",
+        "market",
+        "geopolitical",
+        "news_sentiment"
+      ],
+      "source": "data\\eval\\bab_el_mandeb.csv",
+      "train_dates": [
+        "2019-01-01",
+        "2023-06-30"
+      ],
+      "test_dates": [
+        "2023-07-01",
+        "2025-11-21"
+      ],
+      "medium_threshold": 0.51
+    },
+    "panama": {
+      "metrics": {
+        "n_train": 1642,
+        "n_test": 874,
+        "r2_train": 0.9392377677301831,
+        "r2_test": 0.6365174708391865,
+        "mae_test": 0.0692032497019632,
+        "spearman_test": 0.7925820789999577,
+        "share_test_medium_or_above": 0.2620137299771167,
+        "n_test_medium_or_above": 229,
+        "mae_test_medium_or_above": 0.08414849406276811,
+        "bias_test_medium_or_above": -0.06952750583946457,
+        "top1_agent_agreement": 0.982532751091703,
+        "top3_agent_agreement": 0.9868995633187773
+      },
+      "features_used": [
+        "vessel_count",
+        "avg_delay_hours",
+        "congestion_index",
+        "brent_crude_usd",
+        "trade_volume_index",
+        "freight_rate_index",
+        "military_activity_index",
+        "diplomatic_incident_score",
+        "regime_stability_index",
+        "earthquake_severity",
+        "tsunami_risk",
+        "cyclone_severity",
+        "severe_weather_index",
+        "sentiment_score",
+        "article_volume"
+      ],
+      "features_dropped": [
+        "sanctions_severity",
+        "source_consensus"
+      ],
+      "agents_in_target": [
+        "shipping",
+        "market",
+        "natural_disaster",
+        "news_sentiment"
+      ],
+      "source": "data\\eval\\panama.csv",
+      "train_dates": [
+        "2019-01-01",
+        "2023-06-30"
+      ],
+      "test_dates": [
+        "2023-07-01",
+        "2025-11-20"
+      ],
+      "medium_threshold": 0.51
+    },
+    "malacca": {
+      "metrics": {
+        "n_train": 1642,
+        "n_test": 875,
+        "r2_train": 0.9758361779311624,
+        "r2_test": 0.48798899234459936,
+        "mae_test": 0.05639865752620192,
+        "spearman_test": 0.8421930347011064,
+        "share_test_medium_or_above": 0.14057142857142857,
+        "n_test_medium_or_above": 123,
+        "mae_test_medium_or_above": 0.13822058781811625,
+        "bias_test_medium_or_above": -0.13822058781811625,
+        "top1_agent_agreement": 0.43089430894308944,
+        "top3_agent_agreement": 0.9186991869918699
+      },
+      "features_used": [
+        "vessel_count",
+        "avg_delay_hours",
+        "congestion_index",
+        "brent_crude_usd",
+        "trade_volume_index",
+        "freight_rate_index",
+        "military_activity_index",
+        "diplomatic_incident_score",
+        "regime_stability_index",
+        "earthquake_severity",
+        "tsunami_risk",
+        "cyclone_severity",
+        "severe_weather_index",
+        "sentiment_score",
+        "article_volume"
+      ],
+      "features_dropped": [
+        "sanctions_severity",
+        "source_consensus"
+      ],
+      "agents_in_target": [
+        "shipping",
+        "geopolitical",
+        "natural_disaster",
+        "news_sentiment"
+      ],
+      "source": "data\\eval\\malacca.csv",
+      "train_dates": [
+        "2019-01-01",
+        "2023-06-30"
+      ],
+      "test_dates": [
+        "2023-07-01",
+        "2025-11-21"
+      ],
+      "medium_threshold": 0.51
+    },
+    "pooled": {
+      "metrics": {
+        "n_train": 6568,
+        "n_test": 3499,
+        "r2_train": 0.9654922556967005,
+        "r2_test": 0.598193348804088,
+        "mae_test": 0.0830782142316525,
+        "spearman_test": 0.8163640099455551,
+        "share_test_medium_or_above": 0.4009717062017719,
+        "n_test_medium_or_above": 1403,
+        "mae_test_medium_or_above": 0.11958771084137644,
+        "bias_test_medium_or_above": -0.10192709172828976,
+        "top1_agent_agreement": 0.5288667141838916,
+        "top3_agent_agreement": 0.9394155381325731
+      },
+      "features_used": [
+        "vessel_count",
+        "avg_delay_hours",
+        "congestion_index",
+        "brent_crude_usd",
+        "trade_volume_index",
+        "freight_rate_index",
+        "military_activity_index",
+        "diplomatic_incident_score",
+        "regime_stability_index",
+        "earthquake_severity",
+        "tsunami_risk",
+        "cyclone_severity",
+        "severe_weather_index",
+        "sentiment_score",
+        "article_volume"
+      ],
+      "features_dropped": [
+        "sanctions_severity",
+        "source_consensus"
+      ],
+      "features_nan_in": {
+        "hormuz": [],
+        "bab_el_mandeb": [],
+        "panama": [],
+        "malacca": []
+      },
+      "train_max_date": "2023-06-30",
+      "test_min_date": "2023-07-01"
+    }
+  }
+}

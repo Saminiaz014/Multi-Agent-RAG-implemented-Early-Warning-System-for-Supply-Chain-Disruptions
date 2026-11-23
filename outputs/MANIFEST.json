@@ -1,0 +1,255 @@
+{
+  "generated_utc": "2026-11-23T16:50:31+00:00",
+  "hashing": "sha256 and git blob ids over LF-normalised text (binary files as is)",
+  "produced_by": [
+    "scripts/run_real_surrogate.py",
+    "scripts/run_alert_explanations.py",
+    "scripts/explanation_manifest.py"
+  ],
+  "code": {
+    "head_when_generated": "4de92378a45b5cfb6c21eec58be5712843e10b54",
+    "differs_from_head": [
+      "scripts/explanation_manifest.py",
+      "scripts/run_alert_explanations.py",
+      "scripts/run_real_surrogate.py"
+    ],
+    "files": [
+      {
+        "path": "config/regions/bab_el_mandeb.yaml",
+        "git_blob": "13ae84db3c31f743c39c3f3adf6abd2ecceecc0a"
+      },
+      {
+        "path": "config/regions/hormuz.yaml",
+        "git_blob": "f3a78c690dc50050300eb8c3be29a7b1a92eabc0"
+      },
+      {
+        "path": "config/regions/malacca.yaml",
+        "git_blob": "b1f97d779d4cd3bb1ed813c4b3064699b27b9bfa"
+      },
+      {
+        "path": "config/regions/panama.yaml",
+        "git_blob": "388a27f6a5f84e37954269a7f78e93a788a16bc5"
+      },
+      {
+        "path": "config/settings.yaml",
+        "git_blob": "acd0b0664e69dbf889c28331ddc2b09c63878512"
+      },
+      {
+        "path": "scripts/explanation_manifest.py",
+        "git_blob": "643c983299210221d9a57a37a71146e4d45173a0"
+      },
+      {
+        "path": "scripts/run_alert_explanations.py",
+        "git_blob": "2a1fab69a059783f6988cd555706261918bb8401"
+      },
+      {
+        "path": "scripts/run_method_comparison.py",
+        "git_blob": "80d1a1b989c8a91dbafe2a5ae82cb3d6179f8164"
+      },
+      {
+        "path": "scripts/run_real_surrogate.py",
+        "git_blob": "ab703e05109d45634d97e3d34066813d7af5c419"
+      },
+      {
+        "path": "src/agents/__init__.py",
+        "git_blob": "b4a24e4ffbbcb55432235776ebd1ea17add36ca8"
+      },
+      {
+        "path": "src/agents/base_agent.py",
+        "git_blob": "f6b22cb89bb0e309be014eae2f690a6efd29b1e2"
+      },
+      {
+        "path": "src/agents/disaster_agent.py",
+        "git_blob": "f6038f39959039bffce021f76ce5c91221cd0b6e"
+      },
+      {
+        "path": "src/agents/geopolitical_agent.py",
+        "git_blob": "2045cca6eb65cdbd0f66c6c5011e74fdf0893199"
+      },
+      {
+        "path": "src/agents/market_agent.py",
+        "git_blob": "e40ccca02532cb22b60f8031dd036e69cdd73e59"
+      },
+      {
+        "path": "src/agents/news_agent.py",
+        "git_blob": "5b05ddb6b992feb90447582d111c20a6a5b0b6c4"
+      },
+      {
+        "path": "src/agents/shipping_agent.py",
+        "git_blob": "3fd432acd08bebff5bdb63b1ed333e07db6670e4"
+      },
+      {
+        "path": "src/aggregation/__init__.py",
+        "git_blob": "463885e0daa5a684e8f6edb13be073048eb0d55e"
+      },
+      {
+        "path": "src/aggregation/risk_engine.py",
+        "git_blob": "4eddf42c86e8063971d35cc262d057b123430ac2"
+      },
+      {
+        "path": "src/core/__init__.py",
+        "git_blob": "5c5343a99d94f8db6d6532c7bd92e90b9f74eaec"
+      },
+      {
+        "path": "src/core/config_manager.py",
+        "git_blob": "bbd41e4b52c9482edb4fd8fddbdcabc424553142"
+      },
+      {
+        "path": "src/core/regions.py",
+        "git_blob": "1c55cf10f44d4fde94c4a2f17d737a4813e86d9f"
+      },
+      {
+        "path": "src/evaluation/__init__.py",
+        "git_blob": "f2f0cc6c03db1b52eb1b2a033a012c35df73394e"
+      },
+      {
+        "path": "src/evaluation/block_bootstrap.py",
+        "git_blob": "68cdbb60a3b02d76f32fcd1e13fe3c42d9c13453"
+      },
+      {
+        "path": "src/evaluation/decision_effectiveness.py",
+        "git_blob": "aa925bd454bb5f58df5a22ca0e6bddd2fcd1fbed"
+      },
+      {
+        "path": "src/evaluation/window.py",
+        "git_blob": "2ddd3b4f4f371fcad943d0644e4dd2877906c899"
+      },
+      {
+        "path": "src/explainability/__init__.py",
+        "git_blob": "18db12c6852ed1721d89c0892a23e27ad01757b0"
+      },
+      {
+        "path": "src/explainability/alert_explainer.py",
+        "git_blob": "1e052fc0eb1bc1687120555e250d37c56a33db7c"
+      },
+      {
+        "path": "src/explainability/real_surrogate.py",
+        "git_blob": "31557c2b8922ac499d3906af716d63e015d9a0e0"
+      },
+      {
+        "path": "src/explainability/shap_explainer.py",
+        "git_blob": "e961e3196b66d59163fe8d932db8e85c64355b6c"
+      }
+    ],
+    "verify": "git ls-tree <commit> -- <path> shows the same blob id in the commit that holds this code"
+  },
+  "inputs": [
+    {
+      "path": "data/eval/bab_el_mandeb.csv",
+      "bytes": 489216,
+      "sha256": "97f8b2a66d1d2cd771c85bb5e3f1a1086ac191b13cf12a2f3617bfde00277803",
+      "git_blob": "8812a1c53800e90741a0ab024e8ad9acd854c103"
+    },
+    {
+      "path": "data/eval/hormuz.csv",
+      "bytes": 535118,
+      "sha256": "505414cf5b898f3b5907de9fad158d120bb626974bcb26b32110eb052b11c6f5",
+      "git_blob": "c6b908cab0b82cc5e5853ad050e344a6b1c67993"
+    },
+    {
+      "path": "data/eval/malacca.csv",
+      "bytes": 532365,
+      "sha256": "991134a34d8b06e7b3a544ac384d45c4190a98078cac7b3a16c0d929a424d802",
+      "git_blob": "254c3e3aa2e38b38d75f0dbf3b08555983111c83"
+    },
+    {
+      "path": "data/eval/panama.csv",
+      "bytes": 466425,
+      "sha256": "0b524bdf33f05f515b2101faaad8ff38982ddd06b7dbc87ffbf432b4767983da",
+      "git_blob": "6aeaf7fda28f0fd4c38b3ab6bcd95d0893a60f47"
+    },
+    {
+      "path": "data/eval/bab_el_mandeb.manifest.json",
+      "bytes": 4226,
+      "sha256": "e628dfd95240adfd303df0f411688945d66e342f4f485aa40ba8928675344243",
+      "git_blob": "3199c78d3fa533723ee1236a9547cb46a3c41850"
+    },
+    {
+      "path": "data/eval/hormuz.manifest.json",
+      "bytes": 4219,
+      "sha256": "1f809593e785264c5f67d4dd5c60c1e12fcfa36cd880b52111011d3a7084bdf8",
+      "git_blob": "a18d20f46327d5cf0c7c8f09080946163fc96cef"
+    },
+    {
+      "path": "data/eval/malacca.manifest.json",
+      "bytes": 4215,
+      "sha256": "2de5200ed5e2aaa9aea1ae5e20b0d2e68a964156a98cd731a603950df8082882",
+      "git_blob": "cc2525d975aac86630c39aef358d3c1e84247646"
+    },
+    {
+      "path": "data/eval/panama.manifest.json",
+      "bytes": 4218,
+      "sha256": "0bd481aca4813f5ea0614c8b7037bafaa3fabc00eac2219d1d0cdcad771e2958",
+      "git_blob": "f43ebc8f2e0256c244a3104650d7f3523d6fbca8"
+    }
+  ],
+  "versions": {
+    "python": "3.13.2",
+    "numpy": "2.4.4",
+    "pandas": "3.0.2",
+    "scikit-learn": "1.8.0",
+    "shap": "0.51.0",
+    "joblib": "1.5.3"
+  },
+  "git_ignored_artefacts": {
+    "files": [
+      {
+        "path": "outputs/surrogate/real_rf.joblib",
+        "bytes": 33634669,
+        "sha256": "b07b43c614ca790cc86bdf5ac5553e087d1ce28ed08f5143143511140c693d82",
+        "git_blob": "a0b4449dd39a9a92a078266805dbb4b9d2b99e35"
+      },
+      {
+        "path": "outputs/surrogate/synthetic_rf.joblib",
+        "bytes": 3782371,
+        "sha256": "3fce7cbe3486cd21eb0abe47c1ed0b2a38700b94fc85f47cc296f5a212543bd2",
+        "git_blob": "e5120e8adf49282de1858f5fa833dfe6df6342c7"
+      }
+    ],
+    "trees": {
+      "outputs/explanations/": {
+        "files": 1311,
+        "bytes": 4478400,
+        "sha256": "01b9e66475da0863c2aa75c813af2e67916fa30ca25f92eee8069d987a6f8ae3"
+      }
+    }
+  },
+  "committed": [
+    {
+      "path": "outputs/surrogate/real_surrogate_metrics.md",
+      "bytes": 1901,
+      "sha256": "e49424e85368b2ff520001e752727c25d2cd83b3bde244beaca8aa1ff79ca523",
+      "git_blob": "6532423f13ab69314569f2201fcac1474381965a"
+    },
+    {
+      "path": "outputs/surrogate/real_surrogate_metrics.json",
+      "bytes": 8247,
+      "sha256": "8a3e4cfb37ea08e82cfcbe6d2bced730aa369f5cdbb79fadb4f9e1d6754721ff",
+      "git_blob": "ec017d9f0d516923e95d21fbca7421ec403d5f38"
+    },
+    {
+      "path": "outputs/surrogate/synthetic_surrogate_metrics.json",
+      "bytes": 5515,
+      "sha256": "4af677e883a774f26967223ed4608fefcfad30e4f2b20505d6d3a5316a9df00d",
+      "git_blob": "a6d5657edb0b691779eb03b2f4f447b4e99fe177"
+    },
+    {
+      "path": "outputs/explanations/coverage.json",
+      "bytes": 4449,
+      "sha256": "0e68ffbd4e3bbc96aaa026405dbe7cf24197b5a8f7401fd79ac04839fd988ce7",
+      "git_blob": "7216b61f4bfd0276381097b6a12359cad000d57f"
+    },
+    {
+      "path": "outputs/explanations_summary.md",
+      "bytes": 1757,
+      "sha256": "ae72058158f0e03f8ad4719bad2de99b718b97e81de4136a70b6f71c355a126b",
+      "git_blob": "09a0d7f4a61142450cae8778f480f252a9c48f39"
+    },
+    {
+      "path": "outputs/explanations_summary.json",
+      "bytes": 7650,
+      "sha256": "388047857660cf56b40f697e9997517a3c765c947b6ad1d782659d1bfedf0b64",
+      "git_blob": "eb04592e7e77f140aa9ebe7541a2c9dae6368cff"
+    }
+  ]
+}

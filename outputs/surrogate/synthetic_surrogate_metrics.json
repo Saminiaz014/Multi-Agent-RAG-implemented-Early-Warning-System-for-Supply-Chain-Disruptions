@@ -1,0 +1,153 @@
+{
+  "model": "deployed synthetic surrogate (build_shap_training_data + train_surrogate), evaluated on the same real windows with absent features zero-filled as deployed",
+  "results": {
+    "hormuz": {
+      "metrics": {
+        "n_train": 1642,
+        "n_test": 875,
+        "r2_train": 0.011631216525053611,
+        "r2_test": -0.13184672284886578,
+        "mae_test": 0.1030809719545913,
+        "spearman_test": 0.24628757762986211,
+        "share_test_medium_or_above": 0.28685714285714287,
+        "n_test_medium_or_above": 251,
+        "mae_test_medium_or_above": 0.21358844373122152,
+        "bias_test_medium_or_above": -0.21358844373122152,
+        "top1_agent_agreement": 0.36254980079681276,
+        "top3_agent_agreement": 0.5378486055776892,
+        "r2_synthetic_in_sample": 0.9826612269076747,
+        "note": "r2_train here is on the real training window; the surrogate was fitted on the synthetic series, whose in-sample R\u00b2 is r2_synthetic_in_sample."
+      },
+      "features_used": [
+        "vessel_count",
+        "avg_delay_hours",
+        "congestion_index",
+        "brent_crude_usd",
+        "trade_volume_index",
+        "freight_rate_index",
+        "sanctions_severity",
+        "military_activity_index",
+        "diplomatic_incident_score",
+        "regime_stability_index",
+        "earthquake_severity",
+        "tsunami_risk",
+        "cyclone_severity",
+        "severe_weather_index",
+        "sentiment_score",
+        "source_consensus",
+        "article_volume"
+      ]
+    },
+    "bab_el_mandeb": {
+      "metrics": {
+        "n_train": 1642,
+        "n_test": 875,
+        "r2_train": -0.036097003381623693,
+        "r2_test": -2.6210460181819046,
+        "mae_test": 0.2318520863317126,
+        "spearman_test": 0.24297112204837915,
+        "share_test_medium_or_above": 0.9142857142857143,
+        "n_test_medium_or_above": 800,
+        "mae_test_medium_or_above": 0.2500457545989395,
+        "bias_test_medium_or_above": -0.24996226259391563,
+        "top1_agent_agreement": 0.09875,
+        "top3_agent_agreement": 0.87,
+        "r2_synthetic_in_sample": 0.9817674685699717,
+        "note": "r2_train here is on the real training window; the surrogate was fitted on the synthetic series, whose in-sample R\u00b2 is r2_synthetic_in_sample."
+      },
+      "features_used": [
+        "vessel_count",
+        "avg_delay_hours",
+        "congestion_index",
+        "brent_crude_usd",
+        "trade_volume_index",
+        "freight_rate_index",
+        "sanctions_severity",
+        "military_activity_index",
+        "diplomatic_incident_score",
+        "regime_stability_index",
+        "earthquake_severity",
+        "tsunami_risk",
+        "cyclone_severity",
+        "severe_weather_index",
+        "sentiment_score",
+        "source_consensus",
+        "article_volume"
+      ]
+    },
+    "panama": {
+      "metrics": {
+        "n_train": 1642,
+        "n_test": 874,
+        "r2_train": -1.859040149374756,
+        "r2_test": -0.8383474725155864,
+        "mae_test": 0.16478425120352963,
+        "spearman_test": -0.0034219532272585533,
+        "share_test_medium_or_above": 0.2620137299771167,
+        "n_test_medium_or_above": 229,
+        "mae_test_medium_or_above": 0.06846705452525853,
+        "bias_test_medium_or_above": -0.06440234421381594,
+        "top1_agent_agreement": 0.004366812227074236,
+        "top3_agent_agreement": 0.05240174672489083,
+        "r2_synthetic_in_sample": 0.9686685912036413,
+        "note": "r2_train here is on the real training window; the surrogate was fitted on the synthetic series, whose in-sample R\u00b2 is r2_synthetic_in_sample."
+      },
+      "features_used": [
+        "vessel_count",
+        "avg_delay_hours",
+        "congestion_index",
+        "brent_crude_usd",
+        "trade_volume_index",
+        "freight_rate_index",
+        "sanctions_severity",
+        "military_activity_index",
+        "diplomatic_incident_score",
+        "regime_stability_index",
+        "earthquake_severity",
+        "tsunami_risk",
+        "cyclone_severity",
+        "severe_weather_index",
+        "sentiment_score",
+        "source_consensus",
+        "article_volume"
+      ]
+    },
+    "malacca": {
+      "metrics": {
+        "n_train": 1642,
+        "n_test": 875,
+        "r2_train": -1.5697222255968497,
+        "r2_test": 0.11762465563399316,
+        "mae_test": 0.07985452067555782,
+        "spearman_test": 0.24234950953864537,
+        "share_test_medium_or_above": 0.14057142857142857,
+        "n_test_medium_or_above": 123,
+        "mae_test_medium_or_above": 0.16733493444842518,
+        "bias_test_medium_or_above": -0.16733493444842518,
+        "top1_agent_agreement": 0.14634146341463414,
+        "top3_agent_agreement": 0.3902439024390244,
+        "r2_synthetic_in_sample": 0.9907120534440035,
+        "note": "r2_train here is on the real training window; the surrogate was fitted on the synthetic series, whose in-sample R\u00b2 is r2_synthetic_in_sample."
+      },
+      "features_used": [
+        "vessel_count",
+        "avg_delay_hours",
+        "congestion_index",
+        "brent_crude_usd",
+        "trade_volume_index",
+        "freight_rate_index",
+        "sanctions_severity",
+        "military_activity_index",
+        "diplomatic_incident_score",
+        "regime_stability_index",
+        "earthquake_severity",
+        "tsunami_risk",
+        "cyclone_severity",
+        "severe_weather_index",
+        "sentiment_score",
+        "source_consensus",
+        "article_volume"
+      ]
+    }
+  }
+}

@@ -16,7 +16,9 @@ SHAP values come from one of two surrogates:
   as the orchestrator trains it, kept for comparison.
 
 Writes ``outputs/explanations/`` (real) or ``outputs/explanations_synthetic/``:
-one JSON per alert, a summary per region, and ``coverage.json``.
+one JSON per alert, a summary per region, and ``coverage.json``. Each alert
+file keeps its five largest SHAP features; ``coverage.json`` carries each
+region's exact ``mean_abs_shap`` over every feature of every alert.
 """
 
 from __future__ import annotations
@@ -79,6 +81,19 @@ def _synthetic_shap(config: dict, features: pd.DataFrame, rows: list[int]) -> tu
     return [explainer.explain(features.iloc[[t]])["shap_values"] for t in rows], {"r2_synthetic_in_sample": r2}
 
 
+def mean_abs_shap(shap_rows: list[dict]) -> dict[str, float]:
+    """Mean |SHAP| per feature over a region's alerts, largest first.
+
+    Uses every feature of every alert, unlike the per-alert files, which keep
+    only their top five.
+    """
+    if not shap_rows:
+        return {}
+    features = {f for row in shap_rows for f in row}
+    means = {f: float(np.mean([abs(row.get(f, 0.0)) for row in shap_rows])) for f in features}
+    return dict(sorted(means.items(), key=lambda kv: -kv[1]))
+
+
 def run_region(region: str, surrogate: str, out: Path) -> dict:
     frame, _ = harness._load(region)
     config = load_config_for_region(region)
@@ -109,6 +124,7 @@ def run_region(region: str, surrogate: str, out: Path) -> dict:
         "complete": complete,
         "coverage": complete / len(alert_rows) if alert_rows else None,
         "surrogate_fit": fit,
+        "mean_abs_shap": mean_abs_shap(shap_rows),
     }
 
 

@@ -2,11 +2,13 @@
 
 Re-runnable pipeline. For each region:
 
-1. Load the real frame (2019-01-01 to 2025-08-30) from ``data/eval/<region>.csv``,
-   the api-mode cache built by ``scripts/build_eval_dataset.py``. Only if no
-   cache exists is the existing connector pipeline called, and its output saved
-   to ``data/cache/<region>.csv``.
-2. Split temporally: first 70 % of rows train, last 30 % test.
+1. Load the real frame from ``data/eval/<region>.csv``, the api-mode cache
+   built by ``scripts/build_eval_dataset.py``. Only if no cache exists is the
+   existing connector pipeline called, and its output saved to
+   ``data/cache/<region>.csv``.
+2. Split temporally at settings.yaml ``evaluation.split_date``; the test window
+   runs to ``evaluation.end_date`` (the method comparison's split). Days after
+   ``end_date`` are left out of features and target alike.
 3. Score every agent exactly as the evaluation harness does (fit on the
    training window, score each window) and pass the scores through
    ``RiskEngine.compute_risk`` — the target and its per-agent breakdown.
@@ -99,6 +101,9 @@ def prepare_region(region: str) -> dict:
     frame = frame.sort_values("timestamp").reset_index(drop=True)
     config = load_config_for_region(region)
     train, test = temporal_split(frame)
+    # Only the evaluated days: the fixed split drops days after end_date, and
+    # features built from the whole frame would outrun the target.
+    frame = pd.concat([train, test]).reset_index(drop=True)
 
     scores = agent_scores(config, train, test)
     target = composite_from_agent_scores(scores, config)
