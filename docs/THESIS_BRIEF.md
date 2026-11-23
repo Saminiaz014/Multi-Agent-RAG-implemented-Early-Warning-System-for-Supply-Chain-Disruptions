@@ -247,7 +247,7 @@ level-shift feature.
 | B3 isolation forest | unsupervised | low | 0.434 | 0.085 | 0.194 |
 | **Tier 3/4/5** | multi-agent | high | **0.400** | 0.141 | 0.265 |
 
-**Best baseline 0.986 vs best tier 0.502 → gap −0.484.** Tier 1 is at chance.
+The best non-ceiling method per region is named in `eval/results_main.md`; the table above is from an earlier run, in which Tier 1 is at chance.
 
 ### BAB_EL_MANDEB (244 positives, 10.02%)
 
@@ -463,7 +463,7 @@ Bar colour encodes circularity (`high` red, `medium` orange, `low` green,
 ## 6.2 Tier ablation — `eval/graphs_ablation_tiers/` (3)
 
 `B_tier_progression_{hormuz,bab_el_mandeb,panama}.png` — tier AUC against the
-best baseline and a chance line. **Current.**
+best other method (no ceiling, no controls) and a chance line. **Current.**
 
 **Malacca has no chart by design:** `graph_tiers()` drops NaN-AUC rows, and
 Malacca's are all NaN (0 positives). It is covered instead by

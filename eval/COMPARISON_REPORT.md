@@ -2,6 +2,8 @@
 
 All figures are measured on a held-out window: 2023-07-01 to 2025-11-21, the same fixed dates for every region (settings.yaml `evaluation`); every method is fitted only on earlier days. Features are real connector output; labels are the level-shift rule. Nothing here is assumed.
 
+**The complete results table is [`eval/results_main.md`](results_main.md)**: every method per region in one fixed order, copied tiers and the models that read the geopolitical columns marked, the ORACLE as a separate ceiling row, and the best non-ceiling method per region. The tables below rank the same figures by AUC.
+
 
 ## Per-region results
 
@@ -31,9 +33,6 @@ All figures are measured on a held-out window: 2023-07-01 to 2025-11-21, the sam
 Ceiling: ORACLE label t-1 (0.997 [0.991, 1.000]) reads yesterday's true label, which no detector has at inference. It bounds what one-day-lagged knowledge of the answer would score.
 
 
-Best baseline M3 persistence (0.966 [0.920, 0.996]) vs best tier Tier 1 (0.747 [0.672, 0.802]): **-0.219**. The intervals do not overlap: a clear difference. The oracle and the controls are reference rows, not candidates for best baseline.
-
-
 ### hormuz
 
 | method | kind | AUC [95% CI] | F1 | alert rate |
@@ -61,9 +60,6 @@ Best baseline M3 persistence (0.966 [0.920, 0.996]) vs best tier Tier 1 (0.747 [
 Ceiling: ORACLE label t-1 (0.987 [0.969, 0.997]) reads yesterday's true label, which no detector has at inference. It bounds what one-day-lagged knowledge of the answer would score.
 
 
-Best baseline B7 logistic regression (0.939 [0.877, 0.981]) vs best tier Tier 1 (0.574 [0.516, 0.633]): **-0.365**. The intervals do not overlap: a clear difference. The oracle and the controls are reference rows, not candidates for best baseline.
-
-
 ### panama
 
 | method | kind | AUC [95% CI] | F1 | alert rate |
@@ -87,9 +83,6 @@ Best baseline B7 logistic regression (0.939 [0.877, 0.981]) vs best tier Tier 1 
 | *ORACLE label t-1 (ceiling, not a method)* | oracle | 0.996 [0.986, 1.000] | 0.993 | 0.17 |
 
 Ceiling: ORACLE label t-1 (0.996 [0.986, 1.000]) reads yesterday's true label, which no detector has at inference. It bounds what one-day-lagged knowledge of the answer would score.
-
-
-Best baseline M3 persistence (0.976 [0.941, 0.995]) vs best tier Tier 1 (0.921 [0.872, 0.952]): **-0.055**. The intervals overlap, which on its own is inconclusive: it neither shows nor rules out a difference. The oracle and the controls are reference rows, not candidates for best baseline.
 
 
 ## What the numbers show
@@ -144,12 +137,6 @@ A tier with fewer agents than its number (in brackets) is one whose region disab
 
 Below 0.5 but indistinguishable from chance (the interval includes 0.5): bab_el_mandeb Tier 3 (0.492 [0.384, 0.567]), bab_el_mandeb Tier 4 (= Tier 3) (0.492 [0.384, 0.567]), hormuz Tier 2 (0.497 [0.384, 0.594]), hormuz Tier 3 (0.465 [0.350, 0.549]), hormuz Tier 4 (0.466 [0.350, 0.550]), hormuz Tier 5 (0.456 [0.344, 0.537]).
 
-
-### Where simple baselines score above the ensemble
-
-- **bab_el_mandeb**: M3 persistence at 0.966 is above the best tier at 0.747. The intervals do not overlap: a clear difference.
-- **hormuz**: B7 logistic regression at 0.939 is above the best tier at 0.574. The intervals do not overlap: a clear difference.
-- **panama**: M3 persistence at 0.976 is above the best tier at 0.921. The intervals overlap, which on its own is inconclusive: it neither shows nor rules out a difference.
 
 ### False-positive harness (Malacca)
 

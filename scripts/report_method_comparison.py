@@ -52,8 +52,8 @@ def _auc_cell(row: pd.Series) -> str:
 
 
 #: Reference rows rather than methods. The oracle reads yesterday's label and
-#: the controls are constants or noise, so none is a "best baseline" a tier
-#: can be judged against.
+#: the controls are constants or noise, so none is a method a tier can be
+#: judged against.
 _NOT_METHODS = ("oracle", "control")
 
 
@@ -156,7 +156,7 @@ def graph_alert_rate(results: pd.DataFrame) -> None:
 
 
 def graph_tiers(results: pd.DataFrame) -> None:
-    """Tier progression per region, against the best real baseline there."""
+    """Tier progression per region, against the best other method there."""
     tiers = results[results.family == "tier"].dropna(subset=["auc"])
     baselines = _real_baselines(results.dropna(subset=["auc"]))
 
@@ -172,7 +172,7 @@ def graph_tiers(results: pd.DataFrame) -> None:
                     + (f" ({_ci_pct()} block-bootstrap CI)" if _has_ci(region_tiers) else ""))
         if pd.notna(best):
             ax.axhline(best, color="#42a5f5", linestyle="-", linewidth=2,
-                       label=f"best real baseline ({best:.3f}; no oracle or controls)")
+                       label=f"best other method ({best:.3f}; no ceiling, no controls)")
         top = results[(results.region == region) & _is_ceiling(results)]["auc"].dropna()
         if not top.empty:
             ax.axhline(float(top.iloc[0]), color="#90a4ae", linestyle=":", linewidth=2,
@@ -539,7 +539,6 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
     """Report the measured findings, including the unflattering ones."""
     scored = results.dropna(subset=["auc"])
     tiers = scored[scored.family == "tier"]
-    baselines = _real_baselines(scored)
     ceiling = scored[_is_ceiling(scored)]
     repeats = _repeats(results)
     lines: list[str] = []
@@ -556,14 +555,19 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
         "are real connector output; labels are the level-shift rule. Nothing "
         "here is assumed.\n"
     )
+    lines.append(
+        "**The complete results table is [`eval/results_main.md`](results_main.md)**: "
+        "every method per region in one fixed order, copied tiers and the models that "
+        "read the geopolitical columns marked, the ORACLE as a separate ceiling row, "
+        "and the best non-ceiling method per region. The tables below rank the same "
+        "figures by AUC.\n"
+    )
 
     lines.append("\n## Per-region results\n")
     for region in sorted(scored["region"].unique()):
         in_region = scored[scored.region == region]
         region_rows = in_region[~_is_ceiling(in_region)].sort_values("auc", ascending=False)
         region_ceiling = ceiling[ceiling.region == region]
-        best_baseline = baselines[baselines.region == region].nlargest(1, "auc")
-        best_tier = tiers[tiers.region == region].nlargest(1, "auc")
         lines.append(f"\n### {region}\n")
         auc_head = f"AUC [{_ci_pct()} CI]" if _has_ci(results) else "AUC"
         lines.append(f"| method | kind | {auc_head} | F1 | alert rate |")
@@ -585,16 +589,6 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
                 "true label, which no detector has at inference. It bounds what "
                 "one-day-lagged knowledge of the answer would score.\n"
             )
-        if not best_baseline.empty and not best_tier.empty:
-            bb, bt = best_baseline.iloc[0], best_tier.iloc[0]
-            delta = bt["auc"] - bb["auc"]
-            lines.append(
-                f"\nBest baseline {bb['method']} ({_auc_cell(bb)}) vs best tier "
-                f"{bt['method']} ({_auc_cell(bt)}): **{delta:+.3f}**."
-                f"{_separation(bb, bt)} The oracle and the controls are reference "
-                "rows, not candidates for best baseline.\n"
-            )
-
     lines.append("\n## What the numbers show\n")
 
     # Monotonicity: does adding agents help? Every claim below is computed.
@@ -710,20 +704,6 @@ def write_report(results: pd.DataFrame, sensitivity: pd.DataFrame | None = None)
             "stable series and reports calm. The two are measuring different "
             "things, and that is an architectural finding rather than a bug.\n"
         )
-
-    # Where baselines win outright.
-    lines.append("\n### Where simple baselines score above the ensemble\n")
-    for region in sorted(scored["region"].unique()):
-        bb = baselines[baselines.region == region].nlargest(1, "auc")
-        bt = tiers[tiers.region == region].nlargest(1, "auc")
-        if bb.empty or bt.empty:
-            continue
-        if bb.iloc[0]["auc"] > bt.iloc[0]["auc"]:
-            lines.append(
-                f"- **{region}**: {bb.iloc[0]['method']} at {bb.iloc[0]['auc']:.3f} "
-                f"is above the best tier at {bt.iloc[0]['auc']:.3f}."
-                + _separation(bb.iloc[0], bt.iloc[0])
-            )
 
     # False positive harness.
     malacca = results[results.region == "malacca"].dropna(subset=["alert_rate"])

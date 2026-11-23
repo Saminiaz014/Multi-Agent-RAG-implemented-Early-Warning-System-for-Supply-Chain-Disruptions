@@ -842,76 +842,9 @@ An 8-metric suite (`notebooks/evaluation.py`) additionally covers detection, exp
 
 ## 4.5 Results
 
-Reported as found. Source: `eval/method_comparison_results.csv` (76 rows), graphs in `eval/graphs_method_comparison/` and `eval/graphs_ablation_tiers/`.
+The results are one table per region, generated from `eval/method_comparison_results.csv`: **[`eval/results_main.md`](eval/results_main.md)** (also `eval/results_main.csv`, 76 rows; regenerate with `python scripts/results_table.py`). It lists every method in one fixed order (controls M0-M2, M3, M8, B1-B8, Tiers 1-5) with AUC and its 95 % moving-block bootstrap interval, the paired ΔAUC against Tier 1 (tiers only), F1, false-alarm rate and alert rate, and the ORACLE as a separate ceiling row that is never ranked. It marks the tiers that copy the tier before them (a region disables the agent a tier would add), marks the models that read the geopolitical columns (B3, B7, B8), and states the best non-ceiling method per region. Malacca has no positives, so it shows false-alarm rates only.
 
-### Hormuz — 159 positives (6.53 %)
-
-| Method | Kind | Circ. | AUC | F1 | FPR |
-|---|---|---|---|---|---|
-| ORACLE label t−1 | oracle | n/a | 0.986 | 0.977 | 0.005 |
-| B7 logistic regression | supervised | medium | **0.968** | 0.682 | 0.020 |
-| B6 CUSUM | unsupervised | high | 0.958 | 0.000 | 0.000 |
-| M3 persistence | unsupervised | high | 0.851 | 0.503 | 0.140 |
-| B8 random forest | supervised | medium | 0.747 | 0.378 | 0.100 |
-| M8 matrix profile | unsupervised | low | 0.596 | 0.227 | 0.104 |
-| M0 random | control | n/a | 0.526 | 0.165 | 0.094 |
-| **Tier 1** | multi-agent | high | **0.502** | 0.034 | 0.164 |
-| M1/M2 always/never | control | n/a | 0.500 | 0.000 | 0.000 |
-| **Tier 2** | multi-agent | high | **0.465** | 0.071 | 0.139 |
-| B3 isolation forest | unsupervised | low | 0.434 | 0.085 | 0.194 |
-| **Tier 3/4/5** | multi-agent | high | **0.400** | 0.141 | 0.265 |
-
-**Best baseline 0.986 vs best tier 0.502 → gap −0.484. Tier 1 is at chance**, and Tiers 2–5 fall below it.
-
-### Bab el-Mandeb — 244 positives (10.02 %)
-
-| Method | Circ. | AUC | F1 | FPR |
-|---|---|---|---|---|
-| ORACLE label t−1 | n/a | 0.997 | 0.996 | 0.002 |
-| M3 persistence | high | 0.961 | 0.784 | 0.234 |
-| **Tier 1** | high | **0.679** | 0.553 | 0.735 |
-| **Tier 2** | high | **0.620** | 0.511 | 0.546 |
-| B2 MA crossover | medium | 0.581 | 0.386 | 0.177 |
-| B3 isolation forest | low | 0.500 | 0.410 | 0.628 |
-| **Tier 3/4/5** | high | **0.449** | 0.441 | 0.682 |
-| B6 CUSUM | high | 0.263 | 0.498 | 0.737 |
-
-Gap −0.318. B7/B8 not applicable — no positives in the training window.
-
-### Panama — 149 positives (6.12 %) — the strongest region
-
-| Method | Circ. | AUC | F1 | FPR |
-|---|---|---|---|---|
-| ORACLE label t−1 | n/a | 0.996 | 0.993 | 0.002 |
-| M3 persistence | high | 0.973 | 0.811 | 0.112 |
-| **Tier 1** | high | **0.909** | 0.722 | 0.167 |
-| **Tier 5** | high | **0.884** | 0.613 | 0.157 |
-| **Tier 2** | high | **0.884** | 0.620 | 0.134 |
-| **Tier 3/4** | high | **0.876** | 0.612 | 0.134 |
-| B3 isolation forest | low | 0.814 | 0.435 | 0.170 |
-| B6 CUSUM | high | 0.145 | 0.372 | 0.866 |
-
-**Panama Tier 1 at 0.909 beats every non-oracle unsupervised baseline except persistence.** This is the system's strongest real result.
-
-### Malacca — 0 positives — false-positive harness
-
-AUC undefined. What is measured is the alert rate on a region where nothing happened:
-
-| Method | Alert rate |
-|---|---|
-| M2 never · B6 CUSUM · ORACLE | 0.000 |
-| M3 persistence | 0.049 |
-| B2 MA crossover | 0.059 |
-| B4 EWMA | 0.068 |
-| M0 random | 0.100 |
-| B1 rolling z | 0.103 |
-| M8 matrix profile | 0.107 |
-| B5 AR residual | 0.111 |
-| **Tier 1 / Tier 2** | **0.178 / 0.181** |
-| B3 isolation forest | 0.208 |
-| **Tier 3/4/5** | **0.257** |
-
-**The tiers are the noisiest methods on the quiet region**, and adding agents makes it worse (0.178 → 0.257). This is the cost of the fusion design, and it is reported rather than buried.
+That table is the only place a "best" method is named. The written findings are in `eval/COMPARISON_REPORT.md`, the graphs in `eval/graphs_method_comparison/` and `eval/graphs_ablation_tiers/`. Figures quoted in sections 4.6 to 4.10 and in the headline table at the top come from earlier runs (70/30 split, before the fixed evaluation window) and are not updated here; the table above supersedes them.
 
 ## 4.6 The central negative finding
 

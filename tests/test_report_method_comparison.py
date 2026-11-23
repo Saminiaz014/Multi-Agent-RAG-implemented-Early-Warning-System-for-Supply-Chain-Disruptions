@@ -77,24 +77,30 @@ def _with_ci(results: pd.DataFrame, cis: dict[str, tuple[float, float]]) -> pd.D
     return out
 
 
-def test_oracle_and_controls_are_never_the_best_baseline(tmp_path, monkeypatch) -> None:
+def test_the_report_points_to_the_results_table_and_states_no_best_baseline(
+        tmp_path, monkeypatch) -> None:
+    """One table (eval/results_main.md) owns "best"; the report only points to it."""
     results = _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]})
     extra = [_row("panama", "ORACLE label t-1", 0.99, family="baseline", kind="oracle"),
              _row("panama", "M0 random", 0.95, family="baseline", kind="control")]
     text = _report(tmp_path, monkeypatch, pd.concat([results, pd.DataFrame(extra)]))
-    assert "Best baseline B1 rolling z" in text
-    assert "Best baseline ORACLE" not in text and "Best baseline M0" not in text
-    assert "ORACLE label t-1 at" not in text            # not a "baseline beats tiers" entry
+    assert "results_main.md" in text
+    assert "best baseline" not in text.lower()
+    assert "baselines score above" not in text.lower()
+    assert "ORACLE label t-1 at" not in text            # no "beats the tiers" entry
 
 
-def test_overlap_is_called_inconclusive_not_inseparable(tmp_path, monkeypatch) -> None:
-    base = _results({"panama": [0.9, 0.8, 0.7, 0.7, 0.71]})
-    apart = _report(tmp_path, monkeypatch, _with_ci(base, {}))
-    assert "The intervals do not overlap" in apart           # 0.55 +-0.02 vs 0.90 +-0.02
-    close = _with_ci(base, {"B1 rolling z": (0.40, 0.89), "Tier 1": (0.80, 0.95)})
-    text = _report(tmp_path, monkeypatch, close)
-    assert "inconclusive" in text
-    assert "do not separate" not in text and "cannot separate" not in text
+def test_overlap_is_called_inconclusive_not_inseparable() -> None:
+    """The wording ``_separation`` gives (used for the tier steps) for two methods."""
+    def row(low, high):
+        return pd.Series({"auc": (low + high) / 2, "auc_ci_low": low, "auc_ci_high": high})
+
+    apart = rep._separation(row(0.53, 0.57), row(0.88, 0.92))
+    assert "do not overlap" in apart                         # a clear difference
+    close = rep._separation(row(0.40, 0.89), row(0.80, 0.95))
+    assert "inconclusive" in close
+    assert "do not separate" not in close and "cannot separate" not in close
+    assert rep._separation(pd.Series({"auc": 0.5}), row(0.4, 0.6)) == ""    # no intervals
 
 
 def test_only_a_whole_interval_below_half_is_called_anti_correlated(tmp_path, monkeypatch) -> None:
@@ -139,7 +145,7 @@ def test_oracle_is_a_ceiling_row_below_the_methods(tmp_path, monkeypatch) -> Non
     assert "ORACLE" in table[-1] and "ceiling" in table[-1]
     assert all("ORACLE" not in line for line in table[:-1])   # not ranked among methods
     assert "Ceiling: ORACLE label t-1" in text
-    assert "Best baseline ORACLE" not in text
+    assert "best baseline" not in text.lower()
 
 
 def _with_deltas(results: pd.DataFrame, deltas: dict[str, tuple[float, float, float]]):
