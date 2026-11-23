@@ -8,14 +8,14 @@ A **Decision Support System (DSS)** that detects, explains, and contextualises d
 >
 > **A multi-agent architecture with explicit per-domain weighting produces interpretable, auditable, decision-ready alerts — attribution to a named domain, a SHAP feature breakdown, and a retrieved historical precedent — which single-model detectors cannot produce, at a detection cost this evaluation quantifies honestly rather than hides.**
 >
-> The contribution is not a better detector. It is **an evaluation methodology that catches its own circularity**, plus a diagnosed mechanism for why multi-domain fusion underperforms on a single-domain label ([§4.7](#47-root-cause-analysis--why-hormuz-sits-at-chance)).
+> The contribution is not a better detector. It is **an evaluation methodology that catches its own circularity**, plus a diagnosed mechanism for why multi-domain fusion underperforms on a single-domain label ([§4.7](#47-root-cause-analysis--why-hormuz-tier-1-scores-low)).
 
 | | |
 |---|---|
 | **Regions** | Hormuz · Bab el-Mandeb · Panama · Malacca (2019–2026) |
-| **Test suite** | 410 passed / 0 failed |
-| **Headline result** | Panama Tier 1 **AUC 0.909** · Hormuz Tier 1 **AUC 0.502** (chance) |
-| **Central negative finding** | Adding agents **reduces** AUC in every evaluable region |
+| **Test suite** | `python -m pytest tests` (the count is not restated here) |
+| **Results** | [`eval/results_main.md`](eval/results_main.md): one table per region, every method, with intervals · frozen copy: [`eval/RESULTS_FROZEN.md`](eval/RESULTS_FROZEN.md) |
+| **Central negative finding** | Whether AUC changes as agents are added: the Tier rows and paired ΔAUC in [`eval/results_main.md`](eval/results_main.md), stated only as far as the intervals support it ([§4.6](#46-the-central-negative-finding)) |
 | **Source of record** | [`docs/THESIS_BRIEF.md`](docs/THESIS_BRIEF.md) · [`docs/SCORING_REFERENCE.md`](docs/SCORING_REFERENCE.md) |
 | **Build history** | [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md) — the former phase-by-phase README body |
 
@@ -31,7 +31,7 @@ A **Decision Support System (DSS)** that detects, explains, and contextualises d
   - [3.6 Aggregation](#36-layer-3--risk-aggregation) · [3.7 Explainability](#37-layer-4--explainability) · [3.8 Retrieval](#38-layer-5--retrieval) · [3.9 Presentation](#39-layer-6--presentation)
   - [3.10 Evidence discipline](#310-evidence-discipline) · [3.11 Weighting](#311-weight-determination-and-optimization) · [3.12 Configuration](#312-configuration-and-region-overlays) · [3.13 Verification](#313-verification-methodology) · [3.14 Summary](#314-implementation-summary)
 - [4. Evaluation](#4-evaluation)
-  - [4.1 Design](#41-evaluation-design) · [4.2 Data](#42-dataset-and-ground-truth) · [4.3 Baselines](#43-baselines-tiers-and-circularity) · [4.4 Metrics](#44-metrics) · [4.5 Results](#45-results) · [4.6 Negative finding](#46-the-central-negative-finding) · [4.7 Root cause](#47-root-cause-analysis--why-hormuz-sits-at-chance) · [4.8 Rejected hypotheses](#48-hypotheses-tested-and-rejected) · [4.9 Optimization](#49-weight-optimization-results) · [4.10 Validity](#410-threats-to-validity--what-cannot-be-claimed) · [4.11 Defects](#411-known-defects-and-open-issues)
+  - [4.1 Design](#41-evaluation-design) · [4.2 Data](#42-dataset-and-ground-truth) · [4.3 Baselines](#43-baselines-tiers-and-circularity) · [4.4 Metrics](#44-metrics) · [4.5 Results](#45-results) · [4.6 Negative finding](#46-the-central-negative-finding) · [4.7 Root cause](#47-root-cause-analysis--why-hormuz-tier-1-scores-low) · [4.8 Rejected hypotheses](#48-hypotheses-tested-and-rejected) · [4.9 Optimization](#49-weight-optimization-results) · [4.10 Validity](#410-threats-to-validity--what-cannot-be-claimed) · [4.11 Defects](#411-known-defects-and-open-issues)
 - [Project Structure](#project-structure) · [Installation](#installation) · [Running](#running)
 
 > **On `Phase N` tags.** Sections 1–4 describe the system as it is. The reference sections that follow them (Project Structure, Installation, Configuration) still carry `Phase N` annotations recording *when* a file, dependency or config key was introduced. Those are pointers into [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md), not part of the current structure.
@@ -89,7 +89,7 @@ Three design decisions guard against this, and they are described in full in [§
 2. **Tiers instantiate real agent classes** — an ablation that approximates a tier by averaging feature columns measures nothing about the agents.
 3. **Every method carries a circularity rating** — because the ground-truth label is derived from vessel counts, any method reading vessel counts against a long baseline predicts it partly by construction, and that must be visible on the face of every results table.
 
-These are what allow the negative findings in [§4.6](#46-the-central-negative-finding) and [§4.7](#47-root-cause-analysis--why-hormuz-sits-at-chance) to be trusted rather than explained away. They are stated here, in the methodology, because they are design commitments made before the results existed — not defences constructed afterwards.
+These are what allow the negative findings in [§4.6](#46-the-central-negative-finding) and [§4.7](#47-root-cause-analysis--why-hormuz-tier-1-scores-low) to be trusted rather than explained away. They are stated here, in the methodology, because they are design commitments made before the results existed — not defences constructed afterwards.
 
 ### The consequence for what this system claims
 
@@ -291,7 +291,7 @@ The RandomForest in `src/explainability/` is a **post-hoc surrogate**. It explai
 
 ### 3.5.1 ShippingAgent
 
-The most detailed agent, because it carries the most weight and because its behaviour is the root cause of the central negative result in [§4.7](#47-root-cause-analysis--why-hormuz-sits-at-chance).
+The most detailed agent, because it carries the most weight and because its behaviour is the root cause of the central negative result in [§4.7](#47-root-cause-analysis--why-hormuz-tier-1-scores-low).
 
 **Features.** Three base columns — `vessel_count`, `avg_delay_hours`, `congestion_index` — plus two optional PortWatch columns auto-discovered when present: `tanker_count`, and `vessel_count_7dma` from which `vessel_count_trend` is derived.
 
@@ -358,7 +358,7 @@ Two decisions here, one right and one wrong.
 
 **Wrong — `max()` rather than a blend.** The code comment defends `max()` on the grounds that the two components answer different questions ("did something just change?" versus "are we still below normal?") and are meant to be true at different times, so averaging would let a calm shock detector drag down an active duration signal.
 
-The reasoning is sound and the outcome is not. Measured on the Hormuz test window, `shock` sits at **0.55 on calm days** while `duration` only reaches **0.44 on disrupted ones**, so `max()` returns `shock` nearly everywhere and **erases the working signal**. It prevents dilution and causes **masking** instead. Full decomposition in [§4.7](#47-root-cause-analysis--why-hormuz-sits-at-chance).
+The reasoning is sound and the outcome is not. Measured on the Hormuz test window, `shock` sits at **0.55 on calm days** while `duration` only reaches **0.44 on disrupted ones**, so `max()` returns `shock` nearly everywhere and **erases the working signal**. It prevents dilution and causes **masking** instead. Full decomposition in [§4.7](#47-root-cause-analysis--why-hormuz-tier-1-scores-low).
 
 #### `validate(signals)` — two-stage false-positive suppression
 
@@ -480,7 +480,7 @@ Negative velocity is the interesting component: it captures sentiment *dropping 
 8. level     = high / medium / low by threshold
 ```
 
-**Step 3 is what satisfies R7 at the agent level.** Renormalising over *active* agents makes a silent agent harmless: its weight redistributes across the agents that did report, rather than contributing a zero that drags the composite down. Without this, a domain disabled for a corridor — geopolitical at Panama, say — would depress every score there by exactly its configured weight, a reduction that would have been invisible in the output and would have quietly invalidated the calibrated risk bands.
+**Step 3 is what satisfies R7 at the agent level.** Renormalising over *active* agents makes a silent agent harmless: its weight redistributes across the agents that did report, rather than contributing a zero that drags the composite down. Without this, a domain disabled for a corridor — geopolitical at Panama, say — would depress every score there by exactly its configured weight, a reduction that would have been invisible in the output and would have quietly shifted every score against the fixed risk bands.
 
 **Step 6 is the only non-linearity in the entire scoring path.** It encodes the judgement that three independent domains agreeing is worth more than the arithmetic sum of three domains individually — corroboration across domains is qualitatively different from a single loud domain.
 
@@ -649,21 +649,19 @@ Weights exist at three layers, all searchable:
 
 `weight_mode` in `config/settings.yaml` selects `hand_tuned` (current default) or `optimized`. Hand-tuned L2 weights (renormalised over the five agents so they sum to 1): shipping 0.294, geopolitical 0.294, market 0.176, natural_disaster 0.118, news_sentiment 0.118.
 
-### The risk bands are calibrated, not chosen
+### The risk bands are fixed display thresholds, not calibrated
 
-This is the part most likely to be assumed arbitrary and is not. The bands are the **p60 / p85 / p97 quantiles of the composite score on calm (label-negative) days**, pooled across all four regions 2019–2026 — **9,183 days**:
+The bands cut the composite score into words (Low / Medium / High, and the dashboard's Critical). They are **fixed display thresholds, not calibrated to any outcome**, and they do not enter the real-data evaluation ([§4.5](#45-results)), whose alert rule is each method's own training-window 90th percentile. The synthetic weight optimizer ([§4.9](#49-weight-optimization-results)) does read them: `risk_high` for its F1 and `risk_medium` for its lead-time score.
 
 ```yaml
 thresholds:
-  risk_critical: 0.90   # p97 of calm days
-  risk_high:     0.69   # p85
-  risk_medium:   0.51   # p60  -> ~60% of calm days read LOW
+  risk_critical: 0.90
+  risk_high:     0.69
+  risk_medium:   0.51
   risk_low:      0.30
 ```
 
-They were recalibrated when the shipping agent stopped batch-normalising its forest score ([§3.5.1](#351-shippingagent)). Batch min-max had forced every scored window onto `[0,1]` by its own extremes, so the old `0.8 / 0.6 / 0.4` boundaries were tuned to a compressed, window-relative distribution. On absolute scores the calm median rose to ≈0.47, which put most ordinary days at MEDIUM or worse under the old bands.
-
-**The new bands are the same quantiles of calm behaviour expressed on the new scale — a re-scaling, not a loosening.** Stating it that way is the difference between a defensible recalibration and a suspicious one.
+**Provenance.** The values were set in commit `f7b87ff` (2026-08-30) from a quantile method — p97 / p85 / p60 of the composite on label-negative days — run on the pipeline of that time (six agents, routing included) over every such day, test window included. No script was kept and the run is recorded only in that commit's message, `DEVELOPMENT_LOG.md` and the `config/settings.yaml` comment, so the values cannot be reproduced and have not been re-derived for the current five-agent composite. `scripts/calibrate_risk_bands.py` reconstructs the method on training days only and gives different values; that result is documented, and deliberately not applied, in the comment above `thresholds` in `config/settings.yaml`. Read a band word as a display convention, not as a measured probability or false-alarm rate.
 
 ### Optimization procedure
 
@@ -844,134 +842,85 @@ An 8-metric suite (`notebooks/evaluation.py`) additionally covers detection, exp
 
 The results are one table per region, generated from `eval/method_comparison_results.csv`: **[`eval/results_main.md`](eval/results_main.md)** (also `eval/results_main.csv`, 76 rows; regenerate with `python scripts/results_table.py`). It lists every method in one fixed order (controls M0-M2, M3, M8, B1-B8, Tiers 1-5) with AUC and its 95 % moving-block bootstrap interval, the paired ΔAUC against Tier 1 (tiers only), F1, false-alarm rate and alert rate, and the ORACLE as a separate ceiling row that is never ranked. It marks the tiers that copy the tier before them (a region disables the agent a tier would add), marks the models that read the geopolitical columns (B3, B7, B8), and states the best non-ceiling method per region. Malacca has no positives, so it shows false-alarm rates only.
 
-That table is the only place a "best" method is named. The written findings are in `eval/COMPARISON_REPORT.md`, the graphs in `eval/graphs_method_comparison/` and `eval/graphs_ablation_tiers/`. Figures quoted in sections 4.6 to 4.10 and in the headline table at the top come from earlier runs (70/30 split, before the fixed evaluation window) and are not updated here; the table above supersedes them.
+That table is the only place a "best" method is named. The written findings are in `eval/COMPARISON_REPORT.md`, the graphs in `eval/graphs_method_comparison/` and `eval/graphs_ablation_tiers/`. Sections 4.6 to 4.10 and the headline table at the top state findings without restating numbers: every figure is in the table above or in [`eval/RESULTS_FROZEN.md`](eval/RESULTS_FROZEN.md), which is generated from the committed CSVs.
 
 ## 4.6 The central negative finding
 
-**Across every evaluable region, tier AUC falls as agents are added.**
+What happens to detection as agents are added is read from the **Tier 1 to Tier 5 rows of [`eval/results_main.md`](eval/results_main.md)**: AUC per tier with its bootstrap interval, and the paired ΔAUC of each tier against Tier 1 with its interval. That table is the only support for a sentence about the direction of the change, region by region. A region whose ΔAUC interval includes zero shows no change in either direction, and a tier that copies the tier before it (the region disables the agent it would add) is marked as a copy, not counted as a new result. Malacca has no positives, so it contributes alert rates only. [`eval/RESULTS_FROZEN.md`](eval/RESULTS_FROZEN.md) repeats the paired deltas, the Eq. 1 ablation and the single-agent and leave-one-out ablations, generated from the committed CSVs.
 
-| Region | Tier 1 | Tier 2 | Tier 3 | Tier 4 | Tier 5 |
-|---|---|---|---|---|---|
-| hormuz | 0.502 | 0.465 | 0.400 | 0.401 | 0.401 |
-| bab_el_mandeb | 0.679 | 0.620 | 0.449 | 0.449 | 0.449 |
-| panama | 0.909 | 0.884 | 0.876 | 0.876 | 0.884 |
-| malacca *(alert rate — lower is better)* | 0.178 | 0.181 | 0.257 | 0.257 | 0.257 |
+Whether this refutes the agent-diversity hypothesis (SRQ2) on real data is therefore decided per region by those intervals, not by a sentence here.
 
-**This directly refutes the agent-diversity hypothesis (SRQ2) on real data.**
+**Proposed mechanism: dilution.** The label is shipping-derived. A non-shipping agent contributes weighted score that has no reason to correlate with the label, which pulls the composite toward noise. On this reading the evaluation cannot show multi-domain fusion helping against a single-domain label; it does not show that fusion is worthless. The agent ablations in `eval/RESULTS_FROZEN.md` are where the reading can be checked.
 
-**Mechanism — dilution.** The label is shipping-derived. Every non-shipping agent therefore contributes weighted score that is uncorrelated with the label, pulling the composite toward noise. The finding is not that multi-domain fusion is worthless; it is that **fusion cannot help against a single-domain label**, and the evaluation was constructed well enough to show it.
+## 4.7 Root-cause analysis — why Hormuz Tier 1 scores low
 
-## 4.7 Root-cause analysis — why Hormuz sits at chance
+The current Hormuz Tier 1 result, and how it compares with the baselines, is in [`eval/results_main.md`](eval/results_main.md). The explanation below comes from a decomposition of Hormuz's own anomaly score into its two components, run on an earlier evaluation window (a 70/30 split, test window 2023-08-31 to 2025-08-30). No script was kept and it has not been rerun on the fixed split, so none of its numbers is restated: read the account as a hypothesis for the current result, not a measurement of it.
 
-Decomposing Hormuz's own anomaly score on the test window (2023-08-31 → 2025-08-30, 133 positives / 731 days):
+- **Duration against shock.** On that window the duration component separated the label, while the shock component did the opposite: disruption days looked *less* anomalous to it than calm days.
+- **Masking by `max()`.** The agent's anomaly score is `max(shock, duration)`. The code comment defends `max()` over averaging so that a calm shock detector does not dilute an active duration signal. It prevents that dilution and, when shock sits above duration on quiet days, causes **masking** instead: the working signal is overridden by the one that is not.
+- **Secondary cause (fixed 2026-11-22, issue 11).** `detect()` received only the test slice, so the trailing baseline restarted from scratch and the first test days had no baseline. The comparison now fits each agent on train only and scores it on train + test, keeping the test rows, the same history the baselines get. `eval/diagnostics/split_invariance.py` checks that a day's score no longer depends on where the test window starts.
 
-| Component | Mean on normal | Mean on disruption | **Separation** |
-|---|---|---|---|
-| `duration_score` | 0.0497 | 0.4395 | **+0.3898** |
-| `shock_score` | 0.5455 | 0.3982 | **−0.1473** |
-| `anomaly_score` = `max(shock, duration)` | 0.5561 | 0.5315 | **−0.0246** |
-
-**The duration signal separates the label cleanly (+0.39). The shock detectors are anti-correlated (−0.15) — disruption days look *less* anomalous to them than calm days.** Because shock sits ≈0.55 on quiet days while duration only reaches ≈0.44 on disrupted ones, `max()` returns shock nearly everywhere and **erases the working signal**, leaving −0.02.
-
-The code comment defends `max()` over averaging on the grounds that a calm shock detector would dilute an active duration signal. It does prevent dilution — and causes **masking** instead. **This is the actual root cause of Hormuz ≈ 0.50**: not forest training, not the validation gate.
-
-**Secondary cause.** `detect()` receives only the test slice, so the 365-day trailing baseline restarts from scratch. The **first 120 test days have no baseline at all**, and 17 of 133 positives fall inside that blind window. *Fixed 2026-11-22 (issue 11):* the comparison now fits each agent on train only and scores it on train + test, keeping the test rows, the same history the baselines get. `eval/diagnostics/split_invariance.py` checks that a day's score no longer depends on where the test window starts.
-
-This decomposition is the finding that turns a negative result into a contribution: the architecture is not merely underperforming, it is underperforming for a located, fixable reason.
+A decomposition of this kind is what turns a negative result into a contribution, but only once it has been rerun on the frame the results are reported on.
 
 ## 4.8 Hypotheses tested and rejected
 
-Both were implemented, measured, and reverted. Negative results with a mechanism are evidence.
+Both were implemented, measured and reverted. They were measured on the earlier frame (70/30 split) and have not been rerun on the fixed split, so their numbers are not restated here; they remain in the git history of this file (`git log -p -- README.md`, last full text at `4322369`).
 
 ### Option 1 — replace the persistence gate with direct level-shift scoring
 
-Gate: `level_shift_score > 0.50 AND duration_held >= 0.70`.
+Gate: a day counts when the level-shift score and the held duration both clear a threshold.
 
-- **Structurally inert for the AUC.** `run_method_comparison.py:384` scores via `agent.detect(agent.preprocess(frame))` and never calls `validate()`.
-- Full re-run: **0 of 76 rows changed**, output byte-identical, Hormuz gap unchanged at −0.484.
-- Where it *does* apply (the synthetic path) it is destructive:
-
-| Gate | TP | FP | FN | TN | TPR | FPR | F1 |
-|---|---|---|---|---|---|---|---|
-| persistence (current) | 44 | 10 | 3 | 308 | 0.936 | 0.031 | **0.871** |
-| level_shift | 6 | 2 | 41 | 316 | 0.128 | 0.006 | **0.218** |
-
-Cause: the trailing baseline needs 91 days shifted by 30, so **no baseline exists until day 156** — the day 60–74 disruption is unscoreable by construction — and only 23 of 365 days clear `score > 0.50`.
+- **Structurally inert for the harness's AUC.** The comparison harness scores through `agent.detect(agent.preprocess(frame))` and never calls `validate()`, so a change to the gate cannot change an AUC; a full rerun at the time changed no row.
+- **Destructive where it does apply** (the synthetic path, which does call `validate()`): the trailing baseline needs a long history before any day is scoreable, so an early disruption is unscoreable by construction and few days clear the threshold. Detection fell sharply against the persistence gate.
 
 ### Option 3 — retrain the Isolation Forest on mixed normal + disruption days
 
-- **Premise false.** `_agent_frame` passes only `timestamp` + `shipping__*`, so `y_true` never reaches the agent and `fit()`'s leak-filter never fires. The forest producing Hormuz 0.502 was **already** trained on mixed data.
-- Tested both regimes properly, on real data, with the harness's own split:
-
-| Region | mixed | normal-only | Δ |
-|---|---|---|---|
-| hormuz | 0.5023 | 0.5240 | **+0.0216** |
-| bab_el_mandeb | 0.6790 | 0.6790 | 0.0000 |
-| panama | 0.9087 | 0.9087 | 0.0000 |
-
-Bab el-Mandeb and Panama are identical because their training windows contain no positives, so filtering removes nothing. Option 3's direction is the *worse* of the two on Hormuz, by a negligible margin.
+- **Premise false.** `_agent_frame` passes only `timestamp` and the `shipping__*` columns, so `y_true` never reaches the agent and `fit()`'s leak filter never fires: the forest behind the Hormuz result had already been trained on mixed data.
+- Both regimes were then compared properly on real data with the harness's own split. The mixed direction was the worse of the two on Hormuz, by a small margin; Bab el-Mandeb and Panama were identical because their training windows contain no positives, so filtering removes nothing.
 
 ## 4.9 Weight optimization results
 
-Optuna, TPE sampler (seed 42), median pruner, 100 trials, 1 h cap, Dirichlet-style renormalisation per weight group. Hard constraints reject `risk_high ≤ risk_medium` and `agreement_bonus_5 ≤ agreement_bonus_3`.
+The optimizer is Optuna with the TPE sampler, a median pruner and a fixed seed, with Dirichlet-style renormalisation per weight group. Hard constraints reject `risk_high ≤ risk_medium` and `agreement_bonus_5 ≤ agreement_bonus_3`.
 
 **Objective:** `0.50·F1 + 0.30·lead_time_score − 0.20·FPR`, where lead_time_score is the earliest MEDIUM alert within 5 days before onset ÷ 5.
 
 **Test-split discipline:** touched exactly once, after the study. `PipelineEvaluator.evaluated_splits` is an audit trail proving it.
 
-**Best run:** trial 63, validation objective **0.7491**. Reproduced 2026-09-05: **100 trials requested, 57 completed, 43 pruned** by the median pruner, of which 8 were rejected by the hard constraints. Quote all three numbers — "57 trials" alone reads as a truncated run, and "100 trials" alone hides the pruning.
+**Where the numbers are.** The selected weights are in `config/optimized_weights.yaml`; the trial history, validation and test performance and the pruning counts are in `data/processed/optimization_results.json` (generated and git-ignored; `tests/conftest.py` fails the suite if a test overwrites it). This README does not restate them; that JSON is git-ignored and is not in the tag, so the study's headline figures are also recorded in `docs/SCORING_REFERENCE.md` and `docs/THESIS_BRIEF.md`. When quoting a trial count, quote requested, completed and pruned together: a completed count alone reads as a truncated run, and the requested count alone hides the pruning.
 
 > ### These numbers are not comparable to [§4.5](#45-results)
 >
-> Everything in this section is measured on **synthetic splits**: three independent 365-day realisations of the same generated world (seeds 42 / 43 / 44), carrying a ground-truth `is_disruption` label the data generator placed deliberately.
+> Everything in this section is measured on **synthetic splits**: independent 365-day realisations of the same generated world (three seeds), carrying a ground-truth `is_disruption` label the data generator placed deliberately.
 >
-> [§4.5](#45-results) is measured on the **real evaluation set**: live connector data 2019–2025, with a label derived statistically from vessel counts.
+> [§4.5](#45-results) is measured on the **real evaluation set**: live connector data ([§4.2](#42-dataset-and-ground-truth)), with a label derived statistically from vessel counts.
 >
-> Different data, different label, different harness. **An F1 of 0.933 here does not contradict a Tier 1 AUC of 0.502 there, and neither number transfers to the other setting.** The optimizer runs on synthetic data because it is the only source carrying a label that was placed rather than inferred — see [§3.4](#34-layer-1--ingestion). What this section establishes is that *tuning improves the pipeline against its own objective*, not that the pipeline detects real disruptions.
+> Different data, different label, different harness. **An F1 here does not contradict a Tier 1 AUC there, and neither number transfers to the other setting.** The optimizer runs on synthetic data because it is the only source carrying a label that was placed rather than inferred — see [§3.4](#34-layer-1--ingestion). What this section establishes is that *tuning improves the pipeline against its own objective*, not that the pipeline detects real disruptions.
 
 > ### These numbers come from the six-agent pipeline
 >
-> The 2026-09-05 study ran **before routing was removed** ([§3.10](#a-retired-domain-routing)). On the synthetic splits routing was an active, weighted agent: the optimizer searched its L2 weight, its two intra-agent weights and its threshold, and every F1, lead-time and objective value below includes its contribution.
+> The 2026-09-05 study ran **before routing was removed** ([§3.10](#a-retired-domain-routing)). On the synthetic splits routing was an active, weighted agent: the optimizer searched its L2 weight, its two intra-agent weights and its threshold, and every F1, lead-time and objective value in `data/processed/optimization_results.json` includes its contribution.
 >
-> The removal deleted routing's entries from `config/optimized_weights.yaml` **by hand, without re-running the study**. The file therefore holds the five surviving trial-63 values. They sum to 0.870, and `RiskEngine` renormalises them at run time. That is a valid configuration, but it is **not the configuration that was measured**, and the file header ("auto-generated, do not edit") no longer describes it exactly. Treat everything in this section as a record of the six-agent study until `python main.py --optimize --trials 100` is re-run on the current code ([§4.11](#411-known-defects-and-open-issues)).
+> The removal deleted routing's entries from `config/optimized_weights.yaml` **by hand, without re-running the study**. The file therefore holds the five surviving trial values, which do not sum to one; `RiskEngine` renormalises them at run time. That is a valid configuration, but it is **not the configuration that was measured**, and the file header ("auto-generated, do not edit") no longer describes it exactly. Treat everything in this section as a record of the six-agent study until `python main.py --optimize --trials 100` is re-run on the current code ([§4.11](#411-known-defects-and-open-issues)).
 
 ### Weights
 
-As measured in the six-agent study, with the effective weights the current five-agent pipeline applies after renormalisation:
-
-| Agent | Hand-tuned L2 (study) | Optimized L2 (study) | Optimized, effective now |
-|---|---|---|---|
-| shipping | 0.25 | **0.402** | 0.462 |
-| market | 0.15 | 0.088 | 0.101 |
-| geopolitical | 0.25 | 0.109 | 0.126 |
-| natural_disaster | 0.10 | 0.095 | 0.109 |
-| news_sentiment | 0.10 | **0.177** | 0.203 |
-| routing *(removed)* | 0.15 | 0.130 | — |
-
-The current hand-tuned vector is the study's five non-routing weights renormalised to sum to 1 (0.294 / 0.176 / 0.294 / 0.118 / 0.118, [§3.11](#311-weight-determination-and-optimization)).
+The study's weights (hand-tuned, optimized, and the optimized values as the current five-agent pipeline applies them after renormalisation) are in `config/optimized_weights.yaml`; the study itself was six-agent, so its routing entries have no counterpart there. The current hand-tuned vector is the study's five non-routing weights renormalised to sum to one ([§3.11](#311-weight-determination-and-optimization)).
 
 The optimizer independently concentrates weight on shipping — consistent with the dilution mechanism in [§4.6](#46-the-central-negative-finding), since shipping is the domain the label is derived from. It reaches that conclusion from the synthetic objective alone, without access to the real-data ablation.
 
-### Measured performance (synthetic splits, 365 days each)
+### Measured performance (synthetic splits)
 
-| Split | Config | F1 | Precision | Recall | FPR | Lead time | Objective |
-|---|---|---|---|---|---|---|---|
-| Validation | optimized | 0.978 | 1.000 | 0.957 | 0.000 | 4.33 d | **0.7491** |
-| Validation | hand-tuned | 0.932 | 1.000 | 0.872 | 0.000 | 1.67 d | 0.5659 |
-| Test | optimized | 0.933 | 0.977 | 0.894 | 0.0031 | 5.00 d | **0.7660** |
-| Test | hand-tuned | 0.894 | 1.000 | 0.809 | 0.000 | 1.67 d | 0.5471 |
+Validation and test F1, precision, recall, FPR, lead time and objective, for the optimized and the hand-tuned configuration, are in `data/processed/optimization_results.json` and are not restated here. How to read them does not depend on the values:
 
-**The gain is lead time, not accuracy.** F1 improves by 0.039 on the test split; detection lead time improves from 1.67 to 5.00 days — the full width of the 5-day window the objective scores. That is what the `0.30·lead_time_score` term was written to buy.
-
-**And it is paid for in false positives.** Hand-tuning holds FPR at exactly 0.000 on both splits. Optimization gives up 0.0031 on test. The `−0.20·FPR` term permits that trade deliberately; whether 3 false positives per 1,000 days is worth 3.3 days of warning is an operational judgement the objective encodes but does not settle.
-
-**`weight_mode` remains `hand_tuned` by default.** Switching to `optimized` is a deliberate config change, because the trade above should be made knowingly.
+- **The objective buys lead time, not accuracy.** The `0.30·lead_time_score` term was written to buy it; detection lead time can move at most to the full width of the 5-day window the objective scores.
+- **Read FPR and lead time together.** The `−0.20·FPR` term permits trading false positives for warning time deliberately; whether a given trade is worth it is an operational judgement the objective encodes but does not settle.
+- **`weight_mode` remains `hand_tuned` by default.** Switching to `optimized` is a deliberate config change, because that trade should be made knowingly.
 
 ### Reproducibility
 
-The 2026-09-05 re-run reproduced `config/optimized_weights.yaml` **byte-identically apart from the date header** — every weight to six decimal places, same best trial. The optimizer is fully deterministic under its seed.
+The 2026-09-05 re-run reproduced `config/optimized_weights.yaml` **byte-identically apart from the date header**: the optimizer is deterministic under its seed.
 
-**That guarantee applied to the six-agent code and does not carry over.** The current optimizer has no routing dimensions, so the TPE sampler draws a different sequence of trials. Re-running it will produce a new best trial and new numbers, not trial 63:
+**That guarantee applied to the six-agent code and does not carry over.** The current optimizer has no routing dimensions, so the TPE sampler draws a different sequence of trials. Re-running it will produce a new best trial and new numbers, not the study's best trial:
 
 ```bash
 python main.py --optimize --trials 100
@@ -979,13 +928,13 @@ python main.py --optimize --trials 100
 
 ## 4.10 Threats to validity — what cannot be claimed
 
-Stated explicitly, because a defence will find them otherwise.
+Stated explicitly, because a defence will find them otherwise. None of them restates a number; the numbers are in [`eval/results_main.md`](eval/results_main.md).
 
-1. **Cannot claim the system beats baselines at detection.** On Hormuz it is at chance (0.502 vs 0.968 for logistic regression). Only Panama (0.909) is competitive.
-2. **Cannot claim agent diversity improves detection.** Measured on real data, AUC *falls* monotonically as agents are added, in every evaluable region.
-3. **Cannot cite tier AUC as clean detection skill.** Every tier is rated `high` circularity — tiers include the shipping level-shift feature, which is the label's own statistic.
-4. **Cannot claim performance on the 2026 Hormuz shutdown.** It is not in the evaluation frame, which ends 2025-08-30.
-5. **Cannot claim slow-onset detection.** The label itself misses it — Panama's 38 % drought decline is almost entirely unlabelled.
+1. **Cannot claim the system beats baselines at detection.** The comparison table names the best non-ceiling method per region; read any claim about the system against its own row and interval, not against a headline number.
+2. **Cannot claim agent diversity improves detection.** Read the Tier rows and the paired ΔAUC ([§4.6](#46-the-central-negative-finding)); a region whose interval includes zero shows no change in either direction.
+3. **Cannot cite tier AUC as clean detection skill.** Every tier carries a circularity rating in the table: tiers include the shipping level-shift feature, which is the label's own statistic.
+4. **Cannot claim performance on the 2026 Hormuz shutdown.** It is not in the evaluation frame, which ends at `evaluation.end_date` in `config/settings.yaml`.
+5. **Cannot claim slow-onset detection.** The label itself misses it — Panama's drought decline is almost entirely unlabelled.
 6. **Cannot present the [§4.9](#49-weight-optimization-results) optimization gain as a property of the current five-agent pipeline.** It was measured with routing active on the synthetic splits.
 7. **Cannot cite METRIC 5 or any 8-metric number** until the defects in [§4.11](#411-known-defects-and-open-issues) are resolved.
 
@@ -1015,7 +964,7 @@ Stated explicitly, because a defence will find them otherwise.
 4. **`PipelineEvaluator.build_agents` hardcodes agent config** instead of reading `settings.yaml`, so the optimizer tunes a slightly different agent than the live pipeline runs.
 5. **The SHAP surrogate sees 17 of the features, not all.** Absent: `tanker_count`, `vessel_count_trend`, `freight_services_pct_change`, `sentiment_magnitude`, `recency_weighted_score`. Missing columns fill with 0.0 — indistinguishable from a true zero.
 6. **The shipping duration score is near-circular** against the level-shift label. Cite operationally, never as detection skill.
-7. **The test suite writes into the figure directory.** `tests/test_phase4_depth.py::test_comparison_plots_saved` calls `generate_comparison_plot(..., save_dir="data/processed/")`, so **running `pytest` silently overwrites `shap_comparison_waterfall.png` and `shap_comparison_importance.png` with plots built from test fixtures**. Any figure taken from that directory must be regenerated from a real pipeline run *after* the last test invocation. The test should write to a `tmp_path` fixture instead.
+7. **The test suite used to write into the figure directory (resolved in the freeze commit).** `tests/test_phase4_depth.py::test_comparison_plots_saved` now writes to `tmp_path`, and `tests/conftest.py` fails the suite if `shap_comparison_waterfall.png` or `shap_comparison_importance.png` in `data/processed/` changes while it runs. No code writes those two images any more: the copies on disk are legacy plots built from test fixtures, which the dashboard still shows. Do not cite them.
 
 ### Four composite paths that are not identical
 
@@ -1037,7 +986,7 @@ Always state which produced a reported number.
 | Method comparison (7) | `eval/graphs_method_comparison/` | **Current, real data — cite freely** |
 | Tier ablation (3) | `eval/graphs_ablation_tiers/` | **Current** |
 | Optimizer (6) | `data/processed/` (gitignored) | ⚠ **Six-agent study** — regenerated 2026-09-05, before routing was removed. Cite only with that caveat, or regenerate |
-| SHAP comparison (2) | `data/processed/` (gitignored) | ⚠ **Do not cite.** Overwritten by the *test suite* on every run — see code-level item 7 above. They show fixture data, not a real pipeline run |
+| SHAP comparison (2) | `data/processed/` (gitignored) | ⚠ **Do not cite.** Legacy plots built from test fixtures by an earlier test run; nothing regenerates them now — see code-level item 7 above. They show fixture data, not a real pipeline run |
 | SHAP beeswarm/waterfall (2) | `data/processed/` (gitignored) | ✗ **Stale (2026-06-20) — do not cite** |
 
 Malacca deliberately has no tier-progression chart: `graph_tiers()` drops NaN-AUC rows and all of Malacca's are NaN. It is covered instead by `A2_false_positive_harness.png`. All four regions' tier data is in the CSV.
@@ -1325,9 +1274,9 @@ pytest tests/test_agents.py::test_market_agent_evaluation -v -s
 | `weights.shipping` / `.geopolitical` | `0.294` | L2 weight in the composite (hand-tuned, renormalised over five agents) |
 | `weights.market` | `0.176` | L2 weight in the composite |
 | `weights.natural_disaster` / `.news_sentiment` | `0.118` | L2 weight in the composite |
-| `thresholds.risk_critical` | `0.90` | Composite cutoff for CRITICAL — p97 of calm days ([§3.11](#311-weight-determination-and-optimization)) |
-| `thresholds.risk_high` | `0.69` | Composite cutoff for HIGH — p85 of calm days |
-| `thresholds.risk_medium` | `0.51` | Composite cutoff for MEDIUM — p60 of calm days |
+| `thresholds.risk_critical` | `0.90` | Composite cutoff for CRITICAL: a fixed display threshold, not calibrated ([§3.11](#311-weight-determination-and-optimization)) |
+| `thresholds.risk_high` | `0.69` | Composite cutoff for HIGH: a fixed display threshold |
+| `thresholds.risk_medium` | `0.51` | Composite cutoff for MEDIUM: a fixed display threshold |
 | `thresholds.risk_low` | `0.30` | Composite cutoff for LOW |
 | `weight_mode` | `hand_tuned` | `hand_tuned` (settings.yaml) or `optimized` (`config/optimized_weights.yaml`) |
 | `optimization.n_trials` | `100` | Optuna trial budget for `python main.py --optimize` |

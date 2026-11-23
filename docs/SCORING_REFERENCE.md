@@ -468,12 +468,17 @@ amplification applied.
 | `agreement_bonus_3` | 1.15 | 1.277 |
 | `agreement_bonus_5` | 1.25 | 1.443 |
 
-The hand-tuned bands are **empirically calibrated, not picked**: they are the
-p60 / p85 / p97 quantiles of the composite score on *calm* (label-negative) days,
-pooled across all four regions 2019–2026 (9,183 days). They were recalibrated
-when the shipping agent stopped batch-normalising its forest score — the same
-quantiles of calm behaviour, expressed on the new absolute scale, not a
-loosening.
+The hand-tuned bands are **fixed display thresholds, not calibrated**. They cut the
+composite into words for the dashboard and the narrative. They do not enter the real-data
+evaluation (its alert rule is each method's training-window 90th percentile); the
+synthetic weight optimizer does read `risk_high` and `risk_medium` (F1 and the lead-time
+score).
+Provenance: the values were set in commit `f7b87ff` (2026-08-30) by a quantile method
+(p97 / p85 / p60 of the composite on label-negative days) run on the pipeline of that
+time, test window included. No script was kept, so they cannot be reproduced and have
+not been re-derived for the current five-agent composite. `scripts/calibrate_risk_bands.py`
+reconstructs the method on training days only and gives different values; that is
+documented, and not applied, in the comment above `thresholds` in `config/settings.yaml`.
 
 ### 4.4 Per-day vs single-shot
 

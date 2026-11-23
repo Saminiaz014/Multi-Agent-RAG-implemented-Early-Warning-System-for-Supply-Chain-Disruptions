@@ -106,3 +106,51 @@ def test_the_table_says_what_the_debiased_r2_and_the_table_cannot_show() -> None
     test = pd.DataFrame({"f1": [0.5, 0.6]})
     text = bem.render_table(bem.error_decomposition(y, p, train_mean=0.5), train, test, ["f1"])
     assert "upper bound" in text and "covariate shift" in text and "unexplained" in text
+
+
+# ------------------------------------------- the committed CSV (read by eval/RESULTS_FROZEN.md)
+def _frames():
+    rng = np.random.default_rng(5)
+    train = pd.DataFrame({"a": rng.uniform(0, 1, 120), "b": rng.uniform(0, 1, 120)})
+    test = pd.DataFrame({"a": rng.uniform(0.5, 1.5, 60), "b": rng.uniform(0, 1, 60)})
+    return train, test
+
+
+def test_the_csv_rows_carry_every_number_the_table_shows() -> None:
+    y, p = _pair(seed=2, shift=0.2)
+    train, test = _frames()
+    decomp = bem.error_decomposition(y, p, train_mean=0.4)
+    rows = bem.numeric_rows(decomp, train, test, ["a", "b"])
+    scalar = {r["quantity"]: r["value"] for r in rows if r["feature"] == ""}
+    for key, value in decomp.items():
+        assert scalar[key] == pytest.approx(value), key
+    assert scalar["any_outside"] == pytest.approx(bem.any_outside(train, test, ["a", "b"]))
+    a = bem.outside_range(train["a"], test["a"])
+    by_feature = {(r["quantity"], r["feature"]): r["value"] for r in rows if r["feature"]}
+    for key in ("outside", "below", "above", "train_min", "train_max", "test_min", "test_max"):
+        assert by_feature[(key, "a")] == pytest.approx(a[key]), key
+    assert {f for _, f in by_feature} == {"a", "b"}
+
+
+def test_the_csv_is_written_in_long_form_with_the_region(tmp_path) -> None:
+    y, p = _pair()
+    train, test = _frames()
+    rows = bem.numeric_rows(bem.error_decomposition(y, p, train_mean=0.5), train, test, ["a"])
+    path = tmp_path / "bem.csv"
+    bem.write_rows(rows, path)
+    back = pd.read_csv(path, keep_default_na=False)
+    assert list(back.columns) == ["region", "quantity", "feature", "value"]
+    assert set(back["region"]) == {bem.REGION}
+    assert len(back) == len(rows)
+
+
+def test_the_diagnostic_writes_its_csv_next_to_the_other_committed_results() -> None:
+    assert bem.CSV_OUT == _ROOT / "eval" / "bem_surrogate.csv"
+
+
+def test_the_csv_uses_unix_line_endings_whatever_the_platform(tmp_path) -> None:
+    y, p = _pair()
+    train, test = _frames()
+    path = tmp_path / "bem.csv"
+    bem.write_rows(bem.numeric_rows(bem.error_decomposition(y, p, train_mean=0.5), train, test, ["a"]), path)
+    assert b"\r\n" not in path.read_bytes()

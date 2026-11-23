@@ -156,3 +156,10 @@ def test_figures_md_names_the_f_series_that_exists_and_not_one_that_does_not() -
     doc = mf.render_figures_md()
     assert "`F1`" in doc and "`F10`" in doc and "`F12`" in doc and "`F16`" in doc
     assert "F1` to `F16" not in doc                           # there is no F11
+
+
+def test_an_abbreviated_option_is_refused_too(monkeypatch) -> None:
+    monkeypatch.setattr(mf, "run", lambda *a, **k: pytest.fail("drew figures"))
+    with pytest.raises(SystemExit) as exc:
+        mf.main(["--write-do"])                               # a prefix of --write-doc
+    assert exc.value.code == 2

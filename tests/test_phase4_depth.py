@@ -303,12 +303,13 @@ def test_rag_quality():
 
 
 # ---------------------------------------------------------------------------
-# Test 4 — comparison PNGs saved to data/processed/
+# Test 4 — comparison PNGs saved (to tmp_path)
 # ---------------------------------------------------------------------------
 
 
-def test_comparison_plots_saved(scenario_data):
-    """Both comparison PNGs are created by generate_comparison_plot()."""
+def test_comparison_plots_saved(scenario_data, tmp_path):
+    """Both comparison PNGs are created by generate_comparison_plot() (in tmp_path: the real
+    ones in data/processed/ are shown by the dashboard and guarded by tests/conftest.py)."""
     df, _, _ = scenario_data
 
     ht_engine = RiskEngine(_HT_CFG)
@@ -316,7 +317,7 @@ def test_comparison_plots_saved(scenario_data):
 
     paths = generate_comparison_plot(
         df,
-        save_dir="data/processed/",
+        save_dir=str(tmp_path),
         risk_engine_ht=ht_engine,
         risk_engine_opt=opt_engine,
     )

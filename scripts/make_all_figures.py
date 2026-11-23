@@ -164,7 +164,7 @@ def run(thesis_dir: Path | None = None,
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], allow_abbrev=False)
     parser.add_argument("--write-doc", action="store_true",
                         help="rewrite eval/FIGURES.md from the registry instead of drawing")
     if parser.parse_args(argv).write_doc:

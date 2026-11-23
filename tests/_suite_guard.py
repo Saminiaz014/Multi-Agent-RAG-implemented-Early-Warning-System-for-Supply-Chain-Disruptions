@@ -16,6 +16,16 @@ REAL_OPTIMIZER_OUTPUTS: tuple[Path, ...] = (
     ROOT / "config" / "optimized_weights.yaml",
 )
 
+#: The two SHAP comparison plots (hand-tuned vs optimized weights) the dashboard shows;
+#: written by ``generate_comparison_plot``, so a test must give it a ``tmp_path``.
+REAL_SHAP_PLOTS: tuple[Path, ...] = (
+    ROOT / "data" / "processed" / "shap_comparison_waterfall.png",
+    ROOT / "data" / "processed" / "shap_comparison_importance.png",
+)
+
+#: Everything the suite-wide guard watches.
+GUARDED_OUTPUTS: tuple[Path, ...] = REAL_OPTIMIZER_OUTPUTS + REAL_SHAP_PLOTS
+
 
 def fingerprint(path: Path) -> tuple[str, int] | None:
     """(sha256, mtime in ns) of the file, or None if it does not exist.

@@ -23,7 +23,9 @@ Usage::
 
     python eval/diagnostics/bem_surrogate.py
 
-Writes ``data/eval/diagnostics/bem_surrogate.md`` (git-ignored) and prints it.
+Writes ``data/eval/diagnostics/bem_surrogate.md`` (git-ignored) and prints it, and
+``eval/bem_surrogate.csv`` (committed): the same numbers in long form
+(``region, quantity, feature, value``), which ``eval/RESULTS_FROZEN.md`` reads.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "data" / "eval" / "diagnostics"
+CSV_OUT = ROOT / "eval" / "bem_surrogate.csv"
 REGION = "bab_el_mandeb"
 
 
@@ -133,6 +136,29 @@ def render_table(decomp: dict, train: pd.DataFrame, test: pd.DataFrame,
     return table + "\n\n" + _NOTES + "\n"
 
 
+def numeric_rows(decomp: dict, train: pd.DataFrame, test: pd.DataFrame,
+                 features: list[str]) -> list[dict]:
+    """The diagnostic's numbers as long-form rows (``quantity``, ``feature``, ``value``).
+
+    ``feature`` is empty for the error decomposition and ``any_outside``, and
+    names the feature for each :func:`outside_range` quantity.
+    """
+    rows = [{"quantity": k, "feature": "", "value": float(v)} for k, v in decomp.items()]
+    rows.append({"quantity": "any_outside", "feature": "",
+                 "value": any_outside(train, test, features)})
+    for f in features:
+        for k, v in outside_range(train[f], test[f]).items():
+            rows.append({"quantity": k, "feature": f, "value": float(v)})
+    return rows
+
+
+def write_rows(rows: list[dict], path: Path, region: str = REGION) -> None:
+    """Write :func:`numeric_rows` to ``path`` as ``region, quantity, feature, value``."""
+    frame = pd.DataFrame(rows)
+    frame.insert(0, "region", region)
+    frame.to_csv(path, index=False, lineterminator="\n")
+
+
 def _load_script(name: str, rel: str):
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(ROOT / "scripts"))
@@ -165,10 +191,11 @@ def main() -> int:
               "surrogate metrics, so its top-5 features may not belong to this model.")
         return 1
     top = [t["feature"] for t in summary["regions"][REGION]["top_shap_features"]]
-    table = render_table(error_decomposition(y_te, pred, train_mean=float(np.mean(y_tr))),
-                         X_tr, X_te, top)
+    decomp = error_decomposition(y_te, pred, train_mean=float(np.mean(y_tr)))
+    table = render_table(decomp, X_tr, X_te, top)
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "bem_surrogate.md").write_text(table, encoding="utf-8")
+    write_rows(numeric_rows(decomp, X_tr, X_te, top), CSV_OUT)
     print(f"reproduces the committed held-out R² ({committed:.3f})\n")
     print(table)
     return 0
