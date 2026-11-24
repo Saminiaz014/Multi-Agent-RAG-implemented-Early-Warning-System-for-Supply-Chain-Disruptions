@@ -39,8 +39,6 @@ from src.dashboard import core  # noqa: E402
 
 OUT_DIR = _PROJECT_ROOT / "thesis" / "figures" / "ch3_demo"
 LIVE_DIR = _PROJECT_ROOT / "data" / "live"
-#: Conflict (ACLED) data ends here on the free tier's 12-month lag.
-ACLED_END = "2025-10-29"
 #: Window the Decision-view snapshots are captured with, so the assessed day
 #: (the window's peak) stays within a week of the snapshot date.
 DECISION_WINDOW = "1 week"
@@ -157,17 +155,35 @@ def decision_view_state(region: str, date: str, params: dict) -> dict:
     }
 
 
+def acled_end(region: str) -> str:
+    """Last day with ACLED conflict data in the region's live frame, read from its manifest.
+
+    Returns ``"unknown"`` if the manifest is missing or records no coverage.
+    """
+    try:
+        manifest = json.loads((LIVE_DIR / f"{region}.manifest.json").read_text(encoding="utf-8"))
+        return str(manifest["coverage"]["geopolitical"][1])
+    except (OSError, KeyError, IndexError, ValueError):
+        return "unknown"
+
+
+def gap_notes(region: str, gaps: list[str], risk: pd.DataFrame) -> list[str]:
+    """Why an agent has no score on a snapshot day, as the demonstration text states it."""
+    notes = []
+    if "geopolitical" in gaps:
+        notes.append(f"geopolitical: ACLED conflict data end {acled_end(region)}")
+    if "news_sentiment" not in risk.columns:
+        notes.append("news_sentiment: no GDELT series (HTTP 429 when the series was built)")
+    return notes
+
+
 def snapshot(case: dict, risk: pd.DataFrame, raw: pd.DataFrame, date: str,
              params: dict, active: list[str]) -> dict:
     thr = params["thresholds"]
     i = int(risk["timestamp"].searchsorted(pd.Timestamp(date)))
     row = risk.iloc[i]
     gaps = [a for a in active if pd.isna(row.get(a))]
-    notes = []
-    if "geopolitical" in gaps:
-        notes.append(f"geopolitical: ACLED conflict data end {ACLED_END}")
-    if "news_sentiment" not in risk.columns:
-        notes.append("news_sentiment: no GDELT series (HTTP 429 when the series was built)")
+    notes = gap_notes(case["region"], gaps, risk)
     return {
         "date": f"{row['timestamp']:%Y-%m-%d}",
         "risk_score": _r(row["risk_score"]),

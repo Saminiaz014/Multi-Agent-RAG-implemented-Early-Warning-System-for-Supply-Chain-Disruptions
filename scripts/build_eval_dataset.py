@@ -37,12 +37,12 @@ gap in the news series is an error.
 current GDELT series. The other domains are not re-pulled, so their values and
 the frame's rows stay exactly as they were.
 
-Ground truth is the shipping connector's ``is_disruption`` — a 2-sigma
-persistent drop in transits, plus the pinned April-May 2026 Hormuz shutdown.
-Its known weakness travels with the data in the manifest: a 30-day rolling
-baseline drifts down with a slow decline, so the label catches shocks and
-misses slow-onset disruption. Panama's 2023-24 drought is the case in point —
-transits fell 38% and the label flags almost none of it.
+Ground truth is ``y_true``: a level shift in ``vessel_count`` (see
+:func:`level_shift_label`). The connector's own 2-sigma flag, ``is_disruption``,
+is kept beside it as ``y_true_shock``. A trailing baseline follows a slow decline
+down, so the label is built to catch level shifts and can lose the start of a
+slow-onset disruption; the manifest's ``label_definition`` and
+``label_validation`` record the rule and the episodes it recovers.
 
 Output is cached under ``data/eval/`` (gitignored, like every other derived
 artefact) so the comparison and ablation scripts do not re-pull the APIs.
@@ -261,7 +261,45 @@ def attach_news(frame: pd.DataFrame, news: pd.DataFrame, *,
     return out, source
 
 
-def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFrame, dict]:
+_SHIPPING_REQUIRED = ("timestamp", "vessel_count", "is_disruption")
+
+
+def shipping_from_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Rebuild the shipping connector's output from a frame this builder wrote.
+
+    The inverse of the shipping part of :func:`build_region`'s merge: the
+    ``shipping__`` columns lose their prefix and ``y_true_shock`` (the
+    connector's own 2-sigma flag) becomes ``is_disruption`` again. Days with no
+    vessel count are not shipping days and are dropped. Passed back to
+    :func:`build_region` as ``shipping=``, it gives the frame that fetching
+    would have given, for the same days, without calling PortWatch.
+
+    Args:
+        frame: A frame written by :func:`build_region` (an evaluation or live
+            frame), with ``timestamp``, ``shipping__*`` and ``y_true_shock``.
+
+    Returns:
+        ``timestamp``, ``is_disruption`` and the shipping features, by day.
+
+    Raises:
+        ValueError: If ``shipping__vessel_count`` or ``y_true_shock`` is
+            missing, so the frame is not one this builder wrote.
+    """
+    prefix = "shipping__"
+    for needed in ("shipping__vessel_count", "y_true_shock"):
+        if needed not in frame.columns:
+            raise ValueError(f"cannot rebuild the shipping frame: no {needed} column")
+    columns = [c for c in frame.columns if c.startswith(prefix)]
+    out = frame[["timestamp", *columns]].rename(columns={c: c[len(prefix):] for c in columns})
+    out["timestamp"] = pd.to_datetime(out["timestamp"])
+    out["is_disruption"] = frame["y_true_shock"].fillna(False).astype(bool).to_numpy()
+    out = out.dropna(subset=["vessel_count"]).sort_values("timestamp").reset_index(drop=True)
+    return out[["timestamp", *[c[len(prefix):] for c in columns], "is_disruption"]]
+
+
+def build_region(region: str, drop_incomplete: bool = True,
+                 shipping: pd.DataFrame | None = None,
+                 shipping_source: dict | None = None) -> tuple[pd.DataFrame, dict]:
     """Build one region's merged evaluation frame and its manifest.
 
     Args:
@@ -270,7 +308,24 @@ def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFram
             ``False`` keeps every shipping day and leaves a domain NaN outside
             its source's coverage, for a live series that runs up to the
             latest shipping day (``scripts/build_live_risk_series.py``).
+        shipping: A shipping frame (see :func:`shipping_from_frame`) to use in
+            place of fetching PortWatch. Every other domain is still fetched.
+        shipping_source: What ``shipping`` came from, recorded in the manifest
+            as ``shipping_source`` so that a frame built without calling
+            PortWatch says so. Given with ``shipping`` or not at all.
+
+    Raises:
+        ValueError: If only one of ``shipping`` and ``shipping_source`` is
+            given, or ``shipping`` lacks ``timestamp``, ``vessel_count`` or
+            ``is_disruption``.
     """
+    if (shipping is None) != (shipping_source is None):
+        raise ValueError("shipping and shipping_source go together: a supplied shipping frame "
+                         "must say where it came from (shipping_source), and a source needs a frame")
+    if shipping is not None:
+        absent = [c for c in _SHIPPING_REQUIRED if c not in shipping.columns]
+        if absent:
+            raise ValueError(f"the shipping frame has no {', '.join(absent)} column")
     config = load_config_for_region(region)
     frames: dict[str, pd.DataFrame] = {}
     timings: dict[str, float] = {}
@@ -278,7 +333,10 @@ def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFram
     for domain in _DOMAIN_FEATURES:
         started = time.monotonic()
         print(f"    {domain:<18}", end="", flush=True)
-        df = _fetch_domain(domain, config)
+        if domain == "shipping" and shipping is not None:
+            df = shipping                       # supplied: PortWatch is not called
+        else:
+            df = _fetch_domain(domain, config)
         timings[domain] = round(time.monotonic() - started, 1)
         if df is None or df.empty:
             print(f"unavailable ({timings[domain]}s)")
@@ -292,13 +350,13 @@ def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFram
             "truth label — there is nothing to evaluate against."
         )
 
-    shipping = frames["shipping"].sort_values("timestamp").reset_index(drop=True)
-    merged = shipping[["timestamp", "is_disruption"]].copy()
+    shipping_days = frames["shipping"].sort_values("timestamp").reset_index(drop=True)
+    merged = shipping_days[["timestamp", "is_disruption"]].copy()
     # y_true is the level-shift label; the connector's 2-sigma flag is kept
     # alongside it as y_true_shock so the two are comparable rather than one
     # silently replacing the other.
     merged = merged.rename(columns={"is_disruption": "y_true_shock"})
-    merged["y_true"] = level_shift_label(shipping["vessel_count"]).to_numpy()
+    merged["y_true"] = level_shift_label(shipping_days["vessel_count"]).to_numpy()
 
     present: dict[str, list[str]] = {}
     for domain, df in frames.items():
@@ -381,6 +439,8 @@ def build_region(region: str, drop_incomplete: bool = True) -> tuple[pd.DataFram
         "positive_days_shock": int(merged["y_true_shock"].sum())
         if not merged.empty else 0,
     }
+    if shipping_source is not None:
+        manifest["shipping_source"] = shipping_source
     if news_source is not None:
         manifest["news_source"] = news_source
     if "market" in frames and frames["market"].attrs.get("market_source"):

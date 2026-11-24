@@ -1,13 +1,18 @@
 # Thesis Writing Brief — Complete Project State
 
-**Date of record:** 2026-09-02
-**Branch:** `phase-11-4region` (68 commits) · **HEAD:** `88c4274`
-**Test suite:** 420 passed, 0 failed (5m22s)
-**Scale:** 136 tracked files, 60 source modules, 25 test modules
+**State of record:** the git tag `v1.0.1-thesis` (after the freeze at `v1.0-thesis`).
 
-This document is the single source of truth for writing up the thesis. Every
-number in it was measured in this repository, not estimated. Where a number
-should not be cited as evidence of skill, that is stated at the point of use.
+This document is the guide for writing up the thesis. It states **no measured value of the real-data evaluation**: no result, dataset size, commit count or test count. Each is read from the place that produces it, so it cannot go stale here:
+
+| What | Where |
+|---|---|
+| Detection results, ablations, split sensitivity, false-alarm rates, surrogate fidelity, lead time | [`eval/RESULTS_FROZEN.md`](../eval/RESULTS_FROZEN.md) and [`eval/results_main.md`](../eval/results_main.md), generated from the committed CSVs |
+| Dataset size, date range, positives, provenance of the inputs | `data/eval/<region>.manifest.json` (git-ignored; written by `scripts/build_eval_dataset.py`) |
+| Commits, test count, file count | `git log`, `pytest -q` |
+
+The synthetic optimizer study (§5.5), the graph inventory (Part VI) and the dated defect records (Part VII) keep their own figures and dates as records of those studies. They are not results of the real-data evaluation and are not to be cited as such.
+
+Where a number should not be cited as evidence of skill, that is stated at the point of use.
 
 Companion: `docs/SCORING_REFERENCE.md` — deeper per-agent formulas.
 
@@ -146,27 +151,16 @@ cannot settle whether to re-enable it.
 
 # PART IV — DATA
 
-## 4.1 Real evaluation dataset (`data/eval/`, built 2026-08-30)
+## 4.1 Real evaluation dataset (`data/eval/`)
 
-| Region | Rows | Dropped | Date range | Positive days | Rate | Missing domain |
-|---|---|---|---|---|---|---|
-| hormuz | 2,434 | 358 | 2019-01-01 → 2025-08-30 | **159** | 6.53% | news_sentiment |
-| bab_el_mandeb | 2,434 | 358 | 2019-01-01 → 2025-08-30 | **244** | 10.02% | news_sentiment |
-| panama | 2,433 | 359 | 2019-01-01 → 2025-08-29 | **149** | 6.12% | — (all present) |
-| malacca | 2,434 | 358 | 2019-01-01 → 2025-08-30 | **0** | 0.00% | news_sentiment |
+Built by `scripts/build_eval_dataset.py` from the live connectors, merged on a daily index. Each region's row count, date range, positive days and rate, the domains present and missing, and the provenance of its news, market and ACLED inputs are in `data/eval/<region>.manifest.json` (git-ignored; regenerate with the script). None is restated here. The positives and scored days of the test window are at the head of each region's section in `eval/RESULTS_FROZEN.md`.
 
-**Live sources:** shipping = IMF PortWatch chokepoint transits; market = FRED
-(Brent, freight PPI, freight services); natural_disaster = GDACS (Orange;Red
-only) + USGS (M ≥ 4.0); geopolitical = ACLED; news_sentiment = GDELT when it
-answered. Fetch cost is recorded per region (e.g. Hormuz geopolitical 663.6s).
+**Live sources:** shipping = IMF PortWatch chokepoint transits; market = FRED (Brent, freight PPI, freight services); natural_disaster = GDACS (Orange/Red only) + USGS (`USGSExtractor.min_magnitude`, a code default); geopolitical = ACLED; news_sentiment = GDELT 1.0 daily event export (`scripts/build_gdelt_news_csv.py`).
 
 **Two facts that must appear in the thesis:**
 
-1. **The eval frame ends 2025-08-30.** The pinned April–May 2026 Hormuz
-   shutdown is **not in it**. The 159 Hormuz positives are earlier events.
-2. **news_sentiment is missing from three of four regions** — GDELT did not
-   answer. Column sets are recorded per region in the manifest specifically so
-   a five-feature region is never silently compared against a four-feature one.
+1. **The test window ends at `evaluation.end_date` in `config/settings.yaml`**, a limit set by the ACLED data; the frame may run a few days past it, and those days are not scored. The pinned April–May 2026 Hormuz shutdown is **not in the window**; the positives are earlier events.
+2. **Days GDELT never published are masked, not filled** (`rows_news_masked` and `news_source.missing_days` in the manifest): they stay NaN and are left out of every score. No domain is missing from any region's frame (`domains_missing` is empty in each manifest); which agents a region *uses* is a separate setting, the `enabled` flags in its region config.
 
 ## 4.2 Ground-truth label
 
@@ -175,10 +169,7 @@ y_true = 30-day mean of vessel_count is ≥20% below the trailing
          365-day median, sustained 14+ consecutive days
 ```
 
-**Recorded weakness (in the manifest, travels with the data):** a rolling
-baseline drifts down with a slow decline, so the label catches shocks and
-misses slow-onset disruption. **Panama's 2023–24 drought cut transits 38% and
-the label flags almost none of it.**
+**Recorded weakness:** a trailing baseline follows a slow decline down, so the label is built to catch level shifts and can lose the start of a slow-onset disruption. The manifest records `label_definition`, `label_validation` and `label_secondary` with the frame. How much of a given episode is labelled is read from the test positives in `eval/RESULTS_FROZEN.md`, not from a sentence here.
 
 ## 4.3 Synthetic splits (optimizer + `notebooks/evaluation.py`)
 
@@ -200,25 +191,17 @@ stream. Seed 42 train / 43 validation / 44 test, 365 days each.
 
 # PART V — RESULTS
 
-## 5.1 Method comparison — the headline evidence
+**§5.1 to §5.4 state no number; §5.5 is the synthetic optimizer study and keeps its own figures.** The results are generated from the committed CSVs by `scripts/results_table.py` and `scripts/make_results_frozen.py`. Read them in [`eval/results_main.md`](../eval/results_main.md) (every method, one table per region: AUC with its bootstrap interval, and the paired ΔAUC against Tier 1) and in [`eval/RESULTS_FROZEN.md`](../eval/RESULTS_FROZEN.md) (main table, Eq. 1 ablation, agent ablations, split sensitivity, Malacca false-alarm rates, surrogate fidelity with the Bab el-Mandeb diagnostic, lead time, and the commit and manifest hashes). A sentence in the thesis about a result cites one of those two files.
 
-**Design (three decisions that carry the weight):**
+## 5.1 Method comparison — the design
 
-1. **One temporal split for everyone.** Last 30% of each region's series is the
-   test window; nothing is fitted on it. A supervised model scored on its own
-   training rows posts an inflated, non-comparable number. Temporal not random,
-   because shuffling days leaks the future into the past.
-2. **Tiers build real agents.** Each tier fits and runs actual agent classes,
-   composited with the project's own weights. Approximating a tier by averaging
-   "the first N feature columns" would measure nothing — the first two columns
-   are both shipping features, so a "Tier 2" built that way contains no market
-   signal at all.
-3. **Malacca is a false-positive harness, not a detection test.** Zero labelled
-   disruptions → AUC undefined. What it measures is alert rate on a quiet region.
+**Three decisions carry the weight:**
 
-**Circularity rating, recorded per method** — because the label is
-"vessel_count vs a trailing long baseline," any method computing that same
-statistic predicts it by construction:
+1. **One temporal split for everyone.** A fixed split date (`evaluation.split_date` in `config/settings.yaml`): every method is fitted on the days before it and scored from it to `evaluation.end_date`; nothing is fitted on the test window. A supervised model scored on its own training rows posts an inflated, non-comparable number. Temporal not random, because shuffling days leaks the future into the past.
+2. **Tiers build real agents.** Each tier fits and runs actual agent classes, composited with the project's own weights. Approximating a tier by averaging "the first N feature columns" would measure nothing — the first two columns are both shipping features, so a "Tier 2" built that way contains no market signal at all.
+3. **Malacca is a false-positive harness, not a detection test.** Zero labelled disruptions → AUC undefined. What it measures is the alert rate on a quiet region.
+
+**Circularity rating, recorded per method** — because the label is "vessel_count vs a trailing long baseline," any method computing that same statistic predicts it by construction:
 
 | Rating | Meaning |
 |---|---|
@@ -227,161 +210,33 @@ statistic predicts it by construction:
 | `low` | reads other features, or shape rather than level |
 | `n/a` | controls and oracles |
 
-**All tiers are rated `high`**, because they include the shipping agent's
-level-shift feature.
+**All tiers are rated `high`**, because they include the shipping agent's level-shift feature. Which method is best in a region is named in one place only, `eval/results_main.md`.
 
-### HORMUZ (159 positives, 6.53%)
+## 5.2 The central negative finding — what adding agents does
 
-| Method | Kind | Circ. | AUC | F1 | FPR |
-|---|---|---|---|---|---|
-| ORACLE label t−1 | oracle | n/a | 0.986 | 0.977 | 0.005 |
-| B7 logistic regression | supervised | medium | **0.968** | 0.682 | 0.020 |
-| B6 CUSUM | unsupervised | high | 0.958 | 0.000 | 0.000 |
-| M3 persistence | unsupervised | high | 0.851 | 0.503 | 0.140 |
-| B8 random forest | supervised | medium | 0.747 | 0.378 | 0.100 |
-| M8 matrix profile | unsupervised | low | 0.596 | 0.227 | 0.104 |
-| M0 random | control | n/a | 0.526 | 0.165 | 0.094 |
-| **Tier 1** | multi-agent | high | **0.502** | 0.034 | 0.164 |
-| M1/M2 always/never | control | n/a | 0.500 | 0.000 | 0.000 |
-| **Tier 2** | multi-agent | high | **0.465** | 0.071 | 0.139 |
-| B3 isolation forest | unsupervised | low | 0.434 | 0.085 | 0.194 |
-| **Tier 3/4/5** | multi-agent | high | **0.400** | 0.141 | 0.265 |
+It is read from the tier rows of `eval/results_main.md` (AUC per tier with its interval, and the paired ΔAUC against Tier 1) and from the agent ablations in `eval/RESULTS_FROZEN.md`. Region by region, a ΔAUC interval that excludes zero is a change; one that includes zero is not; a tier that copies the tier before it (the region disables the agent it would add) is not a separate comparison. The agent-diversity hypothesis (SRQ2) is decided by those intervals, not by a sentence here.
 
-The best non-ceiling method per region is named in `eval/results_main.md`; the table above is from an earlier run, in which Tier 1 is at chance.
+**Proposed mechanism: dilution.** The label is shipping-derived, so every non-shipping agent adds weighted score that has no reason to correlate with it, pulling the composite toward noise. The agent ablations are where that reading can be checked. On the false-alarm side, Malacca's alert rates by tier are in the same page.
 
-### BAB_EL_MANDEB (244 positives, 10.02%)
+## 5.3 Root-cause analysis — why Hormuz Tier 1 scores low
 
-| Method | Circ. | AUC | F1 | FPR |
-|---|---|---|---|---|
-| ORACLE label t−1 | n/a | 0.997 | 0.996 | 0.002 |
-| M3 persistence | high | 0.961 | 0.784 | 0.234 |
-| **Tier 1** | high | **0.679** | 0.553 | 0.735 |
-| **Tier 2** | high | **0.620** | 0.511 | 0.546 |
-| B2 MA crossover | medium | 0.581 | 0.386 | 0.177 |
-| B3 isolation forest | low | 0.500 | 0.410 | 0.628 |
-| **Tier 3/4/5** | high | **0.449** | 0.441 | 0.682 |
-| B6 CUSUM | high | 0.263 | 0.498 | 0.737 |
+A decomposition of the shipping agent's anomaly score into its two components, `duration` and `shock`, was run on an earlier evaluation window (a 70/30 split). It found the duration component separating the label, the shock component doing the opposite, and `max(shock, duration)` returning the shock component nearly everywhere: **masking**. No script was kept and it has not been rerun on the fixed split, so none of its numbers is restated: present it as a hypothesis for the current result, not a measurement of it ([README §4.7](../README.md#47-root-cause-analysis--why-hormuz-tier-1-scores-low)).
 
-Gap −0.318. B7/B8 n/a — no positives in the training window.
+**Secondary (fixed, issue 11):** `detect()` received only the test slice, so the trailing baseline restarted from scratch and the first test days had no baseline. The comparison now fits each agent on the training days and scores it on training + test, keeping the test rows; `eval/diagnostics/split_invariance.py` checks that a day's score no longer depends on where the test window starts.
 
-### PANAMA (149 positives, 6.12%) — the best region
+## 5.4 Two hypotheses tested and rejected
 
-| Method | Circ. | AUC | F1 | FPR |
-|---|---|---|---|---|
-| ORACLE label t−1 | n/a | 0.996 | 0.993 | 0.002 |
-| M3 persistence | high | 0.973 | 0.811 | 0.112 |
-| **Tier 1** | high | **0.909** | 0.722 | 0.167 |
-| **Tier 5** | high | **0.884** | 0.613 | 0.157 |
-| **Tier 2** | high | **0.884** | 0.620 | 0.134 |
-| **Tier 3/4** | high | **0.876** | 0.612 | 0.134 |
-| B3 isolation forest | low | 0.814 | 0.435 | 0.170 |
-| B6 CUSUM | high | 0.145 | 0.372 | 0.866 |
-
-**Panama Tier 1 at 0.909 beats every non-oracle unsupervised baseline except
-persistence.** This is the system's strongest real result.
-
-### MALACCA (0 positives) — false-positive harness
-
-AUC undefined. Alert rates on a region where nothing happened:
-
-| Method | Alert rate |
-|---|---|
-| M2 never / B6 CUSUM / ORACLE | 0.000 |
-| M3 persistence | 0.049 |
-| B2 MA crossover | 0.059 |
-| B4 EWMA | 0.068 |
-| M0 random | 0.100 |
-| B1 rolling z | 0.103 |
-| M8 matrix profile | 0.107 |
-| B5 AR residual | 0.111 |
-| **Tier 1 / Tier 2** | **0.178 / 0.181** |
-| B3 isolation forest | 0.208 |
-| **Tier 3/4/5** | **0.257** |
-
-**The tiers are the noisiest methods on the quiet region.** Adding agents makes
-it worse (0.178 → 0.257). Write this up: it is the cost of the fusion design.
-
-## 5.2 The central negative finding — more agents make it worse
-
-Across every evaluable region, tier AUC **falls** as agents are added:
-
-| Region | Tier 1 | Tier 2 | Tier 3 | Tier 4 | Tier 5 |
-|---|---|---|---|---|---|
-| hormuz | 0.502 | 0.465 | 0.400 | 0.401 | 0.401 |
-| bab_el_mandeb | 0.679 | 0.620 | 0.449 | 0.449 | 0.449 |
-| panama | 0.909 | 0.884 | 0.876 | 0.876 | 0.884 |
-| malacca (alert rate ↓ better) | 0.178 | 0.181 | 0.257 | 0.257 | 0.257 |
-
-**This directly contradicts the agent-diversity hypothesis (SRQ2) on real
-data.** The mechanism is dilution: the label is shipping-derived, so every
-non-shipping agent adds weighted score that is uncorrelated with it, pulling
-the composite toward noise. Report this as found.
-
-## 5.3 Root-cause analysis — why Hormuz sits at chance
-
-Decomposing Hormuz's own anomaly score on the test window
-(2023-08-31 → 2025-08-30, 133 positives / 731 days):
-
-| Component | mean on normal | mean on disruption | **separation** |
-|---|---|---|---|
-| `duration_score` | 0.0497 | 0.4395 | **+0.3898** |
-| `shock_score` | 0.5455 | 0.3982 | **−0.1473** |
-| `anomaly_score` = `max(shock, duration)` | 0.5561 | 0.5315 | **−0.0246** |
-
-**The duration signal separates the label cleanly (+0.39). The shock detectors
-are anti-correlated (−0.15) — disruption days look *less* anomalous to them
-than calm days. Because shock sits ~0.55 on quiet days and duration only
-reaches ~0.44 on disrupted ones, `max()` returns shock nearly everywhere and
-erases the working signal, leaving −0.02.**
-
-The code comment defends `max()` over averaging to stop a calm shock detector
-diluting an active duration signal. It prevents dilution and causes **masking**
-instead. This is the actual root cause of Hormuz ≈ 0.50 — not forest training,
-not the validation gate.
-
-**Secondary:** `detect()` receives only the test slice, so the 365-day trailing
-baseline restarts from scratch. The **first 120 test days have no baseline at
-all**, and 17 of 133 positives fall in that blind window.
-
-## 5.4 Two hypotheses tested and rejected (2026-09-01)
-
-Both were implemented, measured, and reverted. Negative results with a
-mechanism are thesis-grade material.
+Both were implemented, measured and reverted (September 2026) on the earlier frame (70/30 split). They have not been rerun on the fixed split, so their numbers are not restated; the account matches README §4.8, and the earlier numbers are in the text of this file at the tag `v1.0-thesis`. Negative results with a mechanism are thesis-grade material.
 
 **Option 1 — replace the persistence gate with direct level-shift scoring.**
-Gate: `level_shift_score > 0.50 AND duration_held >= 0.70`.
 
-- **Structurally inert for the AUC.** `run_method_comparison.py:384` scores via
-  `agent.detect(agent.preprocess(frame))` and never calls `validate()`.
-- Full re-run: **0 of 76 rows changed**. Output byte-identical. Hormuz gap
-  unchanged at −0.484.
-- Where it *does* apply (synthetic path), it is destructive:
-
-| Gate | TP | FP | FN | TN | TPR | FPR | F1 |
-|---|---|---|---|---|---|---|---|
-| persistence (current) | 44 | 10 | 3 | 308 | 0.936 | 0.031 | **0.871** |
-| level_shift | 6 | 2 | 41 | 316 | 0.128 | 0.006 | **0.218** |
-
-Cause: the trailing baseline needs 91 days shifted by 30, so **no baseline
-exists until day 156** — the day 60–74 disruption is unscoreable by
-construction; and only 23 of 365 days clear `score > 0.50`.
+- **Structurally inert for the harness's AUC.** The comparison harness scores through `agent.detect(agent.preprocess(frame))` and never calls `validate()`, so a change to the gate cannot change an AUC; a full rerun at the time changed no row.
+- **Destructive where it does apply** (the synthetic path, which does call `validate()`): the trailing baseline needs a long history before any day is scoreable, so an early disruption is unscoreable by construction and few days clear the threshold. Detection fell sharply against the persistence gate.
 
 **Option 3 — retrain the Isolation Forest on mixed normal + disruption days.**
 
-- **Premise false.** `_agent_frame` passes only `timestamp` + `shipping__*`;
-  `y_true` never reaches the agent, so `fit()`'s leak-filter never fires. The
-  forest producing Hormuz 0.502 was **already** trained on mixed data.
-- Tested both regimes properly on real data with the harness's own split:
-
-| Region | mixed | normal-only | Δ |
-|---|---|---|---|
-| hormuz | 0.5023 | 0.5240 | **+0.0216** |
-| bab_el_mandeb | 0.6790 | 0.6790 | 0.0000 |
-| panama | 0.9087 | 0.9087 | 0.0000 |
-
-Bab el-Mandeb and Panama are identical because their train windows contain no
-positives — filtering removes nothing. Option 3's direction is the *worse* of
-the two on Hormuz, by a negligible margin.
+- **Premise false.** `_agent_frame` passes only `timestamp` and the `shipping__*` columns, so `y_true` never reaches the agent and `fit()`'s leak filter never fires: the forest behind the Hormuz result had already been trained on mixed data.
+- Both regimes were then compared properly on real data with the harness's own split. The mixed direction was the worse of the two on Hormuz, by a small margin; Bab el-Mandeb and Panama were identical because their training windows contain no positives, so filtering removes nothing.
 
 ## 5.5 Weight optimization
 
@@ -450,7 +305,7 @@ than dragging the composite to zero. Step 6 is the only non-linearity.
 
 ## 6.1 Method comparison — `eval/graphs_method_comparison/` (7)
 
-Generated 2026-08-30 23:24 from `method_comparison_results.csv` (23:20).
+Regenerated from `eval/method_comparison_results.csv` by `scripts/make_all_figures.py`; `eval/FIGURES.md` is the registry (each figure's source, command and whether it is regenerable) and wins over the inventory below.
 **Current. Real data. Cite freely.**
 
 | File | Content |
@@ -576,21 +431,25 @@ mirrors `compute_risk`, so the optimizer maximises what the pipeline produces.
 
 State these explicitly; a defense will find them otherwise.
 
-1. **Cannot claim the system beats baselines at detection.** On Hormuz it is at
-   chance (0.502 vs 0.968 for logistic regression). Only Panama (0.909) is
-   competitive.
-2. **Cannot claim agent diversity improves detection.** Measured on real data,
-   AUC *falls* monotonically as agents are added, in every evaluable region.
+1. **Cannot claim the system beats baselines at detection.** Compare each tier
+   with the baselines region by region in `eval/results_main.md`, and say where a
+   baseline is clearly better; do not generalise across regions.
+2. **Cannot claim agent diversity improves detection.** In the frozen results no
+   distinct tier is clearly above Tier 1 (paired ΔAUC, `eval/RESULTS_FROZEN.md`).
 3. **Cannot cite tier AUC as clean detection skill.** Every tier is rated `high`
    circularity — tiers include the shipping level-shift feature, which is the
    label's own statistic.
 4. **Cannot claim anything about routing.** Dormant in all four regions; never
    exercised.
-5. **Cannot claim performance on the 2026 Hormuz shutdown.** Not in the eval
-   frame (ends 2025-08-30).
-6. **Cannot claim slow-onset detection.** The label itself misses it — Panama's
-   38% drought decline is almost entirely unlabelled.
+5. **Cannot claim performance on the 2026 Hormuz shutdown.** Not in the
+   evaluation window (it ends at `evaluation.end_date`).
+6. **Cannot claim slow-onset detection.** A trailing-median label can lose the
+   start of a slow decline; how much of an episode it labels is in the test
+   positives (`eval/RESULTS_FROZEN.md`), not a sentence here.
 7. **Cannot cite METRIC 5 or any 8-metric number until §7.1 and §7.2 are fixed.**
+8. **Cannot cite lead time as early warning.** Against a lagged label every
+   method leads every onset, the random control included (`eval/RESULTS_FROZEN.md`,
+   Lead time).
 
 ---
 
@@ -612,13 +471,15 @@ strongest evidence in the benchmark).
 agents; Malacca as an FP harness; **circularity ratings** — the design decision
 that makes the whole evaluation credible.
 
-**Ch. 5 — Results, reported as found.** Panama 0.909 is the win. Hormuz 0.502 is
-the failure. Diversity *reduces* AUC. Tiers are noisiest on the quiet region.
+**Ch. 5 — Results, reported as found.** Region by region, from
+`eval/results_main.md`: where the tiers stand against the baselines, what the
+paired ΔAUC says about adding agents, and the false-alarm rates on the quiet
+region. No sentence without its table row.
 
-**Ch. 6 — Root-cause analysis.** The `max(shock, duration)` masking finding
-(§5.3) with its decomposition table — this is the chapter that turns a negative
-result into a contribution. Include Options 1 and 3 as tested-and-rejected
-hypotheses with mechanisms (§5.4).
+**Ch. 6 — Root-cause analysis.** The `max(shock, duration)` masking hypothesis
+(§5.3), stated as a hypothesis until it is rerun on the fixed split: a negative
+result becomes a contribution only then. Include Options 1 and 3 as
+tested-and-rejected hypotheses with mechanisms (§5.4).
 
 **Ch. 7 — Explainability and decision support.** SHAP surrogate, RAG gating,
 the transparent action rubric (deliberately not another model).
@@ -626,7 +487,7 @@ the transparent action rubric (deliberately not another model).
 **Ch. 8 — Limitations.** Part VIII verbatim.
 
 **The defensible contribution:** not a better detector, but *an evaluation
-methodology that catches its own circularity* — plus a diagnosed mechanism for
+methodology that catches its own circularity* — plus a proposed mechanism for
 why multi-domain fusion underperforms on a single-domain label. Most theses
 would have reported the Panama number and stopped.
 

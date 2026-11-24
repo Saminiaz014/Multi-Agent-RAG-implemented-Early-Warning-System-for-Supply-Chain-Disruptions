@@ -623,10 +623,10 @@ label's own statistic), `medium` (short/rolling baseline, or fits on the label),
 **Tiers 1+ are rated `high`**, because they include the shipping agent's
 level-shift feature.
 
-Label weakness travels with the data in the manifest: a 30-day rolling baseline
-drifts down with a slow decline, so the label catches shocks and misses
-slow-onset disruption. Panama's 2023–24 drought is the case in point — transits
-fell 38% and the label flags almost none of it.
+Label weakness: a trailing baseline follows a slow decline down, so the label is
+built to catch level shifts and can lose the start of a slow-onset disruption.
+The manifest records `label_definition` and `label_validation`; how much of an
+episode is labelled is read from the test positives in `eval/RESULTS_FROZEN.md`.
 
 Results are in `eval/method_comparison_results.csv` and
 `eval/COMPARISON_REPORT.md`.

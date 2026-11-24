@@ -8,7 +8,7 @@ A **Decision Support System (DSS)** that detects, explains, and contextualises d
 >
 > **A multi-agent architecture with explicit per-domain weighting produces interpretable, auditable, decision-ready alerts — attribution to a named domain, a SHAP feature breakdown, and a retrieved historical precedent — which single-model detectors cannot produce, at a detection cost this evaluation quantifies honestly rather than hides.**
 >
-> The contribution is not a better detector. It is **an evaluation methodology that catches its own circularity**, plus a diagnosed mechanism for why multi-domain fusion underperforms on a single-domain label ([§4.7](#47-root-cause-analysis--why-hormuz-tier-1-scores-low)).
+> The contribution is not a better detector. It is **an evaluation methodology that catches its own circularity**, plus a proposed mechanism for why multi-domain fusion underperforms on a single-domain label ([§4.7](#47-root-cause-analysis--why-hormuz-tier-1-scores-low)).
 
 | | |
 |---|---|
@@ -16,7 +16,7 @@ A **Decision Support System (DSS)** that detects, explains, and contextualises d
 | **Test suite** | `python -m pytest tests` (the count is not restated here) |
 | **Results** | [`eval/results_main.md`](eval/results_main.md): one table per region, every method, with intervals · frozen copy: [`eval/RESULTS_FROZEN.md`](eval/RESULTS_FROZEN.md) |
 | **Central negative finding** | Whether AUC changes as agents are added: the Tier rows and paired ΔAUC in [`eval/results_main.md`](eval/results_main.md), stated only as far as the intervals support it ([§4.6](#46-the-central-negative-finding)) |
-| **Source of record** | [`docs/THESIS_BRIEF.md`](docs/THESIS_BRIEF.md) · [`docs/SCORING_REFERENCE.md`](docs/SCORING_REFERENCE.md) |
+| **Writing guides** | [`docs/THESIS_BRIEF.md`](docs/THESIS_BRIEF.md) (what to claim and not claim; states no measured value of the real-data evaluation) · [`docs/SCORING_REFERENCE.md`](docs/SCORING_REFERENCE.md) |
 | **Build history** | [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md) — the former phase-by-phase README body |
 
 ---
@@ -59,10 +59,10 @@ Purely predictive systems are insufficient here. A risk score with no attributio
 
 | SRQ | Question | Answered by | Verdict |
 |---|---|---|---|
-| **SRQ1** | Can multi-domain signals detect chokepoint disruption? | `scripts/run_method_comparison.py` | Partially — Panama yes (0.909), Hormuz no (0.502) |
-| **SRQ2** | Does agent diversity add value over fewer agents? | Tier ablation · `notebooks/evaluation.py` METRIC 3 | **No — refuted on real data** ([§4.6](#46-the-central-negative-finding)) |
-| **SRQ3** | Can the score be explained faithfully? | `src/explainability/shap_explainer.py` · METRIC 2 | Yes, with a stated surrogate caveat |
-| **SRQ4** | Does weight optimization improve on hand-tuning? | `src/optimization/` · METRIC 5 | **Yes, on the synthetic objective** — lead time 1.67 → 5.00 d, F1 +0.039, at +0.0031 FPR ([§4.9](#49-weight-optimization-results)). Measured on the six-agent pipeline, before routing was removed; says nothing about real-data detection |
+| **SRQ1** | Can multi-domain signals detect chokepoint disruption? | `scripts/run_method_comparison.py` | Decided per region by the AUC and its interval in [`eval/results_main.md`](eval/results_main.md) (also [`eval/RESULTS_FROZEN.md`](eval/RESULTS_FROZEN.md)), not by one sentence for all regions |
+| **SRQ2** | Does agent diversity add value over fewer agents? | Tier ablation · `notebooks/evaluation.py` METRIC 3 | Read from the paired ΔAUC of Tiers 2–5 against Tier 1 and from the agent ablations, both in `eval/RESULTS_FROZEN.md` ([§4.6](#46-the-central-negative-finding)) |
+| **SRQ3** | Can the score be explained faithfully? | `src/explainability/shap_explainer.py` · METRIC 2 | Bounded by the surrogate's held-out R² per region ("Surrogate fidelity" in `eval/RESULTS_FROZEN.md`); the explanations explain the surrogate, not the pipeline |
+| **SRQ4** | Does weight optimization improve on hand-tuning? | `src/optimization/` · METRIC 5 | On the synthetic objective only; the study's numbers are not restated here ([§4.9](#49-weight-optimization-results)). Measured on the six-agent pipeline, before routing was removed; says nothing about real-data detection |
 | **SRQ5** | Would a decision-maker be led to the correct action? | `src/evaluation/decision_effectiveness.py` · METRIC 8 | Not currently citable — see [§4.11](#411-known-defects-and-open-issues) |
 
 ---
@@ -93,7 +93,7 @@ These are what allow the negative findings in [§4.6](#46-the-central-negative-f
 
 ### The consequence for what this system claims
 
-A second commitment follows from the first. Because the evaluation was built to be able to fail, and did fail on two of four regions, the claim the artifact makes is narrower than the one originally hypothesised. The system is not presented as a better detector. It is presented as a system that produces **auditable, attributable, decision-ready alerts**, evaluated by a method that quantifies what that costs in detection performance. The full statement is at the top of this document; the evidence for the cost is [§4.5](#45-results).
+A second commitment follows from the first. Because the evaluation was built to be able to fail, and its results show where it did fail ([§4.5](#45-results)), the claim the artifact makes is narrower than the one originally hypothesised. The system is not presented as a better detector. It is presented as a system that produces **auditable, attributable, decision-ready alerts**, evaluated by a method that quantifies what that costs in detection performance. The full statement is at the top of this document; the evidence for the cost is [§4.5](#45-results).
 
 ---
 
@@ -113,7 +113,7 @@ Requirements are derived from the problem statement in [§1](#1-problem-and-scop
 | **R6** | Keep every number auditable by a domain expert | An unauditable score cannot be defended in a review | No end-to-end learned model, [§3.5](#35-layer-2--detection-agents) |
 | **R7** | Degrade gracefully when a source or agent is unavailable | Free-tier APIs fail, and some domains have no evidence in some regions | Weight renormalisation at two levels, [§3.6](#36-layer-3--risk-aggregation) |
 
-**R7 is load-bearing and easy to underestimate.** All five live sources are free public services that fail intermittently, one of them (GDELT) answered for only one of four regions across the evaluation window, and three of the four regions have at least one domain with no documented driver. A system that required all five agents to report would produce nothing for most region-days. Renormalisation appears twice — inside an agent over its own features ([§3.5](#35-layer-2--detection-agents)) and across agents in the aggregator ([§3.6](#36-layer-3--risk-aggregation)) — because absence occurs at both levels.
+**R7 is load-bearing and easy to underestimate.** All five live sources are free public services that fail intermittently, one of them (GDELT's DOC API) is blocked from this machine, so the evaluation reads its daily event export instead ([§4.2](#42-dataset-and-ground-truth)), and three of the four regions have at least one domain with no documented driver. A system that required all five agents to report would produce nothing for most region-days. Renormalisation appears twice — inside an agent over its own features ([§3.5](#35-layer-2--detection-agents)) and across agents in the aggregator ([§3.6](#36-layer-3--risk-aggregation)) — because absence occurs at both levels.
 
 ---
 
@@ -216,7 +216,7 @@ All five agents read a live, free public API. A sixth domain, routing, was remov
 | **Market** | [FRED API](https://fred.stlouisfed.org/docs/api/fred/) | Free (key) | Brent Crude `DCOILBRENTEU`, Freight PPI `PCU4831114831111`, Freight Services `PCUATFREIATFREI` |
 | **Geopolitical** | [ACLED](https://acleddata.com) | Free (OAuth) | Battles/Explosions → `military_activity_index`; Strategic developments → `diplomatic_incident_score`; Protests/Riots → inverse `regime_stability_index` |
 | **Natural Disaster** | [GDACS](https://www.gdacs.org) + [USGS](https://earthquake.usgs.gov/fdsnws/event/1/) | **No credentials** | GDACS Orange/Red alerts only; USGS supplies magnitude and the tsunami flag |
-| **News Sentiment** | [GDELT DOC API v2](https://api.gdeltproject.org/api/v2/doc/doc) | **No credentials** | Tone scores. Answered for Panama only in the evaluation window |
+| **News Sentiment** | [GDELT 1.0 daily event export](https://data.gdeltproject.org/events/) | **No credentials** | Event counts and tone per region box, read from the CSVs `scripts/build_gdelt_news_csv.py` writes. Days GDELT never published are masked |
 
 ### Connector-by-connector
 
@@ -225,7 +225,7 @@ All five agents read a live, free public API. A sixth domain, routing, was remov
 - `api` mode queries PortWatch's `Daily_Chokepoints_Data` FeatureServer layer for daily transit counts at the chokepoint itself, for every region, 2019-01-01 to present, refreshed daily, with no credentials. `n_total` becomes `vessel_count` and `n_tanker` becomes `tanker_count`; the per-vessel-type counts travel with the frame for provenance and future features.
 - `csv` mode reads a static PortWatch export for a single Persian Gulf port (Shuaiba, Kuwait) — the same provider, a narrower scope.
 - `synthetic` mode generates a 365-day series with three injected disruption scenarios and a ground-truth label.
-- The connector pins the April–May 2026 Hormuz shutdown as known ground truth (`_KNOWN_SHUTDOWN_START` / `_END`). **That window is outside the evaluation frame**, which ends 2025-08-30 — see [§4.2](#42-dataset-and-ground-truth).
+- The connector pins the April–May 2026 Hormuz shutdown as known ground truth (`_KNOWN_SHUTDOWN_START` / `_END`). **That window is outside the evaluation window**, which ends at `evaluation.end_date` — see [§4.2](#42-dataset-and-ground-truth).
 - Raises `ValueError` rather than returning empty when a region has no `portwatch_chokepoint` configured or the API returns no rows: an empty series here means a name mismatch, not a quiet chokepoint.
 
 **`MarketConnector`** — three FRED series on mixed frequencies. Brent is daily; freight PPI and freight services are monthly and are forward-filled to daily. In `api` mode every value is stamped on the day it was first published (ALFRED first release; median lag after the reference date, over releases since each series entered ALFRED: Brent 6 days, PPI 42, freight services 72) and carried forward until the next release, so no value appears before it was published. A few scaling constants (the PPI rebase, the trade-volume scale) are still taken over the whole series. Trade volume is derived from inverse Brent volatility. In `csv` mode the ground-truth label is computed from co-occurring Brent and freight spikes.
@@ -234,7 +234,7 @@ All five agents read a live, free public API. A sixth domain, routing, was remov
 
 **`DisasterConnector`** — queries GDACS `geteventlist` restricted to `Orange;Red` alert levels, and USGS `fdsnws` for seismicity. The alert-level restriction is not conservatism: green-inclusive GDACS queries exceed its **silent 100-result cap** every month, so including them would truncate the response without any error. GDACS hazard codes `FL`, `WF`, `DR` fold into `severe_weather_index`; tropical cyclones drive `cyclone_severity`; USGS supplies `earthquake_severity` on a documented magnitude scale and a real `tsunami_risk` flag.
 
-**`NewsConnector`** — GDELT DOC API v2 tone scores. GDELT answered for only one of four regions across the evaluation window, which is why `NewsAgent` renormalises over present components ([§3.5](#35-layer-2--detection-agents)).
+**`NewsConnector`** — in `gdelt_events` mode it reads the per-region daily CSVs that `scripts/build_gdelt_news_csv.py` writes from the GDELT 1.0 event export (the DOC API v2 is IP-blocked here). `NewsAgent` renormalises over present components ([§3.5](#35-layer-2--detection-agents)).
 
 ### Two deliberate absences
 
@@ -291,7 +291,7 @@ The RandomForest in `src/explainability/` is a **post-hoc surrogate**. It explai
 
 ### 3.5.1 ShippingAgent
 
-The most detailed agent, because it carries the most weight and because its behaviour is the root cause of the central negative result in [§4.7](#47-root-cause-analysis--why-hormuz-tier-1-scores-low).
+The most detailed agent, because it carries the most weight and because its behaviour is the proposed explanation of the central negative result in [§4.7](#47-root-cause-analysis--why-hormuz-tier-1-scores-low).
 
 **Features.** Three base columns — `vessel_count`, `avg_delay_hours`, `congestion_index` — plus two optional PortWatch columns auto-discovered when present: `tanker_count`, and `vessel_count_7dma` from which `vessel_count_trend` is derived.
 
@@ -322,7 +322,7 @@ Selects active features, derives optional ones, forward-fills gaps, and applies 
 
 #### `level_shift_score(vessel_count)` — the duration signal
 
-The shock detectors cannot hold a flag across a sustained disruption. Two of the three base features — `congestion_index` and `avg_delay_hours` — are themselves derived from `vessel_count` against a 30-day rolling baseline, so once traffic settles at a lower level that baseline follows it down and both return to calm values. **Measured on the evaluation set their correlation with a sustained-disruption label is −0.06 and −0.05: no signal at all**, leaving one useful feature of three.
+The shock detectors cannot hold a flag across a sustained disruption. Two of the three base features — `congestion_index` and `avg_delay_hours` — are themselves derived from `vessel_count` against a 30-day rolling baseline, so once traffic settles at a lower level that baseline follows it down and both return to calm values. On an earlier evaluation window (a 70/30 split) their correlation with a sustained-disruption label was close to zero, leaving one useful feature of three; this is **not re-measured on the fixed split**.
 
 The duration score measures how far traffic sits below its own *trailing annual* baseline:
 
@@ -354,11 +354,11 @@ combined = np.maximum(shock, duration)
 
 Two decisions here, one right and one wrong.
 
-**Right — normalising against the fit-time range, not the scored batch.** Batch min-max destroys the signal a sustained disruption carries: when every day in a window is anomalous, rescaling by that window's own extremes maps its least-anomalous day to 0 and its most to 1, so a uniformly disrupted month and a uniformly calm one both span `[0,1]`. Anchoring to the fit-time distribution makes scores absolute and comparable across windows. This change is what forced the risk-band recalibration in [§3.11](#311-weight-determination-and-optimization).
+**Right — normalising against the fit-time range, not the scored batch.** Batch min-max destroys the signal a sustained disruption carries: when every day in a window is anomalous, rescaling by that window's own extremes maps its least-anomalous day to 0 and its most to 1, so a uniformly disrupted month and a uniformly calm one both span `[0,1]`. Anchoring to the fit-time distribution makes scores absolute and comparable across windows. This change is why the risk bands were set again ([§3.11](#311-weight-determination-and-optimization)); they are fixed display thresholds, not calibrated.
 
 **Wrong — `max()` rather than a blend.** The code comment defends `max()` on the grounds that the two components answer different questions ("did something just change?" versus "are we still below normal?") and are meant to be true at different times, so averaging would let a calm shock detector drag down an active duration signal.
 
-The reasoning is sound and the outcome is not. Measured on the Hormuz test window, `shock` sits at **0.55 on calm days** while `duration` only reaches **0.44 on disrupted ones**, so `max()` returns `shock` nearly everywhere and **erases the working signal**. It prevents dilution and causes **masking** instead. Full decomposition in [§4.7](#47-root-cause-analysis--why-hormuz-tier-1-scores-low).
+The reasoning is sound and the outcome is not. On an earlier Hormuz test window (a 70/30 split, **not re-measured on the fixed split**), `shock` on calm days stood above `duration` on disrupted ones, so `max()` returned `shock` nearly everywhere and **erased the working signal**. It prevents dilution and causes **masking** instead. Full decomposition in [§4.7](#47-root-cause-analysis--why-hormuz-tier-1-scores-low).
 
 #### `validate(signals)` — two-stage false-positive suppression
 
@@ -722,17 +722,18 @@ The test suite is not only a correctness net; several of its modules exist to **
 
 ### The suite
 
-| Area | Modules | Tests |
-|---|---|---|
-| Ingestion and connectors | `test_ingestion.py`, `test_region_specific_connectors.py` | 93 |
-| Extractors and knowledge base | `test_extractors.py`, `test_disaster_combined_extractor.py` | 60 |
-| Agents | `test_agents.py`, `test_new_agents.py`, `test_scenarios.py` | 67 |
-| Regions and config | `test_region_configs.py`, `test_config_manager.py`, `test_regions.py`, `test_region_isolation.py`, `test_region_config_completeness.py` | 51 |
-| Dashboard | `test_dashboard_ux.py`, `test_dashboard_regions.py`, `test_dashboard.py` | 66 |
-| API | `test_api_6agent.py`, `test_api_regions.py` | 23 |
-| Aggregation | `test_risk_engine.py` | 17 |
-| Explainability, RAG, evaluation, optimization | `test_evaluation.py`, `test_optimization.py`, `test_shap_6agent.py`, `test_rag_6domain.py`, `test_phase4_depth.py` | 33 |
-| **Total** | **23 modules** | **410** |
+| Area | Modules |
+|---|---|
+| Ingestion and connectors | `test_ingestion.py`, `test_region_specific_connectors.py` |
+| Extractors and knowledge base | `test_extractors.py`, `test_disaster_combined_extractor.py` |
+| Agents | `test_agents.py`, `test_new_agents.py`, `test_scenarios.py` |
+| Regions and config | `test_region_configs.py`, `test_config_manager.py`, `test_regions.py`, `test_region_isolation.py`, `test_region_config_completeness.py` |
+| Dashboard | `test_dashboard_ux.py`, `test_dashboard_regions.py`, `test_dashboard.py` |
+| API | `test_api_6agent.py`, `test_api_regions.py` |
+| Aggregation | `test_risk_engine.py` |
+| Explainability, RAG, evaluation, optimization | `test_evaluation.py`, `test_optimization.py`, `test_shap_6agent.py`, `test_rag_6domain.py`, `test_phase4_depth.py` |
+
+The number of tests per area, and in total, is not stated here: it changes with every commit. `pytest --collect-only -q tests/<module>` counts one module and the last line of `pytest -q` is the suite's result. The measurement code has its own modules under `tests/` (the method comparison, the results table, the figures, the frozen results page, the suite guards), which the table above predates.
 
 All HTTP is mocked in the extractor and connector tests, so the suite runs offline and deterministically. `test_fred_api.py` is a standalone live diagnostic script, not collected by pytest and not counted above.
 
@@ -744,7 +745,7 @@ All HTTP is mocked in the extractor and connector tests, so the suite runs offli
 
 | | |
 |---|---|
-| **Scale** | 48 source modules · 24 test modules (23 collected) · **410 tests, all passing** (~4m45s) |
+| **Scale** | Module and test counts are not restated here: `pytest --collect-only -q` counts the tests and `git ls-files src` the source modules |
 | **Stack** | Python 3.10+, pandas, scikit-learn, SHAP, ChromaDB, Optuna, FastAPI, Streamlit |
 | **Fitted models** | One Isolation Forest + scaler (shipping) and one post-hoc RandomForest surrogate. Nothing else is learned |
 | **Config** | `config/settings.yaml` base + `config/regions/*.yaml` overlays |
@@ -788,21 +789,14 @@ The ground-truth label is "vessel_count against a trailing long baseline." **Any
 
 ### The evaluation dataset
 
-Built by `scripts/build_eval_dataset.py` from the live connectors, merged on a daily index:
+Built by `scripts/build_eval_dataset.py` from the live connectors, merged on a daily index. Each region's row count, date range, positive days and positive rate, the domains present and missing, and the provenance of its news, market and ACLED inputs are written to `data/eval/<region>.manifest.json` when the frame is built. The frame and its manifest are git-ignored; regenerate them with `python scripts/build_eval_dataset.py`. None of those figures is restated here. The positives and scored days **in the test window**, which the results rest on, are at the head of each region's section in [`eval/RESULTS_FROZEN.md`](eval/RESULTS_FROZEN.md) and in `eval/results_main.csv` (`test_positives`, `n_test`).
 
-| Region | Rows | Dropped | Date range | Positive days | Rate | Missing domain |
-|---|---|---|---|---|---|---|
-| hormuz | 2,434 | 358 | 2019-01-01 → 2025-08-30 | **159** | 6.53 % | news_sentiment |
-| bab_el_mandeb | 2,434 | 358 | 2019-01-01 → 2025-08-30 | **244** | 10.02 % | news_sentiment |
-| panama | 2,433 | 359 | 2019-01-01 → 2025-08-29 | **149** | 6.12 % | — (all present) |
-| malacca | 2,434 | 358 | 2019-01-01 → 2025-08-30 | **0** | 0.00 % | news_sentiment |
-
-**Live sources:** shipping = IMF PortWatch chokepoint transits · market = FRED (Brent, freight PPI, freight services) · natural_disaster = GDACS (Orange/Red only) + USGS (M ≥ 4.0) · geopolitical = ACLED · news_sentiment = GDELT where it answered.
+**Live sources:** shipping = IMF PortWatch chokepoint transits · market = FRED (Brent, freight PPI, freight services) · natural_disaster = GDACS (Orange/Red only) + USGS (`USGSExtractor.min_magnitude`, a code default) · geopolitical = ACLED · news_sentiment = GDELT 1.0 daily event export, built by `scripts/build_gdelt_news_csv.py`.
 
 **Two facts that must be stated whenever this dataset is cited:**
 
-1. **The frame ends 2025-08-30.** The pinned April–May 2026 Hormuz shutdown is **not in it**. The 159 Hormuz positives are earlier events.
-2. **news_sentiment is missing from three of four regions** — GDELT did not answer. Column sets are recorded per region in the manifest specifically so a five-feature region is never silently compared against a four-feature one.
+1. **The test window runs from `evaluation.split_date` to `evaluation.end_date` in `config/settings.yaml`**, the end being a limit set by the ACLED data; the frame may run a few days past it, and those days are not scored. The pinned April–May 2026 Hormuz shutdown is **not in the window**; the positives are earlier events.
+2. **Days the news series does not cover are masked, not filled.** GDELT 1.0 has days it never published; those days stay NaN and are left out of every score (`rows_news_masked` and `news_source.missing_days` in the manifest). The scored test days in the results can therefore be fewer than the days in the window. The other columns are forward-filled inside their own coverage only (`gap_fill` in the manifest).
 
 ### The label, and its recorded weakness
 
@@ -811,7 +805,7 @@ y_true = 30-day mean of vessel_count is ≥20% below the trailing
          365-day median, sustained 14+ consecutive days
 ```
 
-**The weakness travels with the data in the manifest, not in a comment:** a rolling baseline drifts downward during a slow decline, so the label catches shocks and misses slow-onset disruption. **Panama's 2023–24 drought cut transits by 38 % and the label flags almost none of it.**
+A trailing baseline follows a slow decline down, so the label is built to catch level shifts and can lose the start of a slow-onset disruption. How much of a given episode it labels is not stated in a sentence here: the manifest records `label_definition`, `label_validation` and `label_secondary` with the frame, and the test positives per region are in `eval/RESULTS_FROZEN.md`. The label is also the statistic the shipping agent measures, which is the circularity the ratings in [§4.1](#circularity-rating--the-decision-that-makes-the-evaluation-credible) record.
 
 ### Synthetic splits
 
@@ -840,7 +834,7 @@ An 8-metric suite (`notebooks/evaluation.py`) additionally covers detection, exp
 
 ## 4.5 Results
 
-The results are one table per region, generated from `eval/method_comparison_results.csv`: **[`eval/results_main.md`](eval/results_main.md)** (also `eval/results_main.csv`, 76 rows; regenerate with `python scripts/results_table.py`). It lists every method in one fixed order (controls M0-M2, M3, M8, B1-B8, Tiers 1-5) with AUC and its 95 % moving-block bootstrap interval, the paired ΔAUC against Tier 1 (tiers only), F1, false-alarm rate and alert rate, and the ORACLE as a separate ceiling row that is never ranked. It marks the tiers that copy the tier before them (a region disables the agent a tier would add), marks the models that read the geopolitical columns (B3, B7, B8), and states the best non-ceiling method per region. Malacca has no positives, so it shows false-alarm rates only.
+The results are one table per region, generated from `eval/method_comparison_results.csv`: **[`eval/results_main.md`](eval/results_main.md)** (also `eval/results_main.csv`; regenerate with `python scripts/results_table.py`). It lists every method in one fixed order (controls M0-M2, M3, M8, B1-B8, Tiers 1-5) with AUC and its 95 % moving-block bootstrap interval, the paired ΔAUC against Tier 1 (tiers only), F1, false-alarm rate and alert rate, and the ORACLE as a separate ceiling row that is never ranked. It marks the tiers that copy the tier before them (a region disables the agent a tier would add), marks the models that read the geopolitical columns (B3, B7, B8), and states the best non-ceiling method per region. Malacca has no positives, so it shows false-alarm rates only.
 
 That table is the only place a "best" method is named. The written findings are in `eval/COMPARISON_REPORT.md`, the graphs in `eval/graphs_method_comparison/` and `eval/graphs_ablation_tiers/`. Sections 4.6 to 4.10 and the headline table at the top state findings without restating numbers: every figure is in the table above or in [`eval/RESULTS_FROZEN.md`](eval/RESULTS_FROZEN.md), which is generated from the committed CSVs.
 
@@ -933,8 +927,8 @@ Stated explicitly, because a defence will find them otherwise. None of them rest
 1. **Cannot claim the system beats baselines at detection.** The comparison table names the best non-ceiling method per region; read any claim about the system against its own row and interval, not against a headline number.
 2. **Cannot claim agent diversity improves detection.** Read the Tier rows and the paired ΔAUC ([§4.6](#46-the-central-negative-finding)); a region whose interval includes zero shows no change in either direction.
 3. **Cannot cite tier AUC as clean detection skill.** Every tier carries a circularity rating in the table: tiers include the shipping level-shift feature, which is the label's own statistic.
-4. **Cannot claim performance on the 2026 Hormuz shutdown.** It is not in the evaluation frame, which ends at `evaluation.end_date` in `config/settings.yaml`.
-5. **Cannot claim slow-onset detection.** The label itself misses it — Panama's drought decline is almost entirely unlabelled.
+4. **Cannot claim performance on the 2026 Hormuz shutdown.** It is not in the evaluation window, which ends at `evaluation.end_date` in `config/settings.yaml`.
+5. **Cannot claim slow-onset detection.** A trailing-median label can lose the start of a slow decline; how much of an episode it labels is in the test positives (`eval/RESULTS_FROZEN.md`), not a sentence here.
 6. **Cannot present the [§4.9](#49-weight-optimization-results) optimization gain as a property of the current five-agent pipeline.** It was measured with routing active on the synthetic splits.
 7. **Cannot cite METRIC 5 or any 8-metric number** until the defects in [§4.11](#411-known-defects-and-open-issues) are resolved.
 
@@ -998,7 +992,7 @@ Malacca deliberately has no tier-progression chart: `graph_tiers()` drops NaN-AU
 | Document | Contents |
 |---|---|
 | [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md) | **The phase-by-phase build history** — the former body of this README, preserved verbatim. Read it for *how* the system was built and why decisions were later revised |
-| `docs/THESIS_BRIEF.md` | The source of record for every measured number in [§4](#4-evaluation). Where this README and the brief disagree, the brief wins |
+| `docs/THESIS_BRIEF.md` | The guide for writing the thesis: what the results allow it to claim and what they do not. It states no measured value of the real-data evaluation; every number in [§4](#4-evaluation) is in `eval/results_main.md` and `eval/RESULTS_FROZEN.md`, which win over any sentence in a doc |
 | `docs/SCORING_REFERENCE.md` | End-to-end walkthrough of how a raw feature becomes a composite risk score and a band; per-agent formulas |
 | `docs/DASHBOARD_USAGE.md` | Running and reading the two-page dashboard |
 | `docs/REGION_USAGE_GUIDE.md` | Adding and operating a region |
@@ -1052,7 +1046,7 @@ supply-chain-dss/
 │   │   ├── market_connector.py      # FRED Brent + freight (live) / CSV / synthetic
 │   │   ├── geopolitical_connector.py # ACLED conflict events (live); no sanctions_severity by design
 │   │   ├── disaster_connector.py    # GDACS + USGS (live); replaced the dead Ambee path
-│   │   ├── news_connector.py        # GDELT DOC API v2 (live)
+│   │   ├── news_connector.py        # GDELT 1.0 event export (gdelt_events mode)
 │   ├── agents/
 │   │   ├── base_agent.py       # ABC + DetectionResult dataclass
 │   │   ├── shipping_agent.py   # IsolationForest + Z-score + level_shift_score() duration signal (Phase 14)
@@ -1247,7 +1241,7 @@ Opens at `http://localhost:8501`. The first load takes ~1 minute (split generati
 pytest tests/ -v
 ```
 
-The full suite is **410 tests / 410 passing** across 23 collected test files, in ~4m45s (`test_fred_api.py` is a standalone diagnostic script and contributes no test items). Verified on the project venv; run it with `.venv/Scripts/python -m pytest -q`. Run the agent evaluations with output:
+Run the full suite with `.venv/Scripts/python -m pytest -q`; its count and result are the last line of that run and are not restated here (`test_fred_api.py` is a standalone diagnostic script and contributes no test items). Run the agent evaluations with output:
 
 ```bash
 pytest tests/test_agents.py::test_shipping_agent_evaluation -v -s

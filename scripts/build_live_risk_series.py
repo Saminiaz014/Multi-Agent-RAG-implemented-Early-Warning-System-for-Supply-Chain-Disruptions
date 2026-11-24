@@ -25,14 +25,24 @@ Usage::
     python scripts/build_live_risk_series.py                 # fetch + score all regions
     python scripts/build_live_risk_series.py --region panama
     python scripts/build_live_risk_series.py --score-only    # rescore the cached frames
+    python scripts/build_live_risk_series.py --shipping-from-cache
+        # refetch every domain except shipping, which is taken from the
+        # previous data/live frame (IMF PortWatch rate-limits: HTTP 429)
+
+``--shipping-from-cache`` records in each manifest (``shipping_source``) which
+cached file the shipping columns came from, its hash and last day, and the
+same record of the cache's own origin if it was itself cached. The shipping
+series then ends where the cache ends.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -54,17 +64,72 @@ from src.evaluation.window import eval_window  # noqa: E402
 LIVE_DIR = _PROJECT_ROOT / "data" / "live"
 
 
-def fetch(region: str) -> pd.DataFrame:
-    """Fetch and cache one region's frame, up to the latest shipping day."""
+def _write_atomically(path: Path, write) -> None:
+    """Write beside ``path`` and move it into place, so a failed write leaves ``path`` as it was.
+
+    The live frame is also the cache the next ``--shipping-from-cache`` run reads.
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        write(tmp)
+        build_eval_dataset._replace_file(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def cached_shipping(region: str) -> tuple[pd.DataFrame, dict]:
+    """The shipping frame of the previous live frame, and a record of where it came from.
+
+    Raises:
+        FileNotFoundError: If there is no cached frame to take it from.
+    """
+    path = LIVE_DIR / f"{region}.csv"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path}: no cached live frame to take shipping from. Run once without "
+            "--shipping-from-cache (it fetches PortWatch).")
+    # round_trip: the default parser can differ from the written float by one ulp
+    cached = pd.read_csv(path, parse_dates=["timestamp"], float_precision="round_trip")
+    shipping = build_eval_dataset.shipping_from_frame(cached)
+    source = {
+        "source": "shipping columns of an earlier data/live frame; IMF PortWatch was not re-fetched",
+        "cache": f"data/live/{region}.csv",
+        "cache_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "cache_rows": int(len(shipping)),
+        "cache_last_day": str(shipping["timestamp"].max())[:10],
+        "cache_written": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+        .isoformat(timespec="seconds"),
+    }
+    earlier = LIVE_DIR / f"{region}.manifest.json"
+    if earlier.exists():
+        inherited = json.loads(earlier.read_text(encoding="utf-8")).get("shipping_source")
+        if inherited:
+            source["inherited"] = inherited
+    return shipping, source
+
+
+def fetch(region: str, shipping_from_cache: bool = False) -> pd.DataFrame:
+    """Fetch and cache one region's frame, up to the latest shipping day.
+
+    Args:
+        shipping_from_cache: Take the shipping columns from the previous
+            ``data/live`` frame instead of calling PortWatch; every other
+            domain is fetched.
+    """
     print(f"\n[{region}] fetching")
-    frame, manifest = build_eval_dataset.build_region(region, drop_incomplete=False)
+    shipping = source = None
+    if shipping_from_cache:
+        shipping, source = cached_shipping(region)
+        print(f"    shipping           cached to {source['cache_last_day']} "
+              "(PortWatch not called)")
+    frame, manifest = build_eval_dataset.build_region(
+        region, drop_incomplete=False, shipping=shipping, shipping_source=source)
     manifest["coverage"] = {
         domain: _coverage(frame, domain) for domain in manifest["domains_present"]
     }
-    frame.to_csv(LIVE_DIR / f"{region}.csv", index=False)
-    (LIVE_DIR / f"{region}.manifest.json").write_text(
-        json.dumps(manifest, indent=2), encoding="utf-8"
-    )
+    _write_atomically(LIVE_DIR / f"{region}.csv", lambda p: frame.to_csv(p, index=False))
+    _write_atomically(LIVE_DIR / f"{region}.manifest.json",
+                      lambda p: p.write_text(json.dumps(manifest, indent=2), encoding="utf-8"))
     return frame
 
 
@@ -129,8 +194,12 @@ def score(region: str, frame: pd.DataFrame) -> pd.DataFrame:
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--region", action="append", dest="regions")
-    parser.add_argument("--score-only", action="store_true",
-                        help="Rescore the cached data/live frames; no API calls.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--score-only", action="store_true",
+                      help="Rescore the cached data/live frames; no API calls.")
+    mode.add_argument("--shipping-from-cache", action="store_true",
+                      help="Fetch every domain except shipping, which is taken from the "
+                           "previous data/live frame (PortWatch is not called).")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
     LIVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -142,7 +211,7 @@ def run(argv: list[str] | None = None) -> int:
                 frame = pd.read_csv(cached, parse_dates=["timestamp"])
                 print(f"\n[{region}] cached frame")
             else:
-                frame = fetch(region)
+                frame = fetch(region, shipping_from_cache=args.shipping_from_cache)
             score(region, frame)
         except Exception as exc:
             print(f"  FAILED: {exc}")
