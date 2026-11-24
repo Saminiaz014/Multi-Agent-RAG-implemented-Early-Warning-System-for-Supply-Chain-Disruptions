@@ -238,7 +238,7 @@ Alert rate on the scored test days:
 
 ## Provenance
 
-Generated with commit `43223696921cace74a4f99c26e27dcb6d3161502` checked out; this page is committed in a later commit (a page cannot name its own), so rerunning the script at the release tag rewrites the commit cells below and leaves the working tree changed. `--check` ignores them and compares everything else. Every input was tracked and unchanged when the page was written. The blob id is git's own (sha1 over the LF content) and the sha256 is over the same bytes: to verify, `git rev-parse <commit-or-tag>:<path>` prints the blob id, and a checkout's file hashes to the sha256 once line endings are LF.
+Generated with commit `c56fedae00452b12db7d6d9f5a437fe631b75e1a` checked out; this page is committed in a later commit (a page cannot name its own), so rerunning the script at the release tag rewrites the commit cells below and leaves the working tree changed. `--check` ignores them and compares everything else. Every input was tracked and unchanged when the page was written. The blob id is git's own (sha1 over the LF content) and the sha256 is over the same bytes: to verify, `git rev-parse <commit-or-tag>:<path>` prints the blob id, and a checkout's file hashes to the sha256 once line endings are LF.
 
 | Input | git blob | sha256 | Last commit touching it |
 |---|---|---|---|
@@ -249,7 +249,7 @@ Generated with commit `43223696921cace74a4f99c26e27dcb6d3161502` checked out; th
 | `eval/agent_ablation_no_eq1.csv` | `30abc7fee6d240daf31c163d769f580e2dab1b58` | `a923cadb04e53e503225b85589f9cc745e1c599d1e9c896e436a66f0a2657cb1` | 3db4a78 |
 | `eval/split_sensitivity.csv` | `0937fe1f888d111aee4d816886be654782e7ba00` | `f34fe9b43214dd4886f0219438f552615892031f5ab3a9f83d8f349e5cc1d205` | 3db4a78 |
 | `eval/lead_time.csv` | `aec14553c4ebd3eb14fd29e01fbb291195631352` | `9cba4e91296c831c33a9c002c6e2875e02338f1480645a61227ee77354b5b031` | 4322369 |
-| `eval/bem_surrogate.csv` | `0a9558ddda366e4c87c6bb5baa829fc3a94a9aef` | `4c01da00ee36361230507b74199164bb157c81567648a822d19b202e4d9ea16a` | added by the commit that contains this page |
+| `eval/bem_surrogate.csv` | `0a9558ddda366e4c87c6bb5baa829fc3a94a9aef` | `4c01da00ee36361230507b74199164bb157c81567648a822d19b202e4d9ea16a` | 1021373 |
 | `outputs/explanations_summary.json` | `2d25c05daec0c362b17b2c9573b50639880cc68b` | `9925e39a06b826917af115d6e7fc8e474bd0722cb077c91e8ac1f2e30ffc54b6` | 3db4a78 |
 | `outputs/MANIFEST.json` | `3100a0883c0ce5963ee930167b87e372d9b80d8b` | `27f3c7ee03ab36754134b025e681d8e5de1e20dd1f842e2a0f0067c37c331b6a` | 3db4a78 |
 
@@ -258,12 +258,13 @@ Generated with commit `43223696921cace74a4f99c26e27dcb6d3161502` checked out; th
 `outputs/MANIFEST.json` has sha256 `27f3c7ee03ab36754134b025e681d8e5de1e20dd1f842e2a0f0067c37c331b6a`; it was generated 2026-11-23T18:51:55+00:00 with `883fba4fb3a2a736f23ed98dae67deb95423616f` as HEAD (recorded in the manifest).
 
 - Committed outputs: 6 of 6 match their recorded sha256 and git blob id, and the blob at HEAD.
-- Producing-code blob ids: 30 of 32 equal the blob at HEAD.
+- Producing-code blob ids: 29 of 32 equal the blob at HEAD.
 - 8 of the producing files were uncommitted changes against that HEAD when the outputs were made; each is identical to HEAD now unless listed below.
 
 The others changed after the outputs were produced; the recorded blob is the version in the commit shown, and the command prints what changed:
 
 | Path | Recorded blob | Blob at HEAD | Last commit holding the recorded blob | What changed |
 |---|---|---|---|---|
+| `scripts/build_eval_dataset.py` | `6e608fdd1f867ac8af072fdaf8b6088772742caa` | `83a5e59c8dfd4c214ffcc6e817eb385f574141b8` | 3db4a78 | `git diff 3db4a78 HEAD -- scripts/build_eval_dataset.py` |
 | `scripts/run_alert_explanations.py` | `dd522031d43358c6c27201258b3d657bf99cca4e` | `fc547afa863d38d76e46bb4230cb4d45ee4b50ab` | 3db4a78 | `git diff 3db4a78 HEAD -- scripts/run_alert_explanations.py` |
 | `scripts/run_method_comparison.py` | `b6d768815e218b81ab42b07ea55da7a8506c247f` | `0f1c22c66a6bb99bfec72fdde238055c4c7f3c29` | 3db4a78 | `git diff 3db4a78 HEAD -- scripts/run_method_comparison.py` |
