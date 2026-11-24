@@ -60,6 +60,15 @@
               "news_sentiment",
               "shipping"
             ],
+            "reporting_agents": [
+              "shipping",
+              "market",
+              "geopolitical",
+              "natural_disaster",
+              "news_sentiment"
+            ],
+            "agents_reporting": 5,
+            "agents_agreeing": 3,
             "assessed_day": "2024-10-02",
             "route_composite": 0.877,
             "status_word": "High",
@@ -123,6 +132,14 @@
               "news_sentiment",
               "shipping"
             ],
+            "reporting_agents": [
+              "shipping",
+              "market",
+              "geopolitical",
+              "natural_disaster"
+            ],
+            "agents_reporting": 4,
+            "agents_agreeing": 3,
             "assessed_day": "2025-06-18",
             "route_composite": 1.0,
             "status_word": "Critical",
@@ -329,6 +346,14 @@
               "news_sentiment",
               "shipping"
             ],
+            "reporting_agents": [
+              "shipping",
+              "market",
+              "natural_disaster",
+              "news_sentiment"
+            ],
+            "agents_reporting": 4,
+            "agents_agreeing": 2,
             "assessed_day": "2026-04-14",
             "route_composite": 0.878,
             "status_word": "High",
@@ -394,6 +419,14 @@
               "news_sentiment",
               "shipping"
             ],
+            "reporting_agents": [
+              "shipping",
+              "market",
+              "natural_disaster",
+              "news_sentiment"
+            ],
+            "agents_reporting": 4,
+            "agents_agreeing": 2,
             "assessed_day": "2026-10-20",
             "route_composite": 0.797,
             "status_word": "High",
@@ -626,6 +659,14 @@
               "news_sentiment",
               "shipping"
             ],
+            "reporting_agents": [
+              "shipping",
+              "market",
+              "geopolitical",
+              "news_sentiment"
+            ],
+            "agents_reporting": 4,
+            "agents_agreeing": 3,
             "assessed_day": "2023-12-16",
             "route_composite": 0.804,
             "status_word": "High",
@@ -687,6 +728,14 @@
               "news_sentiment",
               "shipping"
             ],
+            "reporting_agents": [
+              "shipping",
+              "market",
+              "geopolitical",
+              "news_sentiment"
+            ],
+            "agents_reporting": 4,
+            "agents_agreeing": 3,
             "assessed_day": "2024-01-19",
             "route_composite": 0.797,
             "status_word": "High",
@@ -1112,6 +1161,14 @@
               "news_sentiment",
               "shipping"
             ],
+            "reporting_agents": [
+              "shipping",
+              "market",
+              "natural_disaster",
+              "news_sentiment"
+            ],
+            "agents_reporting": 4,
+            "agents_agreeing": 2,
             "assessed_day": "2024-01-11",
             "route_composite": 0.809,
             "status_word": "High",
@@ -1173,6 +1230,14 @@
               "news_sentiment",
               "shipping"
             ],
+            "reporting_agents": [
+              "shipping",
+              "market",
+              "natural_disaster",
+              "news_sentiment"
+            ],
+            "agents_reporting": 4,
+            "agents_agreeing": 2,
             "assessed_day": "2026-10-24",
             "route_composite": 0.62,
             "status_word": "High",

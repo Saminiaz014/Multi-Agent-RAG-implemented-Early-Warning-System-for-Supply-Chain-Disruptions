@@ -139,3 +139,27 @@ def test_every_current_capture_was_taken_against_the_committed_numbers() -> None
         pytest.skip("thesis/ is git-ignored and not present")
     data = json.loads(manifest.read_text(encoding="utf-8"))
     assert capture.stale_captures(data, cm.sha256_file(cm.COMMITTED)) == []
+
+
+# ------------------------------- "N of M agents" as the Decision View counts them
+def test_agreement_counts_every_agent_with_a_score_that_day_and_those_above_half() -> None:
+    ts = pd.DataFrame({"shipping": [0.2, 1.0], "market": [0.1, 0.6], "geopolitical": [0.3, float("nan")],
+                       "news_sentiment": [0.0, 0.3], "natural_disaster": [0.0, 0.0]})
+    reporting, agreeing = cm.agent_agreement(ts, day=2)
+    assert sorted(reporting) == ["market", "natural_disaster", "news_sentiment", "shipping"]  # geopolitical has none
+    assert agreeing == 2                                                                       # shipping and market
+
+
+def test_agreement_does_not_count_an_absent_column_or_a_score_of_exactly_half() -> None:
+    ts = pd.DataFrame({"shipping": [0.5], "market": [0.9]})
+    reporting, agreeing = cm.agent_agreement(ts, day=1)
+    assert sorted(reporting) == ["market", "shipping"] and agreeing == 1     # no other column; 0.5 is not above 0.5
+
+
+def test_every_committed_snapshot_says_how_many_agents_reported_and_agreed() -> None:
+    committed = json.loads(cm.COMMITTED.read_text(encoding="utf-8"))
+    for case in committed["cases"]:
+        for snap in case["snapshots"]:
+            dv = snap["decision_view"]
+            assert dv["agents_reporting"] == len(dv["reporting_agents"]) >= 1
+            assert 0 <= dv["agents_agreeing"] <= dv["agents_reporting"]

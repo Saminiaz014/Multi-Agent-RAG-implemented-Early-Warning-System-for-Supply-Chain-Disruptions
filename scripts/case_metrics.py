@@ -134,6 +134,18 @@ def demo_route(region: str) -> dict:
     return max(routes, key=lambda r: (len(set(r["agents"]) & with_data), -routes.index(r)))
 
 
+def agent_agreement(ts: pd.DataFrame, day: int) -> tuple[list[str], int]:
+    """Agents with a score on a day (1-based) and how many of them are above 0.5.
+
+    This is the Decision View's "k of n detection agents agree" (``decision_view.py``, the
+    ``reporting`` and ``agreement`` lines). It counts every agent of the region's frame that has a
+    score on the assessed day, not only the agents of the chosen route: an agent that is disabled
+    for the region, or whose source has ended, has no score and is not counted.
+    """
+    reporting = [a for a in core.ALL_AGENTS if a in ts.columns and pd.notna(ts[a].iloc[day - 1])]
+    return reporting, sum(1 for a in reporting if float(ts[a].iloc[day - 1]) > 0.5)
+
+
 def decision_view_state(region: str, date: str, params: dict) -> dict:
     """What the Decision view shows for ``?region=&route=&date=&window=1 week``.
 
@@ -169,12 +181,16 @@ def decision_view_state(region: str, date: str, params: dict) -> dict:
     except Exception as exc:   # same tolerance as the page
         logging.warning("retriever unavailable: %s", exc)
     action, rule = core.decide_action(level, top.get("agent", ""), sustained, hist)
+    reporting, agreeing = agent_agreement(ts, day)
     on_date = int(dates.searchsorted(pd.Timestamp(date)))
     return {
         "route": route["name"],
         "route_key": route["key"],
         "route_composite_on_date": _r(series.iloc[on_date]),
         "route_agents": sorted(agents),
+        "reporting_agents": reporting,
+        "agents_reporting": len(reporting),
+        "agents_agreeing": agreeing,
         "assessed_day": f"{dates[day - 1]:%Y-%m-%d}",
         "route_composite": _r(score),
         "status_word": core.status_word(score, thr),
