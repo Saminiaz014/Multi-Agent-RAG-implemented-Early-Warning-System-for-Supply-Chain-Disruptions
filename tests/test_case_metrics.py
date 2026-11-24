@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
@@ -163,3 +164,48 @@ def test_every_committed_snapshot_says_how_many_agents_reported_and_agreed() -> 
             dv = snap["decision_view"]
             assert dv["agents_reporting"] == len(dv["reporting_agents"]) >= 1
             assert 0 <= dv["agents_agreeing"] <= dv["agents_reporting"]
+
+
+# --------------------------------- the composite with one agent taken out
+_PARAMS = {"inter_weights": {"shipping": 0.294, "market": 0.176, "geopolitical": 0.294,
+                             "natural_disaster": 0.118, "news_sentiment": 0.118},
+           "thresholds": {"risk_medium": 0.51, "risk_high": 0.69, "risk_critical": 0.9}}
+
+
+def test_risk_without_each_agent_renormalises_over_the_rest() -> None:
+    risk = pd.DataFrame({"shipping": [1.0], "market": [1.0], "natural_disaster": [0.0],
+                         "news_sentiment": [0.312]})
+    active = ["shipping", "market", "natural_disaster", "news_sentiment"]
+    out = cm.risk_without_each(risk, 0, _PARAMS, active)
+    assert set(out) == set(active)
+    # without natural disaster: (0.294 + 0.176 + 0.118 * 0.312) / (0.294 + 0.176 + 0.118)
+    assert out["natural_disaster"] == pytest.approx((0.294 + 0.176 + 0.118 * 0.312) / 0.588, abs=1e-3)
+    # without shipping the composite falls
+    assert out["shipping"] < out["natural_disaster"]
+
+
+def test_risk_without_each_agent_skips_an_agent_with_no_score_that_day() -> None:
+    risk = pd.DataFrame({"shipping": [1.0], "market": [1.0], "geopolitical": [float("nan")]})
+    out = cm.risk_without_each(risk, 0, _PARAMS, ["shipping", "market", "geopolitical"])
+    assert set(out) == {"shipping", "market"}
+
+
+def test_every_committed_snapshot_has_the_composite_without_each_scoring_agent() -> None:
+    committed = json.loads(cm.COMMITTED.read_text(encoding="utf-8"))
+    for case in committed["cases"]:
+        for snap in case["snapshots"]:
+            scoring = {a for a, v in snap["agent_scores"].items() if v is not None}
+            assert set(snap["risk_without_agent"]) == scoring
+
+
+def test_risk_without_each_drops_the_agreement_bonus_when_a_high_scorer_goes() -> None:
+    """Three agents above 0.5 earn the 1.15 bonus; take one of them out and the bonus goes with it."""
+    risk = pd.DataFrame({"shipping": [0.6], "market": [0.6], "geopolitical": [0.6], "natural_disaster": [0.0]})
+    out = cm.risk_without_each(risk, 0, _PARAMS, ["shipping", "market", "geopolitical", "natural_disaster"])
+    assert out["natural_disaster"] == pytest.approx(0.6 * 1.15, abs=1e-3)       # still three above 0.5: bonus kept
+    assert out["shipping"] == pytest.approx((0.6 * (0.176 + 0.294)) / (0.176 + 0.294 + 0.118), abs=1e-3)  # two left: no bonus
+
+
+def test_risk_without_each_has_no_entry_when_nothing_else_would_be_scoring() -> None:
+    risk = pd.DataFrame({"shipping": [0.8], "market": [float("nan")]})
+    assert cm.risk_without_each(risk, 0, _PARAMS, ["shipping", "market"]) == {}

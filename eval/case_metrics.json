@@ -46,6 +46,13 @@
             "natural_disaster": 0.0,
             "news_sentiment": 0.084
           },
+          "risk_without_agent": {
+            "shipping": 0.536,
+            "market": 0.679,
+            "geopolitical": 0.59,
+            "natural_disaster": 0.877,
+            "news_sentiment": 0.864
+          },
           "dominant_agent": "shipping",
           "ships_per_day": 131.0,
           "in_traffic_drop_label": false,
@@ -117,6 +124,12 @@
             "geopolitical": 0.85,
             "natural_disaster": 0.0,
             "news_sentiment": null
+          },
+          "risk_without_agent": {
+            "shipping": 0.725,
+            "market": 0.666,
+            "geopolitical": 0.674,
+            "natural_disaster": 0.973
           },
           "dominant_agent": "geopolitical",
           "ships_per_day": 118.0,
@@ -330,6 +343,12 @@
             "natural_disaster": 0.0,
             "news_sentiment": 0.312
           },
+          "risk_without_agent": {
+            "shipping": 0.517,
+            "market": 0.624,
+            "natural_disaster": 0.862,
+            "news_sentiment": 0.799
+          },
           "dominant_agent": "shipping",
           "ships_per_day": 7.0,
           "in_traffic_drop_label": true,
@@ -402,6 +421,12 @@
             "geopolitical": null,
             "natural_disaster": 0.0,
             "news_sentiment": 0.237
+          },
+          "risk_without_agent": {
+            "shipping": 0.333,
+            "market": 0.607,
+            "natural_disaster": 0.734,
+            "news_sentiment": 0.686
           },
           "dominant_agent": "shipping",
           "ships_per_day": 2.0,
@@ -646,6 +671,12 @@
             "geopolitical": 0.686,
             "news_sentiment": 0.461
           },
+          "risk_without_agent": {
+            "shipping": 0.709,
+            "market": 0.779,
+            "geopolitical": 0.866,
+            "news_sentiment": 0.988
+          },
           "dominant_agent": "shipping",
           "ships_per_day": 57.0,
           "in_traffic_drop_label": false,
@@ -714,6 +745,12 @@
             "market": 0.813,
             "geopolitical": 0.848,
             "news_sentiment": 0.163
+          },
+          "risk_without_agent": {
+            "shipping": 0.7,
+            "market": 0.797,
+            "geopolitical": 0.776,
+            "news_sentiment": 1.0
           },
           "dominant_agent": "shipping",
           "ships_per_day": 36.0,
@@ -1148,6 +1185,12 @@
             "natural_disaster": 0.0,
             "news_sentiment": 0.301
           },
+          "risk_without_agent": {
+            "shipping": 0.357,
+            "market": 0.57,
+            "natural_disaster": 0.703,
+            "news_sentiment": 0.643
+          },
           "dominant_agent": "shipping",
           "ships_per_day": 19.0,
           "in_traffic_drop_label": true,
@@ -1216,6 +1259,12 @@
             "market": 0.621,
             "natural_disaster": 0.0,
             "news_sentiment": 0.073
+          },
+          "risk_without_agent": {
+            "shipping": 0.286,
+            "market": 0.217,
+            "natural_disaster": 0.382,
+            "news_sentiment": 0.367
           },
           "dominant_agent": "market",
           "ships_per_day": 28.0,

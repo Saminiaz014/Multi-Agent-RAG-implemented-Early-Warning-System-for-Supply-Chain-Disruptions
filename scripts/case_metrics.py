@@ -226,6 +226,21 @@ def gap_notes(region: str, gaps: list[str], risk: pd.DataFrame) -> list[str]:
     return notes
 
 
+def risk_without_each(risk: pd.DataFrame, i: int, params: dict, active: list[str]) -> dict:
+    """The composite on row ``i`` with each scoring agent taken out in turn.
+
+    Uses the dashboard's own ``composite_series`` (renormalised over the agents that have a
+    score that day, with the agreement bonus), so it answers "what would the score have been
+    without this agent?" the way the page would compute it. An agent with no score that day is
+    skipped: there is nothing to take out, and so is the only agent that scores.
+    """
+    one = risk.iloc[[i]].reset_index(drop=True)
+    scoring = [a for a in active if a in one.columns and pd.notna(one[a].iloc[0])]
+    # with nobody else scoring there is no composite to speak of (``composite_series`` would say 0.0)
+    return {a: _r(core.composite_series(one, params, set(active) - {a}).iloc[0])
+            for a in scoring if len(scoring) > 1}
+
+
 def snapshot(case: dict, risk: pd.DataFrame, raw: pd.DataFrame, date: str,
              params: dict, active: list[str]) -> dict:
     thr = params["thresholds"]
@@ -239,6 +254,7 @@ def snapshot(case: dict, risk: pd.DataFrame, raw: pd.DataFrame, date: str,
         "engine_tier": str(row["risk_level"]),
         "four_tier": core.risk_tier(float(row["risk_score"]), thr),
         "agent_scores": {a: _r(row.get(a)) for a in active},
+        "risk_without_agent": risk_without_each(risk, i, params, active),
         "dominant_agent": str(row["top_agent"]),
         "ships_per_day": _r(raw["shipping__vessel_count"].iloc[i], 1),
         "in_traffic_drop_label": bool(row["y_true"]),
