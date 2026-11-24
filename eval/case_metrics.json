@@ -1,0 +1,1594 @@
+{
+  "thresholds": {
+    "risk_medium": 0.51,
+    "risk_high": 0.69,
+    "risk_critical": 0.9
+  },
+  "inter_agent_weights": {
+    "shipping": 0.294,
+    "market": 0.176,
+    "geopolitical": 0.294,
+    "natural_disaster": 0.118,
+    "news_sentiment": 0.118
+  },
+  "decision_window": "1 week",
+  "cases": [
+    {
+      "case": 1,
+      "slug": "hormuz_warning",
+      "region": "hormuz",
+      "name": "Early warning before the 2026 break",
+      "window": [
+        "2024-07-01",
+        "2026-03-31"
+      ],
+      "event_date": "2026-03-07",
+      "active_agents": [
+        "shipping",
+        "market",
+        "geopolitical",
+        "natural_disaster",
+        "news_sentiment"
+      ],
+      "passive_agents": [],
+      "snapshots": [
+        {
+          "requested": "2024-10-01",
+          "intended_tier": "High",
+          "date": "2024-10-02",
+          "risk_score": 0.773,
+          "engine_tier": "high",
+          "four_tier": "High",
+          "agent_scores": {
+            "shipping": 1.0,
+            "market": 0.64,
+            "geopolitical": 0.871,
+            "natural_disaster": 0.0,
+            "news_sentiment": 0.084
+          },
+          "dominant_agent": "shipping",
+          "ships_per_day": 131.0,
+          "in_traffic_drop_label": false,
+          "data_gaps": [],
+          "decision_view": {
+            "route": "Westbound TSS \u2014 inbound to Persian Gulf",
+            "route_key": "westbound_tss",
+            "route_composite_on_date": 0.877,
+            "route_agents": [
+              "geopolitical",
+              "market",
+              "news_sentiment",
+              "shipping"
+            ],
+            "assessed_day": "2024-10-02",
+            "route_composite": 0.877,
+            "status_word": "High",
+            "level_for_action": "high",
+            "sustained": false,
+            "top_driver": {
+              "agent": "shipping",
+              "feature": "vessel_count",
+              "direction": "elevated"
+            },
+            "drivers": [
+              {
+                "agent": "shipping",
+                "feature": "vessel_count",
+                "direction": "elevated"
+              },
+              {
+                "agent": "geopolitical",
+                "feature": "diplomatic_incident_score",
+                "direction": "elevated"
+              },
+              {
+                "agent": "market",
+                "feature": "brent_crude_usd",
+                "direction": "suppressed"
+              }
+            ],
+            "historical_match": {
+              "similarity": 0.6183,
+              "action": "monitor"
+            },
+            "action": "reroute",
+            "rule": "risk HIGH \u2227 top driver agent = shipping (physical) \u2192 reroute"
+          }
+        },
+        {
+          "requested": "2025-06-21",
+          "intended_tier": "High",
+          "date": "2025-06-21",
+          "risk_score": 0.843,
+          "engine_tier": "high",
+          "four_tier": "High",
+          "agent_scores": {
+            "shipping": 0.749,
+            "market": 1.0,
+            "geopolitical": 0.85,
+            "natural_disaster": 0.0,
+            "news_sentiment": null
+          },
+          "dominant_agent": "geopolitical",
+          "ships_per_day": 118.0,
+          "in_traffic_drop_label": false,
+          "data_gaps": [],
+          "decision_view": {
+            "route": "Westbound TSS \u2014 inbound to Persian Gulf",
+            "route_key": "westbound_tss",
+            "route_composite_on_date": 0.973,
+            "route_agents": [
+              "geopolitical",
+              "market",
+              "news_sentiment",
+              "shipping"
+            ],
+            "assessed_day": "2025-06-18",
+            "route_composite": 1.0,
+            "status_word": "Critical",
+            "level_for_action": "high",
+            "sustained": true,
+            "top_driver": {
+              "agent": "shipping",
+              "feature": "tanker_count",
+              "direction": "elevated"
+            },
+            "drivers": [
+              {
+                "agent": "shipping",
+                "feature": "tanker_count",
+                "direction": "elevated"
+              },
+              {
+                "agent": "geopolitical",
+                "feature": "military_activity_index",
+                "direction": "elevated"
+              },
+              {
+                "agent": "market",
+                "feature": "brent_crude_usd",
+                "direction": "elevated"
+              }
+            ],
+            "historical_match": {
+              "similarity": 0.6183,
+              "action": "monitor"
+            },
+            "action": "escalate",
+            "rule": "risk HIGH for > 5 consecutive days (sustained) \u2192 escalate"
+          }
+        }
+      ],
+      "snapshot_changes": [
+        "2024-10-01 is Low, not High; nearest High day 2024-10-02 used"
+      ],
+      "window_stats": {
+        "days": 639,
+        "mean_risk": 0.498,
+        "max_risk": 0.928,
+        "max_risk_date": "2025-06-18",
+        "four_tier_days": {
+          "Low": 360,
+          "Medium": 210,
+          "High": 68,
+          "Critical": 1
+        },
+        "engine_tier_days": {
+          "low": 360,
+          "medium": 210,
+          "high": 69
+        },
+        "dominant_share": {
+          "shipping": 0.604,
+          "geopolitical": 0.275,
+          "market": 0.121
+        },
+        "agent_means": {
+          "shipping": 0.651,
+          "market": 0.702,
+          "geopolitical": 0.491,
+          "natural_disaster": 0.001,
+          "news_sentiment": 0.12
+        },
+        "agent_corr": {
+          "shipping~market": 0.1,
+          "shipping~geopolitical": 0.01,
+          "shipping~natural_disaster": -0.01,
+          "shipping~news_sentiment": 0.04,
+          "market~geopolitical": 0.11,
+          "market~natural_disaster": -0.0,
+          "market~news_sentiment": -0.01,
+          "geopolitical~natural_disaster": -0.06,
+          "geopolitical~news_sentiment": -0.02,
+          "natural_disaster~news_sentiment": -0.03
+        },
+        "ships_per_day_before_event": 84.6,
+        "ships_per_day_from_event": 2.6,
+        "ships_per_day_by_year": {
+          "2024": 90.6,
+          "2025": 85.5,
+          "2026": 45.6
+        },
+        "high_runs_3d_plus": [
+          {
+            "start": "2024-10-14",
+            "end": "2024-10-16",
+            "max": 0.788,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-06-13",
+            "end": "2025-06-23",
+            "max": 0.928,
+            "dominant": "geopolitical"
+          },
+          {
+            "start": "2026-03-01",
+            "end": "2026-03-07",
+            "max": 0.743,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-03-11",
+            "end": "2026-03-22",
+            "max": 0.736,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-03-25",
+            "end": "2026-03-27",
+            "max": 0.711,
+            "dominant": "shipping"
+          }
+        ]
+      },
+      "label": {
+        "runs": [
+          {
+            "start": "2024-12-08",
+            "end": "2025-02-20",
+            "days": 75,
+            "starts_before_window": false,
+            "high_days_inside": 1,
+            "mean_risk_inside": 0.482,
+            "lead_days_first_high_prior_60d": 55,
+            "lead_is_cap": false
+          },
+          {
+            "start": "2025-11-29",
+            "end": "2026-02-18",
+            "days": 82,
+            "starts_before_window": false,
+            "high_days_inside": 0,
+            "mean_risk_inside": 0.55,
+            "lead_days_first_high_prior_60d": null,
+            "lead_is_cap": false
+          },
+          {
+            "start": "2026-03-07",
+            "end": "2026-03-31",
+            "days": 25,
+            "starts_before_window": false,
+            "high_days_inside": 16,
+            "mean_risk_inside": 0.692,
+            "lead_days_first_high_prior_60d": 10,
+            "lead_is_cap": false
+          }
+        ],
+        "label_days": 182,
+        "high_days_inside_label": 17,
+        "high_days_outside_label": 52
+      }
+    },
+    {
+      "case": 2,
+      "slug": "hormuz_crisis",
+      "region": "hormuz",
+      "name": "Active crisis with degraded inputs",
+      "window": [
+        "2025-10-01",
+        "2026-10-25"
+      ],
+      "event_date": "2026-03-07",
+      "active_agents": [
+        "shipping",
+        "market",
+        "geopolitical",
+        "natural_disaster",
+        "news_sentiment"
+      ],
+      "passive_agents": [],
+      "snapshots": [
+        {
+          "requested": "2026-04-15",
+          "intended_tier": "High",
+          "date": "2026-04-15",
+          "risk_score": 0.718,
+          "engine_tier": "high",
+          "four_tier": "High",
+          "agent_scores": {
+            "shipping": 1.0,
+            "market": 1.0,
+            "geopolitical": null,
+            "natural_disaster": 0.0,
+            "news_sentiment": 0.312
+          },
+          "dominant_agent": "shipping",
+          "ships_per_day": 7.0,
+          "in_traffic_drop_label": true,
+          "data_gaps": [
+            "geopolitical: ACLED conflict data end 2025-11-24"
+          ],
+          "decision_view": {
+            "route": "Westbound TSS \u2014 inbound to Persian Gulf",
+            "route_key": "westbound_tss",
+            "route_composite_on_date": 0.862,
+            "route_agents": [
+              "geopolitical",
+              "market",
+              "news_sentiment",
+              "shipping"
+            ],
+            "assessed_day": "2026-04-14",
+            "route_composite": 0.878,
+            "status_word": "High",
+            "level_for_action": "high",
+            "sustained": true,
+            "top_driver": {
+              "agent": "shipping",
+              "feature": "tanker_count",
+              "direction": "elevated"
+            },
+            "drivers": [
+              {
+                "agent": "shipping",
+                "feature": "tanker_count",
+                "direction": "elevated"
+              },
+              {
+                "agent": "market",
+                "feature": "freight_rate_index",
+                "direction": "suppressed"
+              },
+              {
+                "agent": "news_sentiment",
+                "feature": "recency_weighted_score",
+                "direction": "suppressed"
+              }
+            ],
+            "historical_match": {
+              "similarity": 0.6211,
+              "action": "monitor"
+            },
+            "action": "escalate",
+            "rule": "risk HIGH for > 5 consecutive days (sustained) \u2192 escalate"
+          }
+        },
+        {
+          "requested": "2026-10-25",
+          "intended_tier": "Medium",
+          "date": "2026-10-25",
+          "risk_score": 0.611,
+          "engine_tier": "medium",
+          "four_tier": "Medium",
+          "agent_scores": {
+            "shipping": 1.0,
+            "market": 0.621,
+            "geopolitical": null,
+            "natural_disaster": 0.0,
+            "news_sentiment": 0.237
+          },
+          "dominant_agent": "shipping",
+          "ships_per_day": 2.0,
+          "in_traffic_drop_label": true,
+          "data_gaps": [
+            "geopolitical: ACLED conflict data end 2025-11-24"
+          ],
+          "decision_view": {
+            "route": "Westbound TSS \u2014 inbound to Persian Gulf",
+            "route_key": "westbound_tss",
+            "route_composite_on_date": 0.734,
+            "route_agents": [
+              "geopolitical",
+              "market",
+              "news_sentiment",
+              "shipping"
+            ],
+            "assessed_day": "2026-10-20",
+            "route_composite": 0.797,
+            "status_word": "High",
+            "level_for_action": "high",
+            "sustained": true,
+            "top_driver": {
+              "agent": "shipping",
+              "feature": "congestion_index",
+              "direction": "suppressed"
+            },
+            "drivers": [
+              {
+                "agent": "shipping",
+                "feature": "congestion_index",
+                "direction": "suppressed"
+              },
+              {
+                "agent": "market",
+                "feature": "freight_rate_index",
+                "direction": "elevated"
+              },
+              {
+                "agent": "news_sentiment",
+                "feature": "recency_weighted_score",
+                "direction": "elevated"
+              }
+            ],
+            "historical_match": {
+              "similarity": 0.6211,
+              "action": "monitor"
+            },
+            "action": "escalate",
+            "rule": "risk HIGH for > 5 consecutive days (sustained) \u2192 escalate"
+          }
+        }
+      ],
+      "snapshot_changes": [],
+      "window_stats": {
+        "days": 390,
+        "mean_risk": 0.589,
+        "max_risk": 0.801,
+        "max_risk_date": "2026-08-30",
+        "four_tier_days": {
+          "Low": 82,
+          "Medium": 219,
+          "High": 89,
+          "Critical": 0
+        },
+        "engine_tier_days": {
+          "low": 82,
+          "medium": 219,
+          "high": 89
+        },
+        "dominant_share": {
+          "shipping": 0.949,
+          "market": 0.041,
+          "geopolitical": 0.01
+        },
+        "agent_means": {
+          "shipping": 0.904,
+          "market": 0.732,
+          "geopolitical": 0.251,
+          "natural_disaster": 0.001,
+          "news_sentiment": 0.21
+        },
+        "agent_corr": {
+          "shipping~market": 0.14,
+          "shipping~geopolitical": -0.02,
+          "shipping~natural_disaster": 0.01,
+          "shipping~news_sentiment": 0.3,
+          "market~geopolitical": 0.0,
+          "market~natural_disaster": 0.03,
+          "market~news_sentiment": -0.05,
+          "geopolitical~natural_disaster": -0.08,
+          "geopolitical~news_sentiment": 0.02,
+          "natural_disaster~news_sentiment": 0.01
+        },
+        "ships_per_day_before_event": 67.2,
+        "ships_per_day_from_event": 6.2,
+        "ships_per_day_by_year": {
+          "2025": 70.8,
+          "2026": 18.4
+        },
+        "high_runs_3d_plus": [
+          {
+            "start": "2026-03-01",
+            "end": "2026-03-07",
+            "max": 0.743,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-03-11",
+            "end": "2026-03-22",
+            "max": 0.736,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-03-25",
+            "end": "2026-03-27",
+            "max": 0.711,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-04-14",
+            "end": "2026-04-19",
+            "max": 0.731,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-05-19",
+            "end": "2026-05-21",
+            "max": 0.719,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-06-17",
+            "end": "2026-06-21",
+            "max": 0.706,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-06-24",
+            "end": "2026-06-28",
+            "max": 0.728,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-07-15",
+            "end": "2026-07-25",
+            "max": 0.748,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-08-13",
+            "end": "2026-08-15",
+            "max": 0.727,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-08-19",
+            "end": "2026-08-21",
+            "max": 0.71,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-09-10",
+            "end": "2026-09-13",
+            "max": 0.706,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2026-09-15",
+            "end": "2026-09-20",
+            "max": 0.721,
+            "dominant": "shipping"
+          }
+        ]
+      },
+      "label": {
+        "runs": [
+          {
+            "start": "2025-11-29",
+            "end": "2026-02-18",
+            "days": 82,
+            "starts_before_window": false,
+            "high_days_inside": 0,
+            "mean_risk_inside": 0.55,
+            "lead_days_first_high_prior_60d": null,
+            "lead_is_cap": false
+          },
+          {
+            "start": "2026-03-07",
+            "end": "2026-10-25",
+            "days": 233,
+            "starts_before_window": false,
+            "high_days_inside": 82,
+            "mean_risk_inside": 0.653,
+            "lead_days_first_high_prior_60d": 10,
+            "lead_is_cap": false
+          }
+        ],
+        "label_days": 315,
+        "high_days_inside_label": 82,
+        "high_days_outside_label": 7
+      }
+    },
+    {
+      "case": 3,
+      "slug": "bab_houthi",
+      "region": "bab_el_mandeb",
+      "name": "Houthi shipping crisis",
+      "window": [
+        "2023-06-01",
+        "2025-12-31"
+      ],
+      "event_date": "2023-11-19",
+      "active_agents": [
+        "shipping",
+        "market",
+        "geopolitical",
+        "news_sentiment"
+      ],
+      "passive_agents": [
+        "natural_disaster"
+      ],
+      "snapshots": [
+        {
+          "requested": "2023-12-20",
+          "intended_tier": "Critical",
+          "date": "2023-12-17",
+          "risk_score": 0.927,
+          "engine_tier": "high",
+          "four_tier": "Critical",
+          "agent_scores": {
+            "shipping": 1.0,
+            "market": 0.914,
+            "geopolitical": 0.686,
+            "news_sentiment": 0.461
+          },
+          "dominant_agent": "shipping",
+          "ships_per_day": 57.0,
+          "in_traffic_drop_label": false,
+          "data_gaps": [],
+          "decision_view": {
+            "route": "Northbound \u2014 strait to southern Red Sea",
+            "route_key": "northbound_red_sea",
+            "route_composite_on_date": 0.779,
+            "route_agents": [
+              "geopolitical",
+              "news_sentiment",
+              "shipping"
+            ],
+            "assessed_day": "2023-12-16",
+            "route_composite": 0.804,
+            "status_word": "High",
+            "level_for_action": "high",
+            "sustained": false,
+            "top_driver": {
+              "agent": "shipping",
+              "feature": "congestion_index",
+              "direction": "elevated"
+            },
+            "drivers": [
+              {
+                "agent": "shipping",
+                "feature": "congestion_index",
+                "direction": "elevated"
+              },
+              {
+                "agent": "geopolitical",
+                "feature": "diplomatic_incident_score",
+                "direction": "elevated"
+              },
+              {
+                "agent": "news_sentiment",
+                "feature": "article_volume",
+                "direction": "elevated"
+              }
+            ],
+            "historical_match": {
+              "similarity": 0.6734,
+              "action": "escalate"
+            },
+            "action": "reroute",
+            "rule": "risk HIGH \u2227 top driver agent = shipping (physical) \u2192 reroute"
+          }
+        },
+        {
+          "requested": "2024-01-15",
+          "intended_tier": "Critical",
+          "date": "2024-01-19",
+          "risk_score": 0.92,
+          "engine_tier": "high",
+          "four_tier": "Critical",
+          "agent_scores": {
+            "shipping": 1.0,
+            "market": 0.813,
+            "geopolitical": 0.848,
+            "news_sentiment": 0.163
+          },
+          "dominant_agent": "shipping",
+          "ships_per_day": 36.0,
+          "in_traffic_drop_label": true,
+          "data_gaps": [],
+          "decision_view": {
+            "route": "Northbound \u2014 strait to southern Red Sea",
+            "route_key": "northbound_red_sea",
+            "route_composite_on_date": 0.797,
+            "route_agents": [
+              "geopolitical",
+              "news_sentiment",
+              "shipping"
+            ],
+            "assessed_day": "2024-01-19",
+            "route_composite": 0.797,
+            "status_word": "High",
+            "level_for_action": "high",
+            "sustained": false,
+            "top_driver": {
+              "agent": "shipping",
+              "feature": "vessel_count",
+              "direction": "suppressed"
+            },
+            "drivers": [
+              {
+                "agent": "shipping",
+                "feature": "vessel_count",
+                "direction": "suppressed"
+              },
+              {
+                "agent": "geopolitical",
+                "feature": "military_activity_index",
+                "direction": "elevated"
+              },
+              {
+                "agent": "news_sentiment",
+                "feature": "recency_weighted_score",
+                "direction": "elevated"
+              }
+            ],
+            "historical_match": {
+              "similarity": 0.6183,
+              "action": "monitor"
+            },
+            "action": "reroute",
+            "rule": "risk HIGH \u2227 top driver agent = shipping (physical) \u2192 reroute"
+          }
+        }
+      ],
+      "snapshot_changes": [
+        "2023-12-20 is Medium, not Critical; nearest Critical day 2023-12-17 used",
+        "2024-01-15 is High, not Critical; nearest Critical day 2024-01-19 used"
+      ],
+      "window_stats": {
+        "days": 945,
+        "mean_risk": 0.679,
+        "max_risk": 1.0,
+        "max_risk_date": "2025-01-08",
+        "four_tier_days": {
+          "Low": 84,
+          "Medium": 478,
+          "High": 328,
+          "Critical": 55
+        },
+        "engine_tier_days": {
+          "low": 84,
+          "medium": 478,
+          "high": 383
+        },
+        "dominant_share": {
+          "shipping": 0.931,
+          "geopolitical": 0.051,
+          "market": 0.018
+        },
+        "agent_means": {
+          "shipping": 0.915,
+          "market": 0.689,
+          "geopolitical": 0.504,
+          "news_sentiment": 0.193
+        },
+        "agent_corr": {
+          "shipping~market": -0.1,
+          "shipping~geopolitical": -0.07,
+          "shipping~news_sentiment": 0.17,
+          "market~geopolitical": -0.01,
+          "market~news_sentiment": 0.03,
+          "geopolitical~news_sentiment": 0.08
+        },
+        "ships_per_day_before_event": 75.7,
+        "ships_per_day_from_event": 35.0,
+        "ships_per_day_by_year": {
+          "2023": 74.3,
+          "2024": 32.5,
+          "2025": 33.5
+        },
+        "high_runs_3d_plus": [
+          {
+            "start": "2023-07-28",
+            "end": "2023-07-31",
+            "max": 0.885,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2023-08-12",
+            "end": "2023-08-15",
+            "max": 0.948,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2023-10-18",
+            "end": "2023-10-20",
+            "max": 0.763,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2023-11-17",
+            "end": "2023-11-19",
+            "max": 0.885,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2023-12-03",
+            "end": "2023-12-05",
+            "max": 0.802,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2023-12-14",
+            "end": "2023-12-17",
+            "max": 0.97,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-01-17",
+            "end": "2024-01-19",
+            "max": 0.92,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-02-01",
+            "end": "2024-02-04",
+            "max": 0.876,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-05-08",
+            "end": "2024-05-12",
+            "max": 0.853,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-06-05",
+            "end": "2024-06-09",
+            "max": 0.966,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-06-28",
+            "end": "2024-07-02",
+            "max": 0.902,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-07-08",
+            "end": "2024-07-12",
+            "max": 0.913,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-08-01",
+            "end": "2024-08-03",
+            "max": 0.851,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-09-06",
+            "end": "2024-09-10",
+            "max": 0.828,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-09-14",
+            "end": "2024-09-18",
+            "max": 0.907,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-09-25",
+            "end": "2024-09-29",
+            "max": 0.852,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-10-03",
+            "end": "2024-10-05",
+            "max": 0.964,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-10-07",
+            "end": "2024-10-09",
+            "max": 0.815,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-10-14",
+            "end": "2024-10-16",
+            "max": 0.926,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-10-23",
+            "end": "2024-10-25",
+            "max": 0.811,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-11-14",
+            "end": "2024-11-17",
+            "max": 0.922,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-11-20",
+            "end": "2024-11-22",
+            "max": 0.964,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-11-25",
+            "end": "2024-11-29",
+            "max": 0.818,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-12-04",
+            "end": "2024-12-08",
+            "max": 0.829,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-12-12",
+            "end": "2024-12-18",
+            "max": 0.914,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2024-12-20",
+            "end": "2024-12-29",
+            "max": 0.919,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-01-07",
+            "end": "2025-01-16",
+            "max": 1.0,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-01-18",
+            "end": "2025-01-27",
+            "max": 1.0,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-02-18",
+            "end": "2025-02-21",
+            "max": 0.894,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-03-01",
+            "end": "2025-03-03",
+            "max": 0.898,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-03-07",
+            "end": "2025-03-20",
+            "max": 1.0,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-03-22",
+            "end": "2025-03-24",
+            "max": 0.87,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-04-11",
+            "end": "2025-04-22",
+            "max": 0.873,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-05-17",
+            "end": "2025-05-22",
+            "max": 0.79,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-05-24",
+            "end": "2025-05-26",
+            "max": 0.766,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-05-30",
+            "end": "2025-06-03",
+            "max": 0.82,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-06-10",
+            "end": "2025-06-15",
+            "max": 0.948,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-06-17",
+            "end": "2025-06-29",
+            "max": 1.0,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-07-24",
+            "end": "2025-08-10",
+            "max": 0.99,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-08-15",
+            "end": "2025-08-17",
+            "max": 0.934,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-09-15",
+            "end": "2025-09-17",
+            "max": 0.862,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-10-16",
+            "end": "2025-10-19",
+            "max": 0.877,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-10-21",
+            "end": "2025-10-24",
+            "max": 0.999,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-11-25",
+            "end": "2025-11-27",
+            "max": 0.784,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-12-04",
+            "end": "2025-12-06",
+            "max": 0.771,
+            "dominant": "shipping"
+          },
+          {
+            "start": "2025-12-08",
+            "end": "2025-12-11",
+            "max": 0.754,
+            "dominant": "shipping"
+          }
+        ]
+      },
+      "label": {
+        "runs": [
+          {
+            "start": "2024-01-06",
+            "end": "2024-09-05",
+            "days": 244,
+            "starts_before_window": false,
+            "high_days_inside": 79,
+            "mean_risk_inside": 0.674,
+            "lead_days_first_high_prior_60d": 50,
+            "lead_is_cap": false
+          }
+        ],
+        "label_days": 244,
+        "high_days_inside_label": 79,
+        "high_days_outside_label": 304
+      }
+    },
+    {
+      "case": 4,
+      "slug": "panama_drought",
+      "region": "panama",
+      "name": "Drought, then recovery",
+      "window": [
+        "2023-09-01",
+        "2026-10-25"
+      ],
+      "event_date": "2023-11-23",
+      "active_agents": [
+        "shipping",
+        "market",
+        "natural_disaster",
+        "news_sentiment"
+      ],
+      "passive_agents": [
+        "geopolitical"
+      ],
+      "snapshots": [
+        {
+          "requested": "2024-01-15",
+          "intended_tier": "Medium",
+          "date": "2024-01-15",
+          "risk_score": 0.586,
+          "engine_tier": "medium",
+          "four_tier": "Medium",
+          "agent_scores": {
+            "shipping": 0.907,
+            "market": 0.634,
+            "natural_disaster": 0.0,
+            "news_sentiment": 0.301
+          },
+          "dominant_agent": "shipping",
+          "ships_per_day": 19.0,
+          "in_traffic_drop_label": true,
+          "data_gaps": [],
+          "decision_view": {
+            "route": "Atlantic approach \u2014 Col\u00f3n anchorage",
+            "route_key": "atlantic_approach",
+            "route_composite_on_date": 0.703,
+            "route_agents": [
+              "market",
+              "news_sentiment",
+              "shipping"
+            ],
+            "assessed_day": "2024-01-11",
+            "route_composite": 0.809,
+            "status_word": "High",
+            "level_for_action": "high",
+            "sustained": true,
+            "top_driver": {
+              "agent": "shipping",
+              "feature": "vessel_count",
+              "direction": "suppressed"
+            },
+            "drivers": [
+              {
+                "agent": "shipping",
+                "feature": "vessel_count",
+                "direction": "suppressed"
+              },
+              {
+                "agent": "market",
+                "feature": "trade_volume_index",
+                "direction": "elevated"
+              },
+              {
+                "agent": "news_sentiment",
+                "feature": "article_volume",
+                "direction": "elevated"
+              }
+            ],
+            "historical_match": {
+              "similarity": 0.6387,
+              "action": "escalate"
+            },
+            "action": "escalate",
+            "rule": "risk HIGH for > 5 consecutive days (sustained) \u2192 escalate"
+          }
+        },
+        {
+          "requested": "2026-10-25",
+          "intended_tier": "Low",
+          "date": "2026-10-25",
+          "risk_score": 0.318,
+          "engine_tier": "low",
+          "four_tier": "Low",
+          "agent_scores": {
+            "shipping": 0.362,
+            "market": 0.621,
+            "natural_disaster": 0.0,
+            "news_sentiment": 0.073
+          },
+          "dominant_agent": "market",
+          "ships_per_day": 28.0,
+          "in_traffic_drop_label": false,
+          "data_gaps": [],
+          "decision_view": {
+            "route": "Atlantic approach \u2014 Col\u00f3n anchorage",
+            "route_key": "atlantic_approach",
+            "route_composite_on_date": 0.382,
+            "route_agents": [
+              "market",
+              "news_sentiment",
+              "shipping"
+            ],
+            "assessed_day": "2026-10-24",
+            "route_composite": 0.62,
+            "status_word": "High",
+            "level_for_action": "medium",
+            "sustained": false,
+            "top_driver": {
+              "agent": "shipping",
+              "feature": "vessel_count",
+              "direction": "elevated"
+            },
+            "drivers": [
+              {
+                "agent": "shipping",
+                "feature": "vessel_count",
+                "direction": "elevated"
+              },
+              {
+                "agent": "market",
+                "feature": "freight_rate_index",
+                "direction": "elevated"
+              },
+              {
+                "agent": "news_sentiment",
+                "feature": "sentiment_magnitude",
+                "direction": "suppressed"
+              }
+            ],
+            "historical_match": {
+              "similarity": 0.6211,
+              "action": "monitor"
+            },
+            "action": "monitor",
+            "rule": "risk_level == medium \u2192 monitor"
+          }
+        }
+      ],
+      "snapshot_changes": [],
+      "window_stats": {
+        "days": 1151,
+        "mean_risk": 0.408,
+        "max_risk": 0.764,
+        "max_risk_date": "2025-06-25",
+        "four_tier_days": {
+          "Low": 850,
+          "Medium": 280,
+          "High": 21,
+          "Critical": 0
+        },
+        "engine_tier_days": {
+          "low": 850,
+          "medium": 280,
+          "high": 21
+        },
+        "dominant_share": {
+          "shipping": 0.511,
+          "market": 0.488,
+          "news_sentiment": 0.001
+        },
+        "agent_means": {
+          "shipping": 0.489,
+          "market": 0.703,
+          "natural_disaster": 0.001,
+          "news_sentiment": 0.171
+        },
+        "agent_corr": {
+          "shipping~market": -0.03,
+          "shipping~natural_disaster": 0.05,
+          "shipping~news_sentiment": 0.06,
+          "market~natural_disaster": -0.03,
+          "market~news_sentiment": -0.03,
+          "natural_disaster~news_sentiment": 0.04
+        },
+        "ships_per_day_before_event": 28.9,
+        "ships_per_day_from_event": 29.3,
+        "ships_per_day_by_year": {
+          "2023": 26.7,
+          "2024": 26.5,
+          "2025": 31.1,
+          "2026": 31.3
+        },
+        "high_runs_3d_plus": []
+      },
+      "label": {
+        "runs": [
+          {
+            "start": "2023-11-23",
+            "end": "2024-04-19",
+            "days": 149,
+            "starts_before_window": false,
+            "high_days_inside": 7,
+            "mean_risk_inside": 0.573,
+            "lead_days_first_high_prior_60d": 4,
+            "lead_is_cap": false
+          }
+        ],
+        "label_days": 149,
+        "high_days_inside_label": 7,
+        "high_days_outside_label": 14
+      }
+    }
+  ],
+  "regions": {
+    "hormuz": {
+      "first_day": "2019-01-01",
+      "last_day": "2026-10-25",
+      "engine_critical_days": 0,
+      "dashboard_critical_days_engine_score": 1,
+      "demo_route": "westbound_tss",
+      "dashboard_critical_days_demo_route": 19,
+      "four_tier_days": {
+        "Low": 2151,
+        "Medium": 535,
+        "High": 168,
+        "Critical": 1
+      },
+      "engine_tier_days": {
+        "low": 2151,
+        "medium": 535,
+        "high": 169
+      },
+      "high_days": 169,
+      "label_days": 474,
+      "high_inside_label": 84,
+      "high_outside_label": 85,
+      "high_runs_3d_plus": 14,
+      "dominant_share": {
+        "shipping": 0.58,
+        "geopolitical": 0.3,
+        "market": 0.12,
+        "news_sentiment": 0.01
+      },
+      "agent_means": {
+        "shipping": 0.55,
+        "market": 0.46,
+        "geopolitical": 0.41,
+        "natural_disaster": 0.0,
+        "news_sentiment": 0.13
+      },
+      "mean_risk_by_year": {
+        "2019": 0.21,
+        "2020": 0.24,
+        "2021": 0.29,
+        "2022": 0.43,
+        "2023": 0.43,
+        "2024": 0.51,
+        "2025": 0.46,
+        "2026": 0.63
+      },
+      "high_days_by_year": {
+        "2019": 0,
+        "2020": 0,
+        "2021": 3,
+        "2022": 13,
+        "2023": 10,
+        "2024": 33,
+        "2025": 21,
+        "2026": 89
+      },
+      "ships_per_day_by_year": {
+        "2019": 69.1,
+        "2020": 73.6,
+        "2021": 80.8,
+        "2022": 93.5,
+        "2023": 92.3,
+        "2024": 91.1,
+        "2025": 85.5,
+        "2026": 18.4
+      },
+      "max_risk": 0.928,
+      "max_risk_date": "2025-06-18",
+      "latest": {
+        "risk_score": 0.611,
+        "engine_tier": "medium",
+        "four_tier": "Medium"
+      }
+    },
+    "bab_el_mandeb": {
+      "first_day": "2019-01-01",
+      "last_day": "2026-10-25",
+      "engine_critical_days": 0,
+      "dashboard_critical_days_engine_score": 68,
+      "demo_route": "northbound_red_sea",
+      "dashboard_critical_days_demo_route": 21,
+      "four_tier_days": {
+        "Low": 1523,
+        "Medium": 693,
+        "High": 571,
+        "Critical": 68
+      },
+      "engine_tier_days": {
+        "low": 1523,
+        "medium": 693,
+        "high": 639
+      },
+      "high_days": 639,
+      "label_days": 265,
+      "high_inside_label": 94,
+      "high_outside_label": 545,
+      "high_runs_3d_plus": 58,
+      "dominant_share": {
+        "shipping": 0.7,
+        "geopolitical": 0.21,
+        "market": 0.09,
+        "news_sentiment": 0.0
+      },
+      "agent_means": {
+        "shipping": 0.64,
+        "market": 0.46,
+        "geopolitical": 0.39,
+        "news_sentiment": 0.18
+      },
+      "mean_risk_by_year": {
+        "2019": 0.28,
+        "2020": 0.28,
+        "2021": 0.26,
+        "2022": 0.41,
+        "2023": 0.57,
+        "2024": 0.69,
+        "2025": 0.72,
+        "2026": 0.76
+      },
+      "high_days_by_year": {
+        "2019": 0,
+        "2020": 2,
+        "2021": 0,
+        "2022": 7,
+        "2023": 66,
+        "2024": 147,
+        "2025": 188,
+        "2026": 229
+      },
+      "ships_per_day_by_year": {
+        "2019": 53.5,
+        "2020": 54.5,
+        "2021": 58.8,
+        "2022": 67.1,
+        "2023": 74.0,
+        "2024": 32.5,
+        "2025": 33.5,
+        "2026": 33.2
+      },
+      "max_risk": 1.0,
+      "max_risk_date": "2025-01-08",
+      "latest": {
+        "risk_score": 0.74,
+        "engine_tier": "high",
+        "four_tier": "High"
+      }
+    },
+    "panama": {
+      "first_day": "2019-01-01",
+      "last_day": "2026-10-25",
+      "engine_critical_days": 0,
+      "dashboard_critical_days_engine_score": 0,
+      "demo_route": "atlantic_approach",
+      "dashboard_critical_days_demo_route": 3,
+      "four_tier_days": {
+        "Low": 2498,
+        "Medium": 336,
+        "High": 21,
+        "Critical": 0
+      },
+      "engine_tier_days": {
+        "low": 2498,
+        "medium": 336,
+        "high": 21
+      },
+      "high_days": 21,
+      "label_days": 149,
+      "high_inside_label": 7,
+      "high_outside_label": 14,
+      "high_runs_3d_plus": 0,
+      "dominant_share": {
+        "shipping": 0.62,
+        "market": 0.38,
+        "news_sentiment": 0.01
+      },
+      "agent_means": {
+        "shipping": 0.42,
+        "market": 0.46,
+        "natural_disaster": 0.0,
+        "news_sentiment": 0.15
+      },
+      "mean_risk_by_year": {
+        "2019": 0.18,
+        "2020": 0.22,
+        "2021": 0.21,
+        "2022": 0.35,
+        "2023": 0.37,
+        "2024": 0.45,
+        "2025": 0.35,
+        "2026": 0.41
+      },
+      "high_days_by_year": {
+        "2019": 0,
+        "2020": 0,
+        "2021": 0,
+        "2022": 0,
+        "2023": 3,
+        "2024": 10,
+        "2025": 3,
+        "2026": 5
+      },
+      "ships_per_day_by_year": {
+        "2019": 32.0,
+        "2020": 31.8,
+        "2021": 32.5,
+        "2022": 33.4,
+        "2023": 30.2,
+        "2024": 26.5,
+        "2025": 31.1,
+        "2026": 31.3
+      },
+      "max_risk": 0.764,
+      "max_risk_date": "2025-06-25",
+      "latest": {
+        "risk_score": 0.318,
+        "engine_tier": "low",
+        "four_tier": "Low"
+      }
+    },
+    "malacca": {
+      "first_day": "2019-01-01",
+      "last_day": "2026-10-25",
+      "engine_critical_days": 0,
+      "dashboard_critical_days_engine_score": 0,
+      "demo_route": "northbound_andaman",
+      "dashboard_critical_days_demo_route": 1,
+      "four_tier_days": {
+        "Low": 2585,
+        "Medium": 260,
+        "High": 10,
+        "Critical": 0
+      },
+      "engine_tier_days": {
+        "low": 2585,
+        "medium": 260,
+        "high": 10
+      },
+      "high_days": 10,
+      "label_days": 0,
+      "high_inside_label": 0,
+      "high_outside_label": 10,
+      "high_runs_3d_plus": 0,
+      "dominant_share": {
+        "shipping": 0.9,
+        "geopolitical": 0.09,
+        "news_sentiment": 0.01,
+        "natural_disaster": 0.0
+      },
+      "agent_means": {
+        "shipping": 0.57,
+        "geopolitical": 0.2,
+        "natural_disaster": 0.01,
+        "news_sentiment": 0.18
+      },
+      "mean_risk_by_year": {
+        "2019": 0.19,
+        "2020": 0.22,
+        "2021": 0.28,
+        "2022": 0.25,
+        "2023": 0.32,
+        "2024": 0.36,
+        "2025": 0.45,
+        "2026": 0.44
+      },
+      "high_days_by_year": {
+        "2019": 0,
+        "2020": 0,
+        "2021": 1,
+        "2022": 0,
+        "2023": 0,
+        "2024": 1,
+        "2025": 8,
+        "2026": 0
+      },
+      "ships_per_day_by_year": {
+        "2019": 170.2,
+        "2020": 161.2,
+        "2021": 161.3,
+        "2022": 207.1,
+        "2023": 220.1,
+        "2024": 223.4,
+        "2025": 234.5,
+        "2026": 224.4
+      },
+      "max_risk": 0.816,
+      "max_risk_date": "2024-02-03",
+      "latest": {
+        "risk_score": 0.488,
+        "engine_tier": "low",
+        "four_tier": "Low"
+      }
+    }
+  },
+  "market_corr_hormuz_panama": 1.0,
+  "provenance": {
+    "hormuz": {
+      "frame": "b05eeefe46e8c09813c70a33ab81d6c8325bfd83c9b64a69cabfd882a2908564",
+      "risk": "c8adb90d8d2c2b2f0ed5deb6cc0c88d222d26ad4ab8a9dd827d5b93c0a18e7c7",
+      "manifest": "78a3412da9bed519d7911822f58f346d9c401664c58161de8980790d65e9a56d"
+    },
+    "bab_el_mandeb": {
+      "frame": "759f4c27c481447ec90e2a913a25ea51e1a751a3853fe9f5981822ef832acd73",
+      "risk": "ba4574c10463f83843e8f97ef9089e5887661279edf1ca82a41017dd04434994",
+      "manifest": "83d0b0491a34e191dad2cc55178794505e4b14e96670e6c1432f2c64384972c2"
+    },
+    "panama": {
+      "frame": "5068daa77e2818cf3293a80ec98a16a31edd69c9f4b7f8e3618e85f980eb933d",
+      "risk": "43870eec6521308dc37c8edfef7470bd814d442ad413a83eb2f5f3d62f5761ff",
+      "manifest": "43944a66cf184372083a297ac5c00ce28c72c008eb5e77e994d92a2175d9cf4f"
+    },
+    "malacca": {
+      "frame": "0927430a35b1c86001f74a73d33655c028db5d20bad89a23fa9609da6431905b",
+      "risk": "2dddd51027106cf9676a4db98b1403870b49502cc05815cee5deb710e918ad5e",
+      "manifest": "08966f2f928aef06329da5b30026ed4c7d8be93edb66b795648e9386638d5a65"
+    }
+  }
+}

@@ -23,6 +23,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -35,6 +36,21 @@ from urllib.parse import urlencode
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = _PROJECT_ROOT / "thesis" / "figures" / "ch3_demo"
 MIN_BYTES = 20_000
+
+
+def metrics_sha256(path: Path) -> str:
+    """Hex sha256 of ``case_metrics.json``: the manifest ties the pictures to the numbers."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def stale_captures(manifest: dict, current: str) -> list[str]:
+    """Captures taken against other numbers than ``current``, or against none on record.
+
+    A run with ``--only`` keeps the other page type's earlier captures, so the manifest's own
+    hash can vouch for pictures it did not take; each capture therefore carries its own.
+    """
+    return [c["file"] for c in manifest.get("captures", [])
+            if c.get("case_metrics_sha256") != current]
 
 
 def serving(base: str) -> bool:
@@ -168,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
                      "analysis", (case, main_date, shots), None))
 
     manifest, results = [], []
+    metrics_hash = metrics_sha256(OUT_DIR / "case_metrics.json")
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(args=["--use-angle=swiftshader",
@@ -190,7 +207,8 @@ def main(argv: list[str] | None = None) -> int:
                 for f, (ok, note) in zip(files, checks):
                     results.append((f.name, ok, note))
                     print(f"{'PASS' if ok else 'FAIL'}  {f.name}  ({note})")
-                manifest.append({**meta, "captured": datetime.now(timezone.utc).isoformat(
+                manifest.append({**meta, "case_metrics_sha256": metrics_hash,
+                                 "captured": datetime.now(timezone.utc).isoformat(
                     timespec="seconds"), "ok": all(ok for ok, _ in checks)})
             browser.close()
     finally:
@@ -206,11 +224,16 @@ def main(argv: list[str] | None = None) -> int:
                    if f["file"] not in names] + results
     (OUT_DIR / "manifest.json").write_text(json.dumps(
         {"base_url": base, "viewport": [1600, 1000], "device_scale_factor": 2,
+         "case_metrics_sha256": metrics_sha256(OUT_DIR / "case_metrics.json"),
          "captures": manifest, "files": [{"file": n, "ok": ok, "note": note}
                                           for n, ok, note in results]}, indent=2),
         encoding="utf-8")
     failed = [n for n, ok, _ in results if not ok]
     print(f"{len(results) - len(failed)}/{len(results)} screenshots passed")
+    stale = stale_captures({"captures": manifest}, metrics_hash)
+    if stale:
+        print(f"WARNING: {len(stale)} capture(s) were taken against other numbers than "
+              f"{OUT_DIR / 'case_metrics.json'}: {', '.join(stale)}")
     return 1 if failed else 0
 
 

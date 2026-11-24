@@ -2,7 +2,10 @@
 
 Every figure the demonstration text cites is computed here from the files the
 dashboard reads (``data/live/<region>_risk.csv`` and ``data/live/<region>.csv``)
-and written to ``thesis/figures/ch3_demo/case_metrics.json``. Nothing in the
+and written to ``thesis/figures/ch3_demo/case_metrics.json`` and, byte for byte, to the
+committed ``eval/case_metrics.json`` (its ``provenance`` block holds the sha256 of every
+live file it read; ``capture_demo_screenshots.py`` records the sha256 of the file itself in
+the screenshot manifest). Nothing in the
 scoring is changed: the engine score is the series' ``risk_score``; the
 Decision view's status word and recommended action are recomputed with the
 dashboard's own functions, exactly as the page evaluates them.
@@ -22,6 +25,7 @@ Usage::
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sys
@@ -39,6 +43,8 @@ from src.dashboard import core  # noqa: E402
 
 OUT_DIR = _PROJECT_ROOT / "thesis" / "figures" / "ch3_demo"
 LIVE_DIR = _PROJECT_ROOT / "data" / "live"
+#: The committed copy, so the demonstration's numbers can be cited and checked.
+COMMITTED = _PROJECT_ROOT / "eval" / "case_metrics.json"
 #: Window the Decision-view snapshots are captured with, so the assessed day
 #: (the window's peak) stays within a week of the snapshot date.
 DECISION_WINDOW = "1 week"
@@ -62,6 +68,33 @@ CASES: list[dict] = [
      "window": ("2023-09-01", "2026-10-25"), "event": "2023-11-23",
      "snapshots": [("2024-01-15", "Medium"), ("2026-10-25", "Low")]},
 ]
+
+
+def sha256_file(path: Path) -> str:
+    """Hex sha256 of a file's bytes."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def provenance(regions) -> dict:
+    """sha256 of the live frame, the risk series and the manifest each region's numbers came from.
+
+    A file that is absent is ``None``, so a gap says so instead of vanishing.
+    """
+    names = {"frame": "{r}.csv", "risk": "{r}_risk.csv", "manifest": "{r}.manifest.json"}
+    out = {}
+    for r in regions:
+        out[r] = {k: (sha256_file(LIVE_DIR / n.format(r=r)) if (LIVE_DIR / n.format(r=r)).exists()
+                      else None) for k, n in names.items()}
+    return out
+
+
+def write_metrics(out: dict, paths) -> str:
+    """Write ``out`` as the same LF-terminated JSON to every path; returns its sha256."""
+    text = json.dumps(out, indent=2, default=str)
+    for path in paths:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(text, encoding="utf-8", newline="\n")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _r(x, n: int = 3):
@@ -351,9 +384,10 @@ def main() -> int:
                     for r in ("hormuz", "bab_el_mandeb", "panama", "malacca")},
         "market_corr_hormuz_panama": _r(hormuz["market"].corr(panama["market"]), 4),
     }
+    out["provenance"] = provenance(out["regions"])
     path = OUT_DIR / "case_metrics.json"
-    path.write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
-    print(f"wrote {path}")
+    digest = write_metrics(out, (path, COMMITTED))
+    print(f"wrote {path} and {COMMITTED} (sha256 {digest})")
     for c in out["cases"]:
         print(f"case {c['case']}: " + "; ".join(
             f"{s['date']} {s['risk_score']} {s['four_tier']} / DV {s['decision_view']['status_word']}"
